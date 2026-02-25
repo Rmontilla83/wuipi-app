@@ -1,4 +1,7 @@
-import { supabase, nextSequence } from "./facturacion";
+import { createAdminSupabase } from "@/lib/supabase/server";
+import { nextSequence } from "./facturacion";
+
+const supabase = () => createAdminSupabase();
 
 // ============================================
 // TICKET CATEGORIES
