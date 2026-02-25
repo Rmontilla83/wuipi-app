@@ -7,19 +7,15 @@ import { ScoreRing, LoadBar } from "@/components/dashboard";
 import {
   Headphones, RefreshCw, Clock, Users, AlertTriangle,
   Timer, User, Zap, Tag, ExternalLink, Filter,
+  TicketCheck, Database, ArrowRight,
 } from "lucide-react";
 
-// --- Types for real Kommo data ---
-interface StageData {
-  stage: string; status_id: number; count: number; color: string;
-}
-interface CategoryData {
-  category: string; label: string; count: number; percentage: number;
-}
-interface TechData {
-  id: string; name: string; tickets_total: number; tickets_resolved: number;
-  tickets_open: number; sla_compliance: number;
-}
+// ============================================
+// TYPES
+// ============================================
+interface StageData { stage: string; status_id: number; count: number; color: string; }
+interface CategoryData { category: string; label: string; count: number; percentage: number; }
+interface TechData { id: string; name: string; tickets_total: number; tickets_resolved: number; tickets_open: number; sla_compliance: number; }
 interface TicketData {
   id: string; kommo_id: number; client_name: string; subject: string;
   category: string; category_label: string; priority: string;
@@ -36,8 +32,11 @@ interface SoporteData {
   recent_tickets: TicketData[]; updated_at: string;
 }
 
-// --- Sub-components ---
+type MainTab = "kommo" | "crm";
 
+// ============================================
+// SUB-COMPONENTS
+// ============================================
 function KPICard({ label, value, sub, icon: Icon, color = "text-white" }: {
   label: string; value: string | number; sub?: string; icon: any; color?: string;
 }) {
@@ -67,7 +66,6 @@ function TicketRow({ ticket }: { ticket: TicketData }) {
     resolved: "bg-emerald-500/10 text-emerald-400",
     closed: "bg-gray-500/10 text-gray-400",
   };
-
   const timeAgo = (ts: string) => {
     const mins = Math.floor((Date.now() - new Date(ts).getTime()) / 60000);
     if (mins < 60) return `${mins}m`;
@@ -125,26 +123,19 @@ function TechCard({ tech, rank }: { tech: TechData; rank: number }) {
         </span>
       </div>
       <div className="grid grid-cols-3 gap-2 text-[11px]">
-        <div>
-          <span className="text-gray-500">Total</span>
-          <p className="font-bold text-white">{tech.tickets_total}</p>
-        </div>
-        <div>
-          <span className="text-gray-500">Resueltos</span>
-          <p className="font-bold text-emerald-400">{tech.tickets_resolved}</p>
-        </div>
-        <div>
-          <span className="text-gray-500">Abiertos</span>
-          <p className={`font-bold ${tech.tickets_open > 5 ? "text-red-400" : "text-amber-400"}`}>{tech.tickets_open}</p>
-        </div>
+        <div><span className="text-gray-500">Total</span><p className="font-bold text-white">{tech.tickets_total}</p></div>
+        <div><span className="text-gray-500">Resueltos</span><p className="font-bold text-emerald-400">{tech.tickets_resolved}</p></div>
+        <div><span className="text-gray-500">Abiertos</span><p className={`font-bold ${tech.tickets_open > 5 ? "text-red-400" : "text-amber-400"}`}>{tech.tickets_open}</p></div>
       </div>
     </div>
   );
 }
 
-// --- Main Page ---
-
+// ============================================
+// MAIN PAGE
+// ============================================
 export default function SoportePage() {
+  const [mainTab, setMainTab] = useState<MainTab>("kommo");
   const [data, setData] = useState<SoporteData | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -171,17 +162,68 @@ export default function SoportePage() {
     return () => clearInterval(interval);
   }, [fetchData]);
 
+  return (
+    <>
+      <TopBar title="CRM Soporte" icon={<Headphones size={22} />} />
+      <div className="flex-1 overflow-auto p-6 space-y-4">
+        {/* Main Tabs */}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setMainTab("kommo")}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all border ${
+              mainTab === "kommo"
+                ? "bg-cyan-500/10 text-cyan-400 border-cyan-500/20"
+                : "text-gray-500 hover:text-gray-300 border-transparent hover:bg-wuipi-card-hover"
+            }`}
+          >
+            <ExternalLink size={16} /> Visor Kommo
+          </button>
+          <button
+            onClick={() => setMainTab("crm")}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all border ${
+              mainTab === "crm"
+                ? "bg-wuipi-accent/10 text-wuipi-accent border-wuipi-accent/20"
+                : "text-gray-500 hover:text-gray-300 border-transparent hover:bg-wuipi-card-hover"
+            }`}
+          >
+            <TicketCheck size={16} /> CRM Soporte
+            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-400/10 text-amber-400 border border-amber-400/20">
+              Próximo
+            </span>
+          </button>
+        </div>
+
+        {mainTab === "kommo" && (
+          <KommoVisor
+            data={data} loading={loading} refreshing={refreshing}
+            ticketFilter={ticketFilter} setTicketFilter={setTicketFilter}
+            period={period} setPeriod={setPeriod}
+            fetchData={fetchData} setRefreshing={setRefreshing}
+          />
+        )}
+        {mainTab === "crm" && <CRMSoportePlaceholder />}
+      </div>
+    </>
+  );
+}
+
+// ============================================
+// TAB: VISOR KOMMO
+// ============================================
+function KommoVisor({ data, loading, refreshing, ticketFilter, setTicketFilter, period, setPeriod, fetchData, setRefreshing }: {
+  data: SoporteData | null; loading: boolean; refreshing: boolean;
+  ticketFilter: "all" | "open" | "critical"; setTicketFilter: (f: "all" | "open" | "critical") => void;
+  period: string; setPeriod: (p: string) => void;
+  fetchData: () => Promise<void>; setRefreshing: (b: boolean) => void;
+}) {
   if (loading || !data) {
     return (
-      <>
-        <TopBar title="CRM Soporte" icon={<Headphones size={22} />} />
-        <div className="flex-1 flex items-center justify-center">
-          <div className="flex items-center gap-3 text-gray-500">
-            <RefreshCw size={20} className="animate-spin" />
-            <span>Conectando con Kommo...</span>
-          </div>
+      <div className="flex items-center justify-center py-20">
+        <div className="flex items-center gap-3 text-gray-500">
+          <RefreshCw size={20} className="animate-spin" />
+          <span>Conectando con Kommo...</span>
         </div>
-      </>
+      </div>
     );
   }
 
@@ -202,201 +244,305 @@ export default function SoportePage() {
   const isToday = period === "today";
 
   return (
-    <>
-      <TopBar title="CRM Soporte" icon={<Headphones size={22} />} />
-      <div className="flex-1 overflow-auto p-6 space-y-4">
-
-        {/* Source badge + Period selector */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span className="px-2 py-1 bg-cyan-500/10 border border-cyan-500/20 rounded-lg text-xs font-semibold text-cyan-400 flex items-center gap-1.5">
-              <ExternalLink size={12} /> Kommo: {data.pipeline}
-            </span>
-            <span className="text-xs text-gray-500">{data.total_leads} leads</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-gray-600 mr-1">Período:</span>
-            {([
-              { key: "today", label: "Hoy" },
-              { key: "7d", label: "7 días" },
-              { key: "30d", label: "30 días" },
-              { key: "90d", label: "90 días" },
-              { key: "all", label: "Todo" },
-            ] as const).map((p) => (
-              <button
-                key={p.key}
-                onClick={() => setPeriod(p.key)}
-                className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors ${
-                  period === p.key
-                    ? "bg-cyan-500/10 text-cyan-400 border border-cyan-500/20"
-                    : "text-gray-500 hover:text-gray-300 border border-transparent"
-                }`}
-              >
-                {p.label}
-              </button>
-            ))}
-          </div>
+    <div className="space-y-4">
+      {/* Source badge + Period selector */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="px-2 py-1 bg-cyan-500/10 border border-cyan-500/20 rounded-lg text-xs font-semibold text-cyan-400 flex items-center gap-1.5">
+            <ExternalLink size={12} /> Kommo: {data.pipeline}
+          </span>
+          <span className="text-xs text-gray-500">{data.total_leads} leads</span>
         </div>
-
-        {/* KPI Row */}
-        <div className="grid grid-cols-6 gap-3">
-          <Card className="flex flex-col items-center justify-center py-3">
-            <ScoreRing score={resolutionRate} size={68} />
-            <p className="text-xs font-semibold text-white mt-2">Resolución</p>
-          </Card>
-          <KPICard
-            label={isToday ? "Tickets Hoy" : `Tickets ${periodLabel}`}
-            value={data.total_leads}
-            sub={`${data.tickets_resolved_period || data.tickets_resolved_today} resueltos${isToday ? "" : ` en ${periodLabel}`}`}
-            icon={Headphones}
-          />
-          <KPICard
-            label="Abiertos"
-            value={data.tickets_open}
-            sub={`${data.active_tickets} activos total`}
-            icon={AlertTriangle}
-            color="text-cyan-400"
-          />
-          <KPICard
-            label="En Progreso"
-            value={data.tickets_in_progress}
-            sub={`${data.tickets_pending} pendientes`}
-            icon={Timer}
-            color="text-amber-400"
-          />
-          <KPICard
-            label="Visitas L2C"
-            value={data.visitas_l2c}
-            sub={isToday ? "Soporte en cliente" : `En ${periodLabel}`}
-            icon={Users}
-            color="text-violet-400"
-          />
-          <Card className="flex flex-col justify-between">
-            <div className="flex items-center gap-2 text-xs text-gray-500 mb-1">
-              <Clock size={12} /> Auto-refresh: 60s
-            </div>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-gray-600 mr-1">Período:</span>
+          {([
+            { key: "today", label: "Hoy" },
+            { key: "7d", label: "7 días" },
+            { key: "30d", label: "30 días" },
+            { key: "90d", label: "90 días" },
+            { key: "all", label: "Todo" },
+          ] as const).map((p) => (
             <button
-              onClick={() => { setRefreshing(true); fetchData(); }}
-              disabled={refreshing}
-              className="flex items-center justify-center gap-2 px-3 py-2 bg-cyan-500/10 border border-cyan-500/20 rounded-lg text-cyan-400 text-xs font-semibold disabled:opacity-50"
+              key={p.key}
+              onClick={() => setPeriod(p.key)}
+              className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors ${
+                period === p.key
+                  ? "bg-cyan-500/10 text-cyan-400 border border-cyan-500/20"
+                  : "text-gray-500 hover:text-gray-300 border border-transparent"
+              }`}
             >
-              <RefreshCw size={13} className={refreshing ? "animate-spin" : ""} />
-              Refrescar
+              {p.label}
             </button>
-          </Card>
-        </div>
-
-        {/* Main grid */}
-        <div className="grid grid-cols-3 gap-4">
-          {/* Left: Tickets + Categories */}
-          <div className="col-span-2 space-y-4">
-            {/* Tickets */}
-            <Card>
-              <div className="flex justify-between items-center mb-4">
-                <h3 className="text-base font-bold text-white flex items-center gap-2">
-                  <Zap size={18} /> Tickets Recientes
-                </h3>
-                <div className="flex gap-1">
-                  {(["all", "open", "critical"] as const).map((f) => (
-                    <button key={f} onClick={() => setTicketFilter(f)}
-                      className={`px-3 py-1 rounded-lg text-xs font-semibold transition-colors ${
-                        ticketFilter === f
-                          ? "bg-cyan-500/10 text-cyan-400 border border-cyan-500/20"
-                          : "text-gray-500 hover:text-gray-300 border border-transparent"
-                      }`}>
-                      {f === "all" ? "Todos" : f === "open" ? "Abiertos" : "Críticos"}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className="space-y-2 max-h-[400px] overflow-auto">
-                {filteredTickets.map((t) => <TicketRow key={t.id} ticket={t} />)}
-                {filteredTickets.length === 0 && (
-                  <p className="text-sm text-gray-500 text-center py-8">No hay tickets con este filtro</p>
-                )}
-              </div>
-            </Card>
-
-            {/* Categories + Pipeline stages */}
-            <div className="grid grid-cols-2 gap-4">
-              <Card>
-                <h3 className="text-sm font-bold text-white mb-4 flex items-center gap-2">
-                  <Tag size={16} /> Clasificación por Tipo
-                </h3>
-                <div className="space-y-3">
-                  {data.by_category.map((cat) => (
-                    <div key={cat.category} className="flex items-center gap-3">
-                      <span className="text-xs text-gray-300 w-24 truncate">{cat.label}</span>
-                      <div className="flex-1 h-3 bg-wuipi-bg rounded-full overflow-hidden">
-                        <div className="h-full bg-cyan-500/50 rounded-full" style={{ width: `${cat.percentage}%` }} />
-                      </div>
-                      <span className="text-xs font-bold text-white w-8 text-right">{cat.count}</span>
-                      <span className="text-[10px] text-gray-500 w-10 text-right">{cat.percentage}%</span>
-                    </div>
-                  ))}
-                </div>
-              </Card>
-
-              <Card>
-                <h3 className="text-sm font-bold text-white mb-4 flex items-center gap-2">
-                  <Filter size={16} /> Pipeline - Etapas
-                </h3>
-                <div className="space-y-3">
-                  {data.by_stage.map((stage) => <StageBar key={stage.status_id} stage={stage} />)}
-                </div>
-              </Card>
-            </div>
-          </div>
-
-          {/* Right column: Technicians + Clients */}
-          <div className="space-y-4">
-            <Card>
-              <h3 className="text-sm font-bold text-white mb-4 flex items-center gap-2">
-                <User size={16} /> Rendimiento Equipo
-              </h3>
-              <div className="space-y-3">
-                {data.by_technician
-                  .sort((a, b) => b.sla_compliance - a.sla_compliance)
-                  .map((tech, i) => <TechCard key={tech.id} tech={tech} rank={i} />)}
-                {data.by_technician.length === 0 && (
-                  <p className="text-sm text-gray-500 text-center py-4">Sin datos de técnicos</p>
-                )}
-              </div>
-            </Card>
-
-            <Card>
-              <h3 className="text-sm font-bold text-white mb-3 flex items-center gap-2">
-                <Users size={16} /> Métricas de Clientes
-              </h3>
-              <div className="space-y-3">
-                <div className="p-3 bg-wuipi-bg rounded-lg border border-wuipi-border">
-                  <p className="text-xs text-gray-500">Contactos únicos</p>
-                  <p className="text-2xl font-bold text-white">{data.total_contacts.toLocaleString()}</p>
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="p-3 bg-wuipi-bg rounded-lg border border-wuipi-border">
-                    <p className="text-xs text-gray-500">Tickets {isToday ? "hoy" : periodLabel}</p>
-                    <p className="text-xl font-bold text-cyan-400">{data.total_leads}</p>
-                  </div>
-                  <div className="p-3 bg-wuipi-bg rounded-lg border border-wuipi-border">
-                    <p className="text-xs text-gray-500">Reincidentes</p>
-                    <p className="text-xl font-bold text-red-400">{data.repeat_clients}</p>
-                  </div>
-                </div>
-                {data.repeat_client_pct > 10 && (
-                  <div className="p-3 bg-red-500/5 border border-red-500/20 rounded-lg">
-                    <p className="text-xs text-red-400 font-semibold mb-1">⚠ Tasa de reincidencia</p>
-                    <p className="text-lg font-bold text-red-400">{data.repeat_client_pct}%</p>
-                    <p className="text-[11px] text-gray-500 mt-1">
-                      {data.repeat_clients} clientes contactaron más de una vez
-                    </p>
-                  </div>
-                )}
-              </div>
-            </Card>
-          </div>
+          ))}
         </div>
       </div>
-    </>
+
+      {/* KPI Row */}
+      <div className="grid grid-cols-6 gap-3">
+        <Card className="flex flex-col items-center justify-center py-3">
+          <ScoreRing score={resolutionRate} size={68} />
+          <p className="text-xs font-semibold text-white mt-2">Resolución</p>
+        </Card>
+        <KPICard
+          label={isToday ? "Tickets Hoy" : `Tickets ${periodLabel}`}
+          value={data.total_leads}
+          sub={`${data.tickets_resolved_period || data.tickets_resolved_today} resueltos${isToday ? "" : ` en ${periodLabel}`}`}
+          icon={Headphones}
+        />
+        <KPICard label="Abiertos" value={data.tickets_open} sub={`${data.active_tickets} activos total`} icon={AlertTriangle} color="text-cyan-400" />
+        <KPICard label="En Progreso" value={data.tickets_in_progress} sub={`${data.tickets_pending} pendientes`} icon={Timer} color="text-amber-400" />
+        <KPICard label="Visitas L2C" value={data.visitas_l2c} sub={isToday ? "Soporte en cliente" : `En ${periodLabel}`} icon={Users} color="text-violet-400" />
+        <Card className="flex flex-col justify-between">
+          <div className="flex items-center gap-2 text-xs text-gray-500 mb-1">
+            <Clock size={12} /> Auto-refresh: 60s
+          </div>
+          <button
+            onClick={() => { setRefreshing(true); fetchData(); }}
+            disabled={refreshing}
+            className="flex items-center justify-center gap-2 px-3 py-2 bg-cyan-500/10 border border-cyan-500/20 rounded-lg text-cyan-400 text-xs font-semibold disabled:opacity-50"
+          >
+            <RefreshCw size={13} className={refreshing ? "animate-spin" : ""} />
+            Refrescar
+          </button>
+        </Card>
+      </div>
+
+      {/* Main grid */}
+      <div className="grid grid-cols-3 gap-4">
+        <div className="col-span-2 space-y-4">
+          <Card>
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-base font-bold text-white flex items-center gap-2">
+                <Zap size={18} /> Tickets Recientes
+              </h3>
+              <div className="flex gap-1">
+                {(["all", "open", "critical"] as const).map((f) => (
+                  <button key={f} onClick={() => setTicketFilter(f)}
+                    className={`px-3 py-1 rounded-lg text-xs font-semibold transition-colors ${
+                      ticketFilter === f
+                        ? "bg-cyan-500/10 text-cyan-400 border border-cyan-500/20"
+                        : "text-gray-500 hover:text-gray-300 border border-transparent"
+                    }`}>
+                    {f === "all" ? "Todos" : f === "open" ? "Abiertos" : "Críticos"}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="space-y-2 max-h-[400px] overflow-auto">
+              {filteredTickets.map((t) => <TicketRow key={t.id} ticket={t} />)}
+              {filteredTickets.length === 0 && (
+                <p className="text-sm text-gray-500 text-center py-8">No hay tickets con este filtro</p>
+              )}
+            </div>
+          </Card>
+
+          <div className="grid grid-cols-2 gap-4">
+            <Card>
+              <h3 className="text-sm font-bold text-white mb-4 flex items-center gap-2">
+                <Tag size={16} /> Clasificación por Tipo
+              </h3>
+              <div className="space-y-3">
+                {data.by_category.map((cat) => (
+                  <div key={cat.category} className="flex items-center gap-3">
+                    <span className="text-xs text-gray-300 w-24 truncate">{cat.label}</span>
+                    <div className="flex-1 h-3 bg-wuipi-bg rounded-full overflow-hidden">
+                      <div className="h-full bg-cyan-500/50 rounded-full" style={{ width: `${cat.percentage}%` }} />
+                    </div>
+                    <span className="text-xs font-bold text-white w-8 text-right">{cat.count}</span>
+                    <span className="text-[10px] text-gray-500 w-10 text-right">{cat.percentage}%</span>
+                  </div>
+                ))}
+              </div>
+            </Card>
+
+            <Card>
+              <h3 className="text-sm font-bold text-white mb-4 flex items-center gap-2">
+                <Filter size={16} /> Pipeline - Etapas
+              </h3>
+              <div className="space-y-3">
+                {data.by_stage.map((stage) => <StageBar key={stage.status_id} stage={stage} />)}
+              </div>
+            </Card>
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          <Card>
+            <h3 className="text-sm font-bold text-white mb-4 flex items-center gap-2">
+              <User size={16} /> Rendimiento Equipo
+            </h3>
+            <div className="space-y-3">
+              {data.by_technician
+                .sort((a, b) => b.sla_compliance - a.sla_compliance)
+                .map((tech, i) => <TechCard key={tech.id} tech={tech} rank={i} />)}
+              {data.by_technician.length === 0 && (
+                <p className="text-sm text-gray-500 text-center py-4">Sin datos de técnicos</p>
+              )}
+            </div>
+          </Card>
+
+          <Card>
+            <h3 className="text-sm font-bold text-white mb-3 flex items-center gap-2">
+              <Users size={16} /> Métricas de Clientes
+            </h3>
+            <div className="space-y-3">
+              <div className="p-3 bg-wuipi-bg rounded-lg border border-wuipi-border">
+                <p className="text-xs text-gray-500">Contactos únicos</p>
+                <p className="text-2xl font-bold text-white">{data.total_contacts.toLocaleString()}</p>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="p-3 bg-wuipi-bg rounded-lg border border-wuipi-border">
+                  <p className="text-xs text-gray-500">Tickets {isToday ? "hoy" : periodLabel}</p>
+                  <p className="text-xl font-bold text-cyan-400">{data.total_leads}</p>
+                </div>
+                <div className="p-3 bg-wuipi-bg rounded-lg border border-wuipi-border">
+                  <p className="text-xs text-gray-500">Reincidentes</p>
+                  <p className="text-xl font-bold text-red-400">{data.repeat_clients}</p>
+                </div>
+              </div>
+              {data.repeat_client_pct > 10 && (
+                <div className="p-3 bg-red-500/5 border border-red-500/20 rounded-lg">
+                  <p className="text-xs text-red-400 font-semibold mb-1">⚠ Tasa de reincidencia</p>
+                  <p className="text-lg font-bold text-red-400">{data.repeat_client_pct}%</p>
+                  <p className="text-[11px] text-gray-500 mt-1">
+                    {data.repeat_clients} clientes contactaron más de una vez
+                  </p>
+                </div>
+              )}
+            </div>
+          </Card>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================
+// TAB: CRM SOPORTE (Placeholder)
+// ============================================
+function CRMSoportePlaceholder() {
+  const features = [
+    { icon: Database, title: "Base de Datos Propia", desc: "Tickets almacenados en Supabase con historial completo, sin depender de Kommo" },
+    { icon: Users, title: "Vinculación a Clientes", desc: "Cada ticket enlazado a la ficha integral del cliente — historial, equipo, facturación" },
+    { icon: TicketCheck, title: "SLA Automático", desc: "Temporizadores por prioridad, escalamiento automático, métricas de cumplimiento" },
+    { icon: Zap, title: "Multi-canal", desc: "Tickets desde Portal, WhatsApp, llamadas — todos centralizados en un solo flujo" },
+  ];
+
+  const stages = [
+    { label: "Nuevo", color: "bg-cyan-400" },
+    { label: "Asignado", color: "bg-blue-400" },
+    { label: "En progreso", color: "bg-amber-400" },
+    { label: "Esperando", color: "bg-purple-400" },
+    { label: "Resuelto", color: "bg-emerald-400" },
+    { label: "Cerrado", color: "bg-gray-400" },
+  ];
+
+  return (
+    <div className="space-y-4">
+      <Card className="!p-0 overflow-hidden">
+        <div className="h-1 bg-amber-400" />
+        <div className="p-5">
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 rounded-xl bg-amber-400/10 border border-amber-400/20 flex items-center justify-center">
+              <TicketCheck size={24} className="text-amber-400" />
+            </div>
+            <div className="flex-1">
+              <h2 className="text-lg font-bold text-white">CRM de Soporte Propio</h2>
+              <p className="text-sm text-gray-400">Sistema de tickets en Supabase — próxima fase de desarrollo</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-400/10 text-amber-400 border border-amber-400/20">
+                En planificación
+              </span>
+              <span className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-cyan-400/10 text-cyan-400 border border-cyan-400/20">
+                Visor Kommo activo
+              </span>
+            </div>
+          </div>
+        </div>
+      </Card>
+
+      <div className="grid grid-cols-2 gap-4">
+        <Card>
+          <h3 className="text-sm font-bold text-white mb-4">Funcionalidades Planificadas</h3>
+          <div className="space-y-4">
+            {features.map((f, i) => {
+              const Icon = f.icon;
+              return (
+                <div key={i} className="flex items-start gap-3">
+                  <div className="w-8 h-8 rounded-lg bg-wuipi-accent/10 border border-wuipi-accent/20 flex items-center justify-center shrink-0">
+                    <Icon size={16} className="text-wuipi-accent" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-white">{f.title}</p>
+                    <p className="text-xs text-gray-500 mt-0.5">{f.desc}</p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+
+        <Card>
+          <h3 className="text-sm font-bold text-white mb-4">Pipeline de Tickets</h3>
+          <div className="flex items-center gap-2 mb-6">
+            {stages.map((s, i) => (
+              <div key={i} className="flex items-center gap-2 flex-1">
+                <div className="flex flex-col items-center flex-1">
+                  <div className={`w-full h-2 rounded-full ${s.color}/30`}>
+                    <div className={`h-full rounded-full ${s.color} w-0`} />
+                  </div>
+                  <span className="text-[10px] text-gray-500 mt-1.5">{s.label}</span>
+                </div>
+                {i < stages.length - 1 && <ArrowRight size={10} className="text-gray-700 shrink-0 mt-[-12px]" />}
+              </div>
+            ))}
+          </div>
+
+          <h3 className="text-sm font-bold text-white mb-3 mt-6">Tabla de Tickets (preview)</h3>
+          <div className="border border-wuipi-border rounded-lg overflow-hidden">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="bg-wuipi-bg text-gray-500">
+                  <th className="text-left p-2.5 font-medium">Ticket</th>
+                  <th className="text-left p-2.5 font-medium">Cliente</th>
+                  <th className="text-left p-2.5 font-medium">Categoría</th>
+                  <th className="text-left p-2.5 font-medium">Prioridad</th>
+                  <th className="text-left p-2.5 font-medium">Estado</th>
+                  <th className="text-left p-2.5 font-medium">Técnico</th>
+                </tr>
+              </thead>
+              <tbody>
+                {[1, 2, 3].map(i => (
+                  <tr key={i} className="border-t border-wuipi-border/50">
+                    <td className="p-2.5 text-gray-600 font-mono">TK-0000{i}</td>
+                    <td className="p-2.5 text-gray-600">—</td>
+                    <td className="p-2.5 text-gray-600">—</td>
+                    <td className="p-2.5"><span className="px-1.5 py-0.5 rounded bg-gray-500/10 text-gray-600 text-[10px]">—</span></td>
+                    <td className="p-2.5"><span className="px-1.5 py-0.5 rounded bg-gray-500/10 text-gray-600 text-[10px]">—</span></td>
+                    <td className="p-2.5 text-gray-600">—</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="text-[11px] text-gray-600 text-center mt-3">Los datos se llenarán cuando el módulo esté activo</p>
+        </Card>
+      </div>
+
+      <Card className="!bg-cyan-500/5 border-cyan-500/10">
+        <div className="flex items-start gap-3">
+          <ExternalLink size={16} className="text-cyan-400 mt-0.5 shrink-0" />
+          <div>
+            <p className="text-sm font-semibold text-cyan-400">Transición gradual desde Kommo</p>
+            <p className="text-xs text-gray-400 mt-1">
+              El Visor Kommo seguirá activo como fuente de datos mientras se construye el CRM propio.
+              Una vez listo, los tickets nuevos se crearán en Supabase y Kommo se usará solo como referencia histórica.
+              No perderás ningún dato en la transición.
+            </p>
+          </div>
+        </div>
+      </Card>
+    </div>
   );
 }
