@@ -48,3 +48,5 @@ export const ROLE_PERMISSIONS: Record<UserRole, string[]> = {
 export type { NetworkOverview, NetworkNode, NetworkAlert } from "./prtg";
 export type { SupportOverview, Ticket, TechnicianStats, ZoneStats, CategoryStats } from "./support";
 export { CATEGORY_LABELS, CATEGORY_COLORS, STATUS_LABELS, PRIORITY_LABELS } from "./support";
+export type { FinanceOverview, Invoice, ClientDebt, BCVRate, RevenueMetrics, TaxSummary, CollectionSummary } from "./finance";
+export { PAYMENT_METHOD_LABELS, INVOICE_STATUS_LABELS } from "./finance";
