@@ -107,14 +107,17 @@ export async function getTasks(page: number = 1) {
 export async function getAllLeadsByPipeline(pipelineId: number): Promise<any[]> {
   const allLeads: any[] = [];
   let page = 1;
-  const maxPages = 20; // Safety limit
+  const maxPages = 20;
 
   while (page <= maxPages) {
     try {
-      const data = await getLeadsByPipeline(pipelineId, page, 250);
+      // Fetch all leads, filter by pipeline_id in code
+      const data = await getLeads(page, 250);
       const leads = data?._embedded?.leads || [];
       if (leads.length === 0) break;
-      allLeads.push(...leads);
+      // Filter by pipeline
+      const filtered = leads.filter((l: any) => l.pipeline_id === pipelineId);
+      allLeads.push(...filtered);
       if (!data._links?.next) break;
       page++;
     } catch {
