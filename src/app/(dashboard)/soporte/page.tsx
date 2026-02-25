@@ -29,8 +29,8 @@ interface TicketData {
 interface SoporteData {
   source: string; pipeline: string; period: string; total_leads: number;
   tickets_today: number; tickets_open: number; tickets_in_progress: number;
-  tickets_pending: number; tickets_resolved_today: number; active_tickets: number;
-  visitas_l2c: number;
+  tickets_pending: number; tickets_resolved_today: number; tickets_resolved_period: number;
+  active_tickets: number; visitas_l2c: number;
   total_contacts: number; repeat_clients: number; repeat_client_pct: number;
   by_stage: StageData[]; by_category: CategoryData[]; by_technician: TechData[];
   recent_tickets: TicketData[]; updated_at: string;
@@ -195,6 +195,12 @@ export default function SoportePage() {
     ? Math.round(((data.total_leads - data.active_tickets) / data.total_leads) * 100)
     : 0;
 
+  const periodLabels: Record<string, string> = {
+    today: "Hoy", "7d": "7 días", "30d": "30 días", "90d": "90 días", all: "Total",
+  };
+  const periodLabel = periodLabels[period] || period;
+  const isToday = period === "today";
+
   return (
     <>
       <TopBar title="Soporte" icon={<Headphones size={22} />} />
@@ -238,10 +244,33 @@ export default function SoportePage() {
             <ScoreRing score={resolutionRate} size={68} />
             <p className="text-xs font-semibold text-white mt-2">Resolución</p>
           </Card>
-          <KPICard label="Tickets Hoy" value={data.tickets_today} sub={`${data.tickets_resolved_today} resueltos`} icon={Headphones} />
-          <KPICard label="Abiertos" value={data.tickets_open} sub={`${data.active_tickets} activos total`} icon={AlertTriangle} color="text-cyan-400" />
-          <KPICard label="En Progreso" value={data.tickets_in_progress} sub={`${data.tickets_pending} pendientes`} icon={Timer} color="text-amber-400" />
-          <KPICard label="Visitas L2C" value={data.visitas_l2c} sub="Soporte en cliente" icon={Users} color="text-violet-400" />
+          <KPICard
+            label={isToday ? "Tickets Hoy" : `Tickets ${periodLabel}`}
+            value={data.total_leads}
+            sub={`${data.tickets_resolved_period || data.tickets_resolved_today} resueltos${isToday ? "" : ` en ${periodLabel}`}`}
+            icon={Headphones}
+          />
+          <KPICard
+            label="Abiertos"
+            value={data.tickets_open}
+            sub={`${data.active_tickets} activos total`}
+            icon={AlertTriangle}
+            color="text-cyan-400"
+          />
+          <KPICard
+            label="En Progreso"
+            value={data.tickets_in_progress}
+            sub={`${data.tickets_pending} pendientes`}
+            icon={Timer}
+            color="text-amber-400"
+          />
+          <KPICard
+            label="Visitas L2C"
+            value={data.visitas_l2c}
+            sub={isToday ? "Soporte en cliente" : `En ${periodLabel}`}
+            icon={Users}
+            color="text-violet-400"
+          />
           <Card className="flex flex-col justify-between">
             <div className="flex items-center gap-2 text-xs text-gray-500 mb-1">
               <Clock size={12} /> Auto-refresh: 60s
@@ -346,8 +375,8 @@ export default function SoportePage() {
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                   <div className="p-3 bg-wuipi-bg rounded-lg border border-wuipi-border">
-                    <p className="text-xs text-gray-500">Activos hoy</p>
-                    <p className="text-xl font-bold text-cyan-400">{data.tickets_today}</p>
+                    <p className="text-xs text-gray-500">Tickets {isToday ? "hoy" : periodLabel}</p>
+                    <p className="text-xl font-bold text-cyan-400">{data.total_leads}</p>
                   </div>
                   <div className="p-3 bg-wuipi-bg rounded-lg border border-wuipi-border">
                     <p className="text-xs text-gray-500">Reincidentes</p>

@@ -167,6 +167,7 @@ export async function GET(request: NextRequest) {
 
     // Classify leads
     const allActive = leads.filter((l: any) => l.status_id !== STATUS.atendido && l.status_id !== STATUS.cerrado);
+    const resolvedPeriod = leads.filter((l: any) => l.status_id === STATUS.atendido || l.status_id === STATUS.cerrado);
     const resolvedToday = leads.filter((l: any) => l.status_id === STATUS.atendido && l.closed_at && l.closed_at >= todayTs);
     const createdToday = leads.filter((l: any) => l.created_at >= todayTs);
     const openLeads = leads.filter((l: any) => l.status_id === STATUS.incoming);
@@ -290,6 +291,7 @@ export async function GET(request: NextRequest) {
       tickets_in_progress: inProgressLeads.length,
       tickets_pending: pendingLeads.length,
       tickets_resolved_today: resolvedToday.length,
+      tickets_resolved_period: resolvedPeriod.length,
       active_tickets: allActive.length,
       visitas_l2c: leads.filter((l: any) => l.status_id === STATUS.tarea_l2c || l.status_id === STATUS.tarea_acceso).length + (categoryMap.get("visita_l2c")?.count || 0),
 
