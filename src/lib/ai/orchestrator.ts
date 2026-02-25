@@ -22,20 +22,6 @@ Lineamientos:
 - Usa datos específicos, no generalidades
 - Sugiere acciones concretas con impacto estimado cuando sea posible`;
 
-function selectEngine(taskType: TaskType): "claude" | "gemini" {
-  switch (taskType) {
-    case "analysis":
-    case "briefing":
-    case "chat":
-      return "claude";
-    case "classification":
-    case "quick":
-      return "gemini";
-    default:
-      return "claude";
-  }
-}
-
 async function callClaude(prompt: string): Promise<string> {
   const { default: Anthropic } = await import("@anthropic-ai/sdk");
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
@@ -65,30 +51,35 @@ export async function queryAI(
   taskType: TaskType = "chat",
   context?: string
 ): Promise<{ content: string; engine: "claude" | "gemini" }> {
-  const engine = selectEngine(taskType);
   const fullPrompt = context ? `${context}\n\n${prompt}` : prompt;
 
   const hasClaude = !!process.env.ANTHROPIC_API_KEY;
   const hasGemini = !!process.env.GEMINI_API_KEY;
 
-  try {
-    if (engine === "claude" && hasClaude) {
-      return { content: await callClaude(fullPrompt), engine: "claude" };
-    }
-    if (engine === "gemini" && hasGemini) {
-      return { content: await callGemini(fullPrompt), engine: "gemini" };
-    }
-    if (hasClaude) {
-      return { content: await callClaude(fullPrompt), engine: "claude" };
-    }
-    if (hasGemini) {
-      return { content: await callGemini(fullPrompt), engine: "gemini" };
-    }
-    throw new Error("No AI engine configured");
-  } catch (error) {
-    console.error(`AI ${engine} error:`, error);
-    throw error;
+  // Try available engines - prefer based on task, fallback to whatever is available
+  const engines: Array<{ name: "claude" | "gemini"; available: boolean; call: () => Promise<string> }> = [];
+
+  // For analysis/briefing/chat prefer Claude, for quick/classification prefer Gemini
+  if (taskType === "classification" || taskType === "quick") {
+    engines.push({ name: "gemini", available: hasGemini, call: () => callGemini(fullPrompt) });
+    engines.push({ name: "claude", available: hasClaude, call: () => callClaude(fullPrompt) });
+  } else {
+    engines.push({ name: "claude", available: hasClaude, call: () => callClaude(fullPrompt) });
+    engines.push({ name: "gemini", available: hasGemini, call: () => callGemini(fullPrompt) });
   }
+
+  for (const engine of engines) {
+    if (!engine.available) continue;
+    try {
+      const content = await engine.call();
+      return { content, engine: engine.name };
+    } catch (error) {
+      console.error(`AI ${engine.name} failed:`, error);
+      continue; // Try next engine
+    }
+  }
+
+  throw new Error("No AI engine available or all engines failed");
 }
 
 export function isConfigured(): boolean {
