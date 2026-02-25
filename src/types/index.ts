@@ -37,9 +37,9 @@ export interface ModuleHealth {
 
 // Dashboard permission map
 export const ROLE_PERMISSIONS: Record<UserRole, string[]> = {
-  admin: ["comando", "supervisor", "infraestructura", "soporte", "finanzas", "configuracion"],
+  admin: ["comando", "supervisor", "infraestructura", "soporte", "facturacion", "finanzas", "configuracion"],
   soporte: ["comando", "soporte"],
-  finanzas: ["comando", "finanzas"],
+  finanzas: ["comando", "facturacion", "finanzas"],
   infraestructura: ["comando", "infraestructura"],
   tecnico: ["soporte"],
   cliente: ["portal"],

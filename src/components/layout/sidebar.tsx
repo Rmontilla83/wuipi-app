@@ -13,6 +13,7 @@ import {
   Radio,
   Headphones,
   DollarSign,
+  FileText,
   Settings,
   ChevronLeft,
   ChevronRight,
@@ -24,6 +25,7 @@ const NAV_ITEMS = [
   { id: "supervisor", label: "Supervisor IA", icon: Brain, path: "/supervisor", highlight: true },
   { id: "infraestructura", label: "Infraestructura", icon: Radio, path: "/infraestructura" },
   { id: "soporte", label: "Soporte", icon: Headphones, path: "/soporte" },
+  { id: "facturacion", label: "Facturación", icon: FileText, path: "/facturacion" },
   { id: "finanzas", label: "Finanzas", icon: DollarSign, path: "/finanzas" },
   { id: "configuracion", label: "Configuración", icon: Settings, path: "/configuracion" },
 ];
