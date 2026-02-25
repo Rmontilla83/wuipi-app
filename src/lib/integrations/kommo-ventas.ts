@@ -7,8 +7,7 @@ const KOMMO_ACCESS_TOKEN = process.env.KOMMO_VENTAS_ACCESS_TOKEN;
 
 function getBaseUrl(): string {
   if (!KOMMO_SUBDOMAIN) throw new Error("KOMMO_VENTAS_SUBDOMAIN not configured");
-  // Use api-g domain as indicated by the JWT token's api_domain field
-  return `https://api-g.kommo.com/api/v4`;
+  return `https://${KOMMO_SUBDOMAIN}.kommo.com/api/v4`;
 }
 
 async function kommoFetch<T>(endpoint: string, params?: Record<string, string>): Promise<T> {

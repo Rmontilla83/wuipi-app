@@ -58,19 +58,26 @@ export default function VentasPage() {
   const [mainTab, setMainTab] = useState<MainTab>("kommo");
   const [data, setData] = useState<VentasData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [period, setPeriod] = useState("30d");
   const [selectedPipeline, setSelectedPipeline] = useState<string>("all");
 
   const fetchData = useCallback(async () => {
     try {
+      setError(null);
       const params = new URLSearchParams({ period });
       if (selectedPipeline !== "all") params.set("pipeline_id", selectedPipeline);
       const res = await fetch(`/api/ventas?${params}`);
       const json = await res.json();
-      if (!json.error) setData(json);
+      if (json.error) {
+        setError(json.error + (json.details ? `: ${json.details}` : ""));
+      } else {
+        setData(json);
+      }
     } catch (err) {
       console.error("Error fetching ventas:", err);
+      setError(err instanceof Error ? err.message : "Error de conexión");
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -106,7 +113,7 @@ export default function VentasPage() {
         </div>
 
         {mainTab === "kommo" && (
-          <KommoVisor data={data} loading={loading} refreshing={refreshing}
+          <KommoVisor data={data} loading={loading} error={error} refreshing={refreshing}
             period={period} setPeriod={setPeriod}
             selectedPipeline={selectedPipeline} setSelectedPipeline={setSelectedPipeline}
             fetchData={fetchData} setRefreshing={setRefreshing} />
@@ -120,18 +127,36 @@ export default function VentasPage() {
 // ============================================
 // VISOR KOMMO VENTAS
 // ============================================
-function KommoVisor({ data, loading, refreshing, period, setPeriod, selectedPipeline, setSelectedPipeline, fetchData, setRefreshing }: {
-  data: VentasData | null; loading: boolean; refreshing: boolean;
+function KommoVisor({ data, loading, error, refreshing, period, setPeriod, selectedPipeline, setSelectedPipeline, fetchData, setRefreshing }: {
+  data: VentasData | null; loading: boolean; error: string | null; refreshing: boolean;
   period: string; setPeriod: (p: string) => void;
   selectedPipeline: string; setSelectedPipeline: (p: string) => void;
   fetchData: () => Promise<void>; setRefreshing: (b: boolean) => void;
 }) {
-  if (loading || !data) {
+  if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
         <div className="flex items-center gap-3 text-gray-500">
           <RefreshCw size={20} className="animate-spin" />
           <span>Conectando con Kommo Ventas...</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (error || !data) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <div className="text-center space-y-3">
+          <div className="w-12 h-12 rounded-xl bg-red-500/10 border border-red-500/20 flex items-center justify-center mx-auto">
+            <Zap size={24} className="text-red-400" />
+          </div>
+          <p className="text-sm text-red-400 font-medium">Error al conectar con Kommo Ventas</p>
+          <p className="text-xs text-gray-500 max-w-md">{error || "No se recibieron datos"}</p>
+          <button onClick={() => { setRefreshing(true); fetchData(); }}
+            className="px-3 py-1.5 rounded-lg text-xs font-medium bg-wuipi-card border border-wuipi-border text-gray-300 hover:bg-wuipi-card-hover transition-colors">
+            Reintentar
+          </button>
         </div>
       </div>
     );
