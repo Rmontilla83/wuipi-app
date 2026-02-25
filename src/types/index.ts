@@ -44,3 +44,5 @@ export const ROLE_PERMISSIONS: Record<UserRole, string[]> = {
   tecnico: ["soporte"],
   cliente: ["portal"],
 };
+
+export type { NetworkOverview, NetworkNode, NetworkAlert } from "./prtg";
