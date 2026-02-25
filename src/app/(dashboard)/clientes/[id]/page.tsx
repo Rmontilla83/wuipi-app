@@ -99,7 +99,15 @@ export default function ClientDetailPage() {
       setLoading(true);
       const res = await fetch(`/api/facturacion/clients/${clientId}?detail=true`);
       if (!res.ok) throw new Error("Cliente no encontrado");
-      setClient(await res.json());
+      const data = await res.json();
+      // Ensure defaults for optional nested data
+      data.invoices = data.invoices || [];
+      data.payments = data.payments || [];
+      data.billing_summary = data.billing_summary || {
+        total_invoiced: 0, total_paid: 0, total_overdue: 0,
+        balance: 0, invoice_count: 0, payment_count: 0,
+      };
+      setClient(data);
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -206,10 +214,10 @@ export default function ClientDetailPage() {
 
             {/* Quick Stats */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-5">
-              <QStat icon={DollarSign} label="Facturado" value={`$${fmt(client.billing_summary.total_invoiced)}`} color="text-cyan-400" />
-              <QStat icon={CheckCircle} label="Cobrado" value={`$${fmt(client.billing_summary.total_paid)}`} color="text-emerald-400" />
-              <QStat icon={AlertTriangle} label="Vencido" value={`$${fmt(client.billing_summary.total_overdue)}`} color={client.billing_summary.total_overdue > 0 ? "text-red-400" : "text-gray-500"} />
-              <QStat icon={Receipt} label="Balance" value={`$${fmt(client.billing_summary.balance)}`} color={client.billing_summary.balance > 0 ? "text-amber-400" : "text-emerald-400"} />
+              <QStat icon={DollarSign} label="Facturado" value={`$${fmt(client.billing_summary?.total_invoiced || 0)}`} color="text-cyan-400" />
+              <QStat icon={CheckCircle} label="Cobrado" value={`$${fmt(client.billing_summary?.total_paid || 0)}`} color="text-emerald-400" />
+              <QStat icon={AlertTriangle} label="Vencido" value={`$${fmt(client.billing_summary?.total_overdue || 0)}`} color={(client.billing_summary?.total_overdue || 0) > 0 ? "text-red-400" : "text-gray-500"} />
+              <QStat icon={Receipt} label="Balance" value={`$${fmt(client.billing_summary?.balance || 0)}`} color={(client.billing_summary?.balance || 0) > 0 ? "text-amber-400" : "text-emerald-400"} />
             </div>
           </div>
         </Card>
@@ -321,8 +329,10 @@ function TabInfo({ client }: { client: ClientDetail }) {
 
 /* ========== TAB: FACTURACION ========== */
 function TabFacturacion({ client }: { client: ClientDetail }) {
-  const bs = client.billing_summary;
+  const bs = client.billing_summary || { total_invoiced: 0, total_paid: 0, total_overdue: 0, balance: 0, invoice_count: 0, payment_count: 0 };
   const collRate = bs.total_invoiced > 0 ? ((bs.total_paid / bs.total_invoiced) * 100) : 0;
+  const invoices = client.invoices || [];
+  const payments = client.payments || [];
 
   return (
     <div className="space-y-4">
@@ -349,7 +359,7 @@ function TabFacturacion({ client }: { client: ClientDetail }) {
       {/* Invoices Table */}
       <Card>
         <h3 className="text-sm font-semibold text-gray-400 mb-4 flex items-center gap-2"><Receipt size={14} /> Facturas recientes</h3>
-        {client.invoices.length === 0 ? (
+        {invoices.length === 0 ? (
           <p className="text-sm text-gray-600 text-center py-6">Sin facturas registradas</p>
         ) : (
           <div className="overflow-x-auto">
@@ -366,7 +376,7 @@ function TabFacturacion({ client }: { client: ClientDetail }) {
                 </tr>
               </thead>
               <tbody>
-                {client.invoices.map(inv => {
+                {invoices.map(inv => {
                   const is = INV_STATUS[inv.status] || { label: inv.status, cls: "text-gray-400 bg-gray-400/10" };
                   return (
                     <tr key={inv.id} className="border-b border-wuipi-border/50 hover:bg-wuipi-card-hover transition-colors">
@@ -391,7 +401,7 @@ function TabFacturacion({ client }: { client: ClientDetail }) {
       {/* Payments Table */}
       <Card>
         <h3 className="text-sm font-semibold text-gray-400 mb-4 flex items-center gap-2"><CreditCard size={14} /> Pagos recientes</h3>
-        {client.payments.length === 0 ? (
+        {payments.length === 0 ? (
           <p className="text-sm text-gray-600 text-center py-6">Sin pagos registrados</p>
         ) : (
           <div className="overflow-x-auto">
@@ -407,7 +417,7 @@ function TabFacturacion({ client }: { client: ClientDetail }) {
                 </tr>
               </thead>
               <tbody>
-                {client.payments.map(pay => {
+                {payments.map(pay => {
                   const ps = PAY_STATUS[pay.status] || { label: pay.status, cls: "text-gray-400 bg-gray-400/10" };
                   return (
                     <tr key={pay.id} className="border-b border-wuipi-border/50 hover:bg-wuipi-card-hover transition-colors">
