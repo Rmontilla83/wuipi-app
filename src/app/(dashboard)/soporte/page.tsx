@@ -174,7 +174,7 @@ export default function SoportePage() {
   if (loading || !data) {
     return (
       <>
-        <TopBar title="Soporte" icon={<Headphones size={22} />} />
+        <TopBar title="CRM Soporte" icon={<Headphones size={22} />} />
         <div className="flex-1 flex items-center justify-center">
           <div className="flex items-center gap-3 text-gray-500">
             <RefreshCw size={20} className="animate-spin" />
@@ -203,7 +203,7 @@ export default function SoportePage() {
 
   return (
     <>
-      <TopBar title="Soporte" icon={<Headphones size={22} />} />
+      <TopBar title="CRM Soporte" icon={<Headphones size={22} />} />
       <div className="flex-1 overflow-auto p-6 space-y-4">
 
         {/* Source badge + Period selector */}

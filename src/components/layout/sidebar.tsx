@@ -10,24 +10,60 @@ import { ROLE_PERMISSIONS } from "@/types";
 import {
   Target,
   Brain,
-  Radio,
   Headphones,
-  DollarSign,
-  FileText,
+  TrendingUp,
+  Building2,
+  Users,
+  Globe,
   Settings,
   ChevronLeft,
   ChevronRight,
   LogOut,
 } from "lucide-react";
 
-const NAV_ITEMS = [
-  { id: "comando", label: "Centro de Comando", icon: Target, path: "/comando" },
-  { id: "supervisor", label: "Supervisor IA", icon: Brain, path: "/supervisor", highlight: true },
-  { id: "infraestructura", label: "Infraestructura", icon: Radio, path: "/infraestructura" },
-  { id: "soporte", label: "Soporte", icon: Headphones, path: "/soporte" },
-  { id: "facturacion", label: "Facturación", icon: FileText, path: "/facturacion" },
-  { id: "finanzas", label: "Finanzas", icon: DollarSign, path: "/finanzas" },
-  { id: "configuracion", label: "Configuración", icon: Settings, path: "/configuracion" },
+// Navigation structure with logical groups
+interface NavItem {
+  id: string;
+  label: string;
+  icon: React.ComponentType<{ size?: number; className?: string }>;
+  path: string;
+  highlight?: boolean;
+}
+
+interface NavGroup {
+  label: string;
+  items: NavItem[];
+}
+
+const NAV_GROUPS: NavGroup[] = [
+  {
+    label: "Estratégico",
+    items: [
+      { id: "comando", label: "Centro de Comando", icon: Target, path: "/comando" },
+      { id: "supervisor", label: "Supervisor IA", icon: Brain, path: "/supervisor", highlight: true },
+    ],
+  },
+  {
+    label: "Operativo",
+    items: [
+      { id: "soporte", label: "CRM Soporte", icon: Headphones, path: "/soporte" },
+      { id: "ventas", label: "CRM Ventas", icon: TrendingUp, path: "/ventas" },
+    ],
+  },
+  {
+    label: "Administrativo",
+    items: [
+      { id: "erp", label: "ERP Administrativo", icon: Building2, path: "/erp" },
+      { id: "clientes", label: "Clientes", icon: Users, path: "/clientes" },
+    ],
+  },
+  {
+    label: "Sistema",
+    items: [
+      { id: "portal-admin", label: "Portal Clientes", icon: Globe, path: "/portal-admin" },
+      { id: "configuracion", label: "Configuración", icon: Settings, path: "/configuracion" },
+    ],
+  },
 ];
 
 interface SidebarProps {
@@ -41,7 +77,6 @@ export function Sidebar({ user }: SidebarProps) {
   const supabase = createClient();
 
   const allowedModules = ROLE_PERMISSIONS[user.role] || [];
-  const visibleItems = NAV_ITEMS.filter((item) => allowedModules.includes(item.id));
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -49,11 +84,17 @@ export function Sidebar({ user }: SidebarProps) {
     router.refresh();
   };
 
+  // Filter groups: only show groups that have at least one visible item
+  const visibleGroups = NAV_GROUPS.map((group) => ({
+    ...group,
+    items: group.items.filter((item) => allowedModules.includes(item.id)),
+  })).filter((group) => group.items.length > 0);
+
   return (
     <aside
       className={cn(
         "h-screen flex flex-col bg-wuipi-sidebar border-r border-wuipi-border transition-all duration-300",
-        collapsed ? "w-[72px]" : "w-[250px]"
+        collapsed ? "w-[72px]" : "w-[260px]"
       )}
     >
       {/* Logo */}
@@ -74,38 +115,58 @@ export function Sidebar({ user }: SidebarProps) {
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 p-2 space-y-0.5 overflow-y-auto">
-        {visibleItems.map((item) => {
-          const isActive = pathname === item.path;
-          const Icon = item.icon;
-          const isAI = item.highlight;
+      <nav className="flex-1 px-2 py-3 overflow-y-auto">
+        {visibleGroups.map((group, groupIndex) => (
+          <div key={group.label}>
+            {/* Group separator */}
+            {groupIndex > 0 && (
+              <div className="my-2 mx-3 border-t border-wuipi-border/50" />
+            )}
 
-          return (
-            <Link
-              key={item.id}
-              href={item.path}
-              className={cn(
-                "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all",
-                collapsed && "justify-center px-0",
-                isActive
-                  ? isAI
-                    ? "bg-wuipi-purple/10 text-wuipi-purple border border-wuipi-purple/20"
-                    : "bg-wuipi-accent/10 text-wuipi-accent border border-wuipi-accent/20"
-                  : "text-gray-500 hover:bg-wuipi-card-hover border border-transparent"
-              )}
-            >
-              <Icon size={20} className="shrink-0" />
-              {!collapsed && (
-                <span className="flex items-center gap-2">
-                  {item.label}
-                  {isAI && !isActive && (
-                    <span className="w-1.5 h-1.5 rounded-full bg-wuipi-purple shadow-[0_0_6px] shadow-wuipi-purple glow-dot" />
-                  )}
-                </span>
-              )}
-            </Link>
-          );
-        })}
+            {/* Group label */}
+            {!collapsed && (
+              <div className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-gray-600">
+                {group.label}
+              </div>
+            )}
+
+            {/* Group items */}
+            <div className="space-y-0.5">
+              {group.items.map((item) => {
+                const isActive = pathname === item.path || pathname.startsWith(item.path + "/");
+                const Icon = item.icon;
+                const isAI = item.highlight;
+
+                return (
+                  <Link
+                    key={item.id}
+                    href={item.path}
+                    title={collapsed ? item.label : undefined}
+                    className={cn(
+                      "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all",
+                      collapsed && "justify-center px-0",
+                      isActive
+                        ? isAI
+                          ? "bg-wuipi-purple/10 text-wuipi-purple border border-wuipi-purple/20"
+                          : "bg-wuipi-accent/10 text-wuipi-accent border border-wuipi-accent/20"
+                        : "text-gray-500 hover:bg-wuipi-card-hover hover:text-gray-300 border border-transparent"
+                    )}
+                  >
+                    <Icon size={20} className="shrink-0" />
+                    {!collapsed && (
+                      <span className="flex items-center gap-2 truncate">
+                        {item.label}
+                        {isAI && !isActive && (
+                          <span className="w-1.5 h-1.5 rounded-full bg-wuipi-purple shadow-[0_0_6px] shadow-wuipi-purple glow-dot" />
+                        )}
+                      </span>
+                    )}
+                  </Link>
+                );
+              })}
+            </div>
+          </div>
+        ))}
       </nav>
 
       {/* Bottom: Collapse + User */}

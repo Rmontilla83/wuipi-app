@@ -2,7 +2,7 @@
 // WUIPI APP - Core Type Definitions
 // ===========================================
 
-export type UserRole = "admin" | "soporte" | "finanzas" | "infraestructura" | "tecnico" | "cliente";
+export type UserRole = "admin" | "gerente" | "soporte" | "finanzas" | "infraestructura" | "tecnico" | "vendedor" | "cliente";
 
 export interface UserProfile {
   id: string;
@@ -35,14 +35,16 @@ export interface ModuleHealth {
   updated_at: string;
 }
 
-// Dashboard permission map
+// Dashboard permission map — matches sidebar nav IDs
 export const ROLE_PERMISSIONS: Record<UserRole, string[]> = {
-  admin: ["comando", "supervisor", "infraestructura", "soporte", "facturacion", "finanzas", "configuracion"],
-  soporte: ["comando", "soporte"],
-  finanzas: ["comando", "facturacion", "finanzas"],
-  infraestructura: ["comando", "infraestructura"],
-  tecnico: ["soporte"],
-  cliente: ["portal"],
+  admin:           ["comando", "supervisor", "soporte", "ventas", "erp", "clientes", "portal-admin", "configuracion"],
+  gerente:         ["comando", "supervisor", "soporte", "ventas", "erp", "clientes", "configuracion"],
+  finanzas:        ["comando", "erp", "clientes"],
+  soporte:         ["comando", "soporte", "clientes"],
+  infraestructura: ["comando", "clientes"],
+  tecnico:         ["soporte"],
+  vendedor:        ["comando", "ventas", "clientes"],
+  cliente:         ["portal"],
 };
 
 export type { NetworkOverview, NetworkNode, NetworkAlert } from "./prtg";

@@ -6,10 +6,12 @@ import { Users, Brain } from "lucide-react";
 
 interface TopBarProps {
   title: string;
+  subtitle?: string;
   icon?: React.ReactNode;
+  actions?: React.ReactNode;
 }
 
-export function TopBar({ title, icon }: TopBarProps) {
+export function TopBar({ title, subtitle, icon, actions }: TopBarProps) {
   const [time, setTime] = useState(new Date());
 
   useEffect(() => {
@@ -19,12 +21,16 @@ export function TopBar({ title, icon }: TopBarProps) {
 
   return (
     <header className="h-16 px-7 flex items-center justify-between border-b border-wuipi-border bg-wuipi-sidebar shrink-0">
-      <h1 className="text-xl font-bold text-white flex items-center gap-2">
-        {icon}
-        {title}
-      </h1>
+      <div className="flex items-center gap-3">
+        <h1 className="text-xl font-bold text-white flex items-center gap-2">
+          {icon}
+          {title}
+        </h1>
+        {subtitle && <span className="text-sm text-gray-500 hidden sm:inline">— {subtitle}</span>}
+      </div>
 
       <div className="flex items-center gap-4">
+        {actions}
         {/* Client count */}
         <div className="flex items-center gap-2 px-3 py-1.5 bg-wuipi-bg rounded-lg border border-wuipi-border">
           <Users size={14} className="text-gray-500" />
