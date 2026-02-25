@@ -1,10 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getClient, updateClient, deleteClient } from "@/lib/dal/facturacion";
+import { getClient, getClientDetail, updateClient, deleteClient } from "@/lib/dal/facturacion";
+import { clientUpdateSchema, validate } from "@/lib/validations/schemas";
 
-export async function GET(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
-    const client = await getClient(id);
+    const { searchParams } = new URL(request.url);
+    const detail = searchParams.get("detail") === "true";
+    
+    const client = detail ? await getClientDetail(id) : await getClient(id);
     return NextResponse.json(client);
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
@@ -15,7 +19,13 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   try {
     const { id } = await params;
     const body = await request.json();
-    const client = await updateClient(id, body);
+    
+    const validation = validate(clientUpdateSchema, body);
+    if (!validation.success) {
+      return NextResponse.json({ error: validation.error, details: validation.details }, { status: 400 });
+    }
+    
+    const client = await updateClient(id, validation.data);
     return NextResponse.json(client);
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
