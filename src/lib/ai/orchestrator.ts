@@ -45,8 +45,9 @@ async function callClaude(prompt: string): Promise<string> {
     system: SYSTEM_PROMPT,
     messages: [{ role: "user", content: prompt }],
   });
-  return response.content
-    .filter((b): b is { type: "text"; text: string } => b.type === "text")
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return (response.content as any[])
+    .filter((b) => b.type === "text")
     .map((b) => b.text)
     .join("");
 }

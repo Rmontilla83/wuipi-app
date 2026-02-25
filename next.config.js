@@ -2,7 +2,9 @@
 const nextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
-  serverExternalPackages: ["@anthropic-ai/sdk", "@google/generative-ai"],
+  experimental: {
+    serverComponentsExternalPackages: ["@anthropic-ai/sdk", "@google/generative-ai"],
+  },
   headers: async () => [
     {
       source: "/(.*)",
