@@ -7,7 +7,7 @@ import {
   Megaphone, Rocket, Wrench, Sparkles, Bug, Shield,
   ChevronDown, ChevronRight, CheckCircle2, Clock,
   Package, Database, Layout, Users, CreditCard,
-  Radio, Brain, Globe,
+  Radio, Brain, Globe, Headphones,
 } from "lucide-react";
 
 /* ========== TYPES ========== */
@@ -43,6 +43,41 @@ const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string }
 };
 
 const RELEASES: Release[] = [
+  {
+    version: "0.8.0",
+    date: "2026-02-25",
+    title: "CRM Soporte Propio",
+    description: "Sistema de tickets completo en Supabase con CRUD, SLA automático, categorías y asignación de técnicos.",
+    icon: Headphones,
+    status: "deployed",
+    changes: [
+      { type: "feature", text: "Schema completo: tickets, ticket_categories, ticket_comments con triggers SLA automáticos" },
+      { type: "feature", text: "CRUD de tickets: crear, listar, filtrar por estado/prioridad, buscar por asunto/número" },
+      { type: "feature", text: "Modal de creación con: asunto, descripción, prioridad, canal, categoría, cliente, técnico, sector, nodo" },
+      { type: "feature", text: "SLA automático por prioridad y categoría con cálculo via trigger PostgreSQL" },
+      { type: "feature", text: "API de comentarios/timeline con tracking automático de cambios de estado y asignación" },
+      { type: "feature", text: "10 categorías pre-cargadas alineadas con los tipos de falla de Kommo" },
+      { type: "feature", text: "Tab Visor Kommo preservado como puente durante la transición" },
+      { type: "feature", text: "Secuencia TK-2026-XXXXXX para numeración automática de tickets" },
+    ],
+  },
+  {
+    version: "0.7.0",
+    date: "2026-02-25",
+    title: "Protecciones Base + Actualizaciones",
+    description: "Error boundaries, validación Zod, API hardening y página de changelog.",
+    icon: Shield,
+    status: "deployed",
+    changes: [
+      { type: "feature", text: "Página de Actualizaciones con changelog de versiones y timeline visual" },
+      { type: "feature", text: "Visor Kommo separado como tab dentro de CRM Soporte" },
+      { type: "security", text: "Error boundary global — nunca más pantalla blanca por errores" },
+      { type: "security", text: "Validación Zod en API de clientes (POST/PUT) con schemas tipados" },
+      { type: "improvement", text: "API helpers para respuestas consistentes de error" },
+      { type: "improvement", text: "Página Not Found personalizada para rutas inválidas" },
+      { type: "fix", text: "Protección contra billing_summary undefined en ficha del cliente" },
+    ],
+  },
   {
     version: "0.6.0",
     date: "2026-02-25",

@@ -9,6 +9,7 @@ import {
   Timer, User, Zap, Tag, ExternalLink, Filter,
   TicketCheck, Database, ArrowRight,
 } from "lucide-react";
+import CRMSoporteTab from "@/components/soporte/crm-tab";
 
 // ============================================
 // TYPES
@@ -187,9 +188,6 @@ export default function SoportePage() {
             }`}
           >
             <TicketCheck size={16} /> CRM Soporte
-            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-400/10 text-amber-400 border border-amber-400/20">
-              Próximo
-            </span>
           </button>
         </div>
 
@@ -201,7 +199,7 @@ export default function SoportePage() {
             fetchData={fetchData} setRefreshing={setRefreshing}
           />
         )}
-        {mainTab === "crm" && <CRMSoportePlaceholder />}
+        {mainTab === "crm" && <CRMSoporteTab />}
       </div>
     </>
   );
@@ -417,132 +415,4 @@ function KommoVisor({ data, loading, refreshing, ticketFilter, setTicketFilter, 
   );
 }
 
-// ============================================
-// TAB: CRM SOPORTE (Placeholder)
-// ============================================
-function CRMSoportePlaceholder() {
-  const features = [
-    { icon: Database, title: "Base de Datos Propia", desc: "Tickets almacenados en Supabase con historial completo, sin depender de Kommo" },
-    { icon: Users, title: "Vinculación a Clientes", desc: "Cada ticket enlazado a la ficha integral del cliente — historial, equipo, facturación" },
-    { icon: TicketCheck, title: "SLA Automático", desc: "Temporizadores por prioridad, escalamiento automático, métricas de cumplimiento" },
-    { icon: Zap, title: "Multi-canal", desc: "Tickets desde Portal, WhatsApp, llamadas — todos centralizados en un solo flujo" },
-  ];
-
-  const stages = [
-    { label: "Nuevo", color: "bg-cyan-400" },
-    { label: "Asignado", color: "bg-blue-400" },
-    { label: "En progreso", color: "bg-amber-400" },
-    { label: "Esperando", color: "bg-purple-400" },
-    { label: "Resuelto", color: "bg-emerald-400" },
-    { label: "Cerrado", color: "bg-gray-400" },
-  ];
-
-  return (
-    <div className="space-y-4">
-      <Card className="!p-0 overflow-hidden">
-        <div className="h-1 bg-amber-400" />
-        <div className="p-5">
-          <div className="flex items-center gap-4">
-            <div className="w-12 h-12 rounded-xl bg-amber-400/10 border border-amber-400/20 flex items-center justify-center">
-              <TicketCheck size={24} className="text-amber-400" />
-            </div>
-            <div className="flex-1">
-              <h2 className="text-lg font-bold text-white">CRM de Soporte Propio</h2>
-              <p className="text-sm text-gray-400">Sistema de tickets en Supabase — próxima fase de desarrollo</p>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-400/10 text-amber-400 border border-amber-400/20">
-                En planificación
-              </span>
-              <span className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-cyan-400/10 text-cyan-400 border border-cyan-400/20">
-                Visor Kommo activo
-              </span>
-            </div>
-          </div>
-        </div>
-      </Card>
-
-      <div className="grid grid-cols-2 gap-4">
-        <Card>
-          <h3 className="text-sm font-bold text-white mb-4">Funcionalidades Planificadas</h3>
-          <div className="space-y-4">
-            {features.map((f, i) => {
-              const Icon = f.icon;
-              return (
-                <div key={i} className="flex items-start gap-3">
-                  <div className="w-8 h-8 rounded-lg bg-wuipi-accent/10 border border-wuipi-accent/20 flex items-center justify-center shrink-0">
-                    <Icon size={16} className="text-wuipi-accent" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-semibold text-white">{f.title}</p>
-                    <p className="text-xs text-gray-500 mt-0.5">{f.desc}</p>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </Card>
-
-        <Card>
-          <h3 className="text-sm font-bold text-white mb-4">Pipeline de Tickets</h3>
-          <div className="flex items-center gap-2 mb-6">
-            {stages.map((s, i) => (
-              <div key={i} className="flex items-center gap-2 flex-1">
-                <div className="flex flex-col items-center flex-1">
-                  <div className={`w-full h-2 rounded-full ${s.color}/30`}>
-                    <div className={`h-full rounded-full ${s.color} w-0`} />
-                  </div>
-                  <span className="text-[10px] text-gray-500 mt-1.5">{s.label}</span>
-                </div>
-                {i < stages.length - 1 && <ArrowRight size={10} className="text-gray-700 shrink-0 mt-[-12px]" />}
-              </div>
-            ))}
-          </div>
-
-          <h3 className="text-sm font-bold text-white mb-3 mt-6">Tabla de Tickets (preview)</h3>
-          <div className="border border-wuipi-border rounded-lg overflow-hidden">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="bg-wuipi-bg text-gray-500">
-                  <th className="text-left p-2.5 font-medium">Ticket</th>
-                  <th className="text-left p-2.5 font-medium">Cliente</th>
-                  <th className="text-left p-2.5 font-medium">Categoría</th>
-                  <th className="text-left p-2.5 font-medium">Prioridad</th>
-                  <th className="text-left p-2.5 font-medium">Estado</th>
-                  <th className="text-left p-2.5 font-medium">Técnico</th>
-                </tr>
-              </thead>
-              <tbody>
-                {[1, 2, 3].map(i => (
-                  <tr key={i} className="border-t border-wuipi-border/50">
-                    <td className="p-2.5 text-gray-600 font-mono">TK-0000{i}</td>
-                    <td className="p-2.5 text-gray-600">—</td>
-                    <td className="p-2.5 text-gray-600">—</td>
-                    <td className="p-2.5"><span className="px-1.5 py-0.5 rounded bg-gray-500/10 text-gray-600 text-[10px]">—</span></td>
-                    <td className="p-2.5"><span className="px-1.5 py-0.5 rounded bg-gray-500/10 text-gray-600 text-[10px]">—</span></td>
-                    <td className="p-2.5 text-gray-600">—</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <p className="text-[11px] text-gray-600 text-center mt-3">Los datos se llenarán cuando el módulo esté activo</p>
-        </Card>
-      </div>
-
-      <Card className="!bg-cyan-500/5 border-cyan-500/10">
-        <div className="flex items-start gap-3">
-          <ExternalLink size={16} className="text-cyan-400 mt-0.5 shrink-0" />
-          <div>
-            <p className="text-sm font-semibold text-cyan-400">Transición gradual desde Kommo</p>
-            <p className="text-xs text-gray-400 mt-1">
-              El Visor Kommo seguirá activo como fuente de datos mientras se construye el CRM propio.
-              Una vez listo, los tickets nuevos se crearán en Supabase y Kommo se usará solo como referencia histórica.
-              No perderás ningún dato en la transición.
-            </p>
-          </div>
-        </div>
-      </Card>
-    </div>
-  );
-}
+// CRM Soporte tab is now in @/components/soporte/crm-tab.tsx
