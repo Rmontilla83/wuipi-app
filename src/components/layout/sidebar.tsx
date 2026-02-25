@@ -16,6 +16,7 @@ import {
   Users,
   Globe,
   Settings,
+  Megaphone,
   ChevronLeft,
   ChevronRight,
   LogOut,
@@ -64,6 +65,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { id: "portal-admin", label: "Portal Clientes", icon: Globe, path: "/portal-admin" },
       { id: "configuracion", label: "Configuración", icon: Settings, path: "/configuracion" },
+      { id: "actualizaciones", label: "Actualizaciones", icon: Megaphone, path: "/actualizaciones" },
     ],
   },
 ];

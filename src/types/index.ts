@@ -37,8 +37,8 @@ export interface ModuleHealth {
 
 // Dashboard permission map — matches sidebar nav IDs
 export const ROLE_PERMISSIONS: Record<UserRole, string[]> = {
-  admin:           ["comando", "supervisor", "soporte", "ventas", "erp", "clientes", "portal-admin", "configuracion"],
-  gerente:         ["comando", "supervisor", "soporte", "ventas", "erp", "clientes", "configuracion"],
+  admin:           ["comando", "supervisor", "soporte", "ventas", "erp", "clientes", "portal-admin", "configuracion", "actualizaciones"],
+  gerente:         ["comando", "supervisor", "soporte", "ventas", "erp", "clientes", "configuracion", "actualizaciones"],
   finanzas:        ["comando", "erp", "clientes"],
   soporte:         ["comando", "soporte", "clientes"],
   infraestructura: ["comando", "clientes"],
