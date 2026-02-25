@@ -46,13 +46,33 @@ function mapStatusLabel(statusId: number): string {
 // Detect category from lead name
 function detectCategory(name: string): { category: string; label: string } {
   const lower = name.toLowerCase();
-  if (lower.includes("sin servicio") || lower.includes("sin internet") || lower.includes("sin conexion")) return { category: "sin_servicio", label: "Sin Servicio" };
+  // Categorías técnicas de red
+  if (lower.includes("sin servicio") || lower.includes("sin internet") || lower.includes("sin conexion") || lower.includes("sin conexión")) return { category: "sin_servicio", label: "Sin Servicio" };
   if (lower.includes("lentitud") || lower.includes("lento") || lower.includes("velocidad")) return { category: "lentitud", label: "Lentitud" };
   if (lower.includes("intermitencia") || lower.includes("intermitente") || lower.includes("se cae")) return { category: "intermitencia", label: "Intermitencia" };
+  // Visitas L2C / Soporte en cliente (ANTES de equipos para que "visita" no caiga en otro)
+  if (lower.includes("visita") || lower.includes("alineacion") || lower.includes("alineación") || lower.includes("alineamiento")) return { category: "visita_l2c", label: "Visita L2C" };
+  // Cableado (ANTES de equipos)
+  if (lower.includes("cableado") || lower.includes("cable ")) return { category: "cableado", label: "Cableado" };
+  // Equipos
+  if (lower.includes("equipo") || lower.includes("router") || lower.includes("antena") || lower.includes("red interna") || lower.includes("nodo")) return { category: "equipos", label: "Equipos" };
+  // Administrativas
+  if (lower.includes("cambio") && lower.includes("razon")) return { category: "cambio_razon_social", label: "Cambio Razón Social" };
+  if (lower.includes("razon social")) return { category: "cambio_razon_social", label: "Cambio Razón Social" };
+  // Suspensión
+  if (lower.includes("suspendido") || lower.includes("suspension") || lower.includes("suspensión") || lower.includes("suspender")) return { category: "suspension", label: "Suspensión" };
+  // Desincorporación / Retiro
+  if (lower.includes("desincorpor") || lower.includes("retiro") || lower.includes("retirado") || lower.includes("baja")) return { category: "desincorporacion", label: "Desincorporación" };
+  // Instalación
   if (lower.includes("instalacion") || lower.includes("instalación")) return { category: "instalacion", label: "Instalación" };
   if (lower.includes("mudanza") || lower.includes("traslado")) return { category: "mudanza", label: "Mudanza" };
   if (lower.includes("factur") || lower.includes("cobro") || lower.includes("pago")) return { category: "facturacion", label: "Facturación" };
-  if (lower.includes("equipo") || lower.includes("router") || lower.includes("antena") || lower.includes("red interna")) return { category: "equipos", label: "Equipos" };
+  
+  // Si el nombre parece ser solo un nombre de persona/empresa (sin descripción de problema)
+  // Patrón: no contiene palabras clave técnicas y parece un nombre propio
+  const hasKeywords = /servicio|red|cable|equipo|lent|inter|install|factur|cobr|pago|cambio|retir|suspen|visita|aline|mudanz|traslad/i.test(name);
+  if (!hasKeywords) return { category: "consulta_general", label: "Consulta General" };
+
   return { category: "otro", label: "Otro" };
 }
 
@@ -234,6 +254,7 @@ export async function GET(request: NextRequest) {
       tickets_pending: pendingLeads.length,
       tickets_resolved_today: resolvedToday.length,
       active_tickets: allActive.length,
+      visitas_l2c: leads.filter((l: any) => l.status_id === STATUS.tarea_l2c || l.status_id === STATUS.tarea_acceso).length + (categoryMap.get("visita_l2c")?.count || 0),
 
       // Client metrics
       total_contacts: contactIds.size,

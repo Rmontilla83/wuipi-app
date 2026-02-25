@@ -27,9 +27,10 @@ interface TicketData {
   created_at: string; updated_at: string; closed_at: string | null;
 }
 interface SoporteData {
-  source: string; pipeline: string; total_leads: number;
+  source: string; pipeline: string; period: string; total_leads: number;
   tickets_today: number; tickets_open: number; tickets_in_progress: number;
   tickets_pending: number; tickets_resolved_today: number; active_tickets: number;
+  visitas_l2c: number;
   total_contacts: number; repeat_clients: number; repeat_client_pct: number;
   by_stage: StageData[]; by_category: CategoryData[]; by_technician: TechData[];
   recent_tickets: TicketData[]; updated_at: string;
@@ -245,7 +246,7 @@ export default function SoportePage() {
           <KPICard label="Tickets Hoy" value={data.tickets_today} sub={`${data.tickets_resolved_today} resueltos`} icon={Headphones} />
           <KPICard label="Abiertos" value={data.tickets_open} sub={`${data.active_tickets} activos total`} icon={AlertTriangle} color="text-cyan-400" />
           <KPICard label="En Progreso" value={data.tickets_in_progress} sub={`${data.tickets_pending} pendientes`} icon={Timer} color="text-amber-400" />
-          <KPICard label="Contactos" value={data.total_contacts} sub={`${data.repeat_clients} reincidentes (${data.repeat_client_pct}%)`} icon={Users} />
+          <KPICard label="Visitas L2C" value={data.visitas_l2c} sub="Soporte en cliente" icon={Users} color="text-violet-400" />
           <Card className="flex flex-col justify-between">
             <div className="flex items-center gap-2 text-xs text-gray-500 mb-1">
               <Clock size={12} /> Auto-refresh: 60s
