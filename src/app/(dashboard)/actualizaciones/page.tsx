@@ -44,6 +44,24 @@ const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string }
 
 const RELEASES: Release[] = [
   {
+    version: "1.0.0",
+    date: "2026-02-25",
+    title: "CRM Ventas — Visor Kommo",
+    description: "Integración con cuenta Kommo Ventas (wuipidrive) con auto-detección de pipelines, KPIs en vivo y ranking de vendedores.",
+    icon: Layout,
+    status: "deployed",
+    changes: [
+      { type: "feature", text: "Integración con cuenta Kommo Ventas separada (wuipidrive.kommo.com)" },
+      { type: "feature", text: "Auto-detección de pipelines — no requiere configurar IDs manualmente" },
+      { type: "feature", text: "KPIs en vivo: leads activos, ganados, pipeline value, tasa de conversión" },
+      { type: "feature", text: "Visualización de etapas por pipeline con barras de progreso y valores" },
+      { type: "feature", text: "Ranking de vendedores con tasa de conversión y valor cerrado" },
+      { type: "feature", text: "Lista de leads recientes con estado, responsable y valor" },
+      { type: "feature", text: "Filtros por período y por pipeline" },
+      { type: "feature", text: "Tab CRM Ventas placeholder listo para desarrollo del pipeline propio" },
+    ],
+  },
+  {
     version: "0.9.0",
     date: "2026-02-25",
     title: "Kanban Board + Ficha de Ticket",
