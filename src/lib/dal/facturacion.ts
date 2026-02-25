@@ -87,6 +87,55 @@ export async function deleteClient(id: string) {
   if (error) throw new Error(error.message);
 }
 
+// --- CLIENT DETAIL (ficha integral) ---
+
+export async function getClientDetail(id: string) {
+  // Get client with plan
+  const { data: client, error } = await supabase()
+    .from("clients")
+    .select("*, plans(id, code, name, price_usd, speed_down, speed_up, technology)")
+    .eq("id", id)
+    .single();
+  if (error) throw new Error(error.message);
+
+  // Get invoices
+  const { data: invoices } = await supabase()
+    .from("invoices")
+    .select("id, invoice_number, issue_date, due_date, currency, total, amount_paid, balance_due, status")
+    .eq("client_id", id)
+    .order("issue_date", { ascending: false })
+    .limit(20);
+
+  // Get payments
+  const { data: payments } = await supabase()
+    .from("payments")
+    .select("id, payment_number, payment_date, amount, currency, status, reference_number, payment_methods(name)")
+    .eq("client_id", id)
+    .order("payment_date", { ascending: false })
+    .limit(20);
+
+  // Calculate billing summary
+  const allInvoices = invoices || [];
+  const allPayments = payments || [];
+  const totalInvoiced = allInvoices.reduce((s: number, i: any) => s + Number(i.total || 0), 0);
+  const totalPaid = allPayments.filter((p: any) => p.status === "confirmed").reduce((s: number, p: any) => s + Number(p.amount || 0), 0);
+  const totalOverdue = allInvoices.filter((i: any) => i.status === "overdue").reduce((s: number, i: any) => s + Number(i.balance_due || 0), 0);
+
+  return {
+    ...client,
+    invoices: allInvoices,
+    payments: allPayments,
+    billing_summary: {
+      total_invoiced: totalInvoiced,
+      total_paid: totalPaid,
+      total_overdue: totalOverdue,
+      balance: totalInvoiced - totalPaid,
+      invoice_count: allInvoices.length,
+      payment_count: allPayments.length,
+    },
+  };
+}
+
 // --- PLANS ---
 
 export async function getPlans(activeOnly = true) {
