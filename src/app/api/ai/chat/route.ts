@@ -68,22 +68,27 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Message required" }, { status: 400 });
     }
 
-    // If AI is configured, use real engines
+    // Try real AI engines first
     if (isConfigured()) {
-      const context = await gatherContext(request);
-      const historyText = history?.length
-        ? `Conversación previa:\n${history.map((m: { role: string; content: string }) => `${m.role === "user" ? "Usuario" : "Supervisor"}: ${m.content}`).join("\n")}\n\n`
-        : "";
+      try {
+        const context = await gatherContext(request);
+        const historyText = history?.length
+          ? `Conversación previa:\n${history.map((m: { role: string; content: string }) => `${m.role === "user" ? "Usuario" : "Supervisor"}: ${m.content}`).join("\n")}\n\n`
+          : "";
 
-      const { content, engine } = await queryAI(
-        `${historyText}Usuario pregunta: ${message}`,
-        "chat",
-        context
-      );
-      return NextResponse.json({ content, engine });
+        const { content, engine } = await queryAI(
+          `${historyText}Usuario pregunta: ${message}`,
+          "chat",
+          context
+        );
+        return NextResponse.json({ content, engine });
+      } catch (aiError) {
+        console.error("AI engines failed, falling back to mock:", aiError);
+        // Fall through to mock
+      }
     }
 
-    // Mock mode — simulate delay
+    // Mock mode — always works as fallback
     await new Promise((r) => setTimeout(r, 600 + Math.random() * 800));
     const mock = getMockResponse(message);
     return NextResponse.json(mock);
