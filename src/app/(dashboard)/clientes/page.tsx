@@ -48,11 +48,12 @@ export default function ClientesPage() {
       if (statusFilter !== "all") params.set("status", statusFilter);
       const res = await fetch(`/api/facturacion/clients?${params}`);
       if (res.ok) {
-        const data = await res.json();
+        const json = await res.json();
+        const data = Array.isArray(json) ? json : (json.data || []);
         setClients(data);
         // Calculate stats
         setStats({
-          total: data.length,
+          total: json.total || data.length,
           active: data.filter((c: Client) => c.service_status === "active").length,
           suspended: data.filter((c: Client) => c.service_status === "suspended").length,
           pending: data.filter((c: Client) => c.service_status === "pending").length,
