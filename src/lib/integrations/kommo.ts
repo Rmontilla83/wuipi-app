@@ -54,6 +54,38 @@ export async function getLeads(page: number = 1, limit: number = 250, filter?: R
   return kommoFetch<any>("/leads", params);
 }
 
+// Fetch ALL leads with optional date range (paginated)
+export async function getAllLeads(options?: { from?: number; to?: number; pipelineId?: number }): Promise<any[]> {
+  const allLeads: any[] = [];
+  let page = 1;
+  const maxPages = 40;
+
+  while (page <= maxPages) {
+    try {
+      const filter: Record<string, string> = {};
+      if (options?.from) filter["filter[created_at][from]"] = options.from.toString();
+      if (options?.to) filter["filter[created_at][to]"] = options.to.toString();
+
+      const data = await getLeads(page, 250, filter);
+      const leads = data?._embedded?.leads || [];
+      if (leads.length === 0) break;
+
+      if (options?.pipelineId) {
+        allLeads.push(...leads.filter((l: any) => l.pipeline_id === options.pipelineId));
+      } else {
+        allLeads.push(...leads);
+      }
+
+      if (!data._links?.next) break;
+      page++;
+    } catch {
+      break;
+    }
+  }
+
+  return allLeads;
+}
+
 export async function getLeadsByPipeline(pipelineId: number, page: number = 1, limit: number = 250) {
   return kommoFetch<any>("/leads", {
     page: page.toString(),
@@ -103,29 +135,9 @@ export async function getTasks(page: number = 1) {
   });
 }
 
-// Fetch ALL leads from a pipeline (paginated)
-export async function getAllLeadsByPipeline(pipelineId: number): Promise<any[]> {
-  const allLeads: any[] = [];
-  let page = 1;
-  const maxPages = 20;
-
-  while (page <= maxPages) {
-    try {
-      // Fetch all leads, filter by pipeline_id in code
-      const data = await getLeads(page, 250);
-      const leads = data?._embedded?.leads || [];
-      if (leads.length === 0) break;
-      // Filter by pipeline
-      const filtered = leads.filter((l: any) => l.pipeline_id === pipelineId);
-      allLeads.push(...filtered);
-      if (!data._links?.next) break;
-      page++;
-    } catch {
-      break;
-    }
-  }
-
-  return allLeads;
+// Legacy wrapper
+export async function getAllLeadsByPipeline(pipelineId: number, from?: number, to?: number): Promise<any[]> {
+  return getAllLeads({ pipelineId, from, to });
 }
 
 export function isConfigured(): boolean {

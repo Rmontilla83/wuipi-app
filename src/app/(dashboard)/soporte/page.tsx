@@ -148,10 +148,11 @@ export default function SoportePage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [ticketFilter, setTicketFilter] = useState<"all" | "open" | "critical">("all");
+  const [period, setPeriod] = useState("30d");
 
   const fetchData = useCallback(async () => {
     try {
-      const res = await fetch("/api/soporte");
+      const res = await fetch(`/api/soporte?period=${period}`);
       const json = await res.json();
       if (!json.error) setData(json);
     } catch (err) {
@@ -167,6 +168,12 @@ export default function SoportePage() {
     const interval = setInterval(fetchData, 60000);
     return () => clearInterval(interval);
   }, [fetchData]);
+
+  // Refetch when period changes
+  useEffect(() => {
+    setLoading(true);
+    fetchData();
+  }, [period, fetchData]);
 
   if (loading || !data) {
     return (
@@ -197,15 +204,36 @@ export default function SoportePage() {
       <TopBar title="Soporte" icon={<Headphones size={22} />} />
       <div className="flex-1 overflow-auto p-6 space-y-4">
 
-        {/* Source badge */}
+        {/* Source badge + Period selector */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <span className="px-2 py-1 bg-cyan-500/10 border border-cyan-500/20 rounded-lg text-xs font-semibold text-cyan-400 flex items-center gap-1.5">
               <ExternalLink size={12} /> Kommo: {data.pipeline}
             </span>
-            <span className="text-xs text-gray-500">{data.total_leads} leads totales</span>
+            <span className="text-xs text-gray-500">{data.total_leads} leads</span>
           </div>
-          <span className="text-[10px] text-gray-600">Última actualización: {new Date(data.updated_at).toLocaleTimeString("es-VE")}</span>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-gray-600 mr-1">Período:</span>
+            {([
+              { key: "today", label: "Hoy" },
+              { key: "7d", label: "7 días" },
+              { key: "30d", label: "30 días" },
+              { key: "90d", label: "90 días" },
+              { key: "all", label: "Todo" },
+            ] as const).map((p) => (
+              <button
+                key={p.key}
+                onClick={() => setPeriod(p.key)}
+                className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors ${
+                  period === p.key
+                    ? "bg-cyan-500/10 text-cyan-400 border border-cyan-500/20"
+                    : "text-gray-500 hover:text-gray-300 border border-transparent"
+                }`}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* KPI Row */}

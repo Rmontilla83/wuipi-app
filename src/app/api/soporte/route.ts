@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import * as kommo from "@/lib/integrations/kommo";
 
 // Pipeline & Status IDs for "Embudo de SOPORTE"
@@ -69,17 +69,28 @@ function detectPriority(statusId: number, createdAt: number): string {
 // User map for quick lookups
 interface UserInfo { id: number; name: string; isAdmin: boolean; groupId: number; }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
     if (!kommo.isConfigured()) {
-      // Return mock data if not configured (import from existing mock)
       return NextResponse.json({ error: "Kommo not configured", mock: true });
+    }
+
+    // Parse period
+    const { searchParams } = new URL(request.url);
+    const period = searchParams.get("period") || "30d";
+    let fromTs: number | undefined;
+    const now = Math.floor(Date.now() / 1000);
+    switch (period) {
+      case "today": { const td = new Date(); td.setHours(0,0,0,0); fromTs = Math.floor(td.getTime()/1000); break; }
+      case "7d": fromTs = now - 7 * 86400; break;
+      case "30d": fromTs = now - 30 * 86400; break;
+      case "90d": fromTs = now - 90 * 86400; break;
     }
 
     // Fetch data in parallel
     const [usersData, leadsData] = await Promise.all([
       kommo.getUsers(),
-      kommo.getAllLeadsByPipeline(PIPELINE_ID),
+      kommo.getAllLeadsByPipeline(PIPELINE_ID, fromTs),
     ]);
 
     const users: UserInfo[] = (usersData?._embedded?.users || []).map((u: any) => ({
@@ -212,6 +223,7 @@ export async function GET() {
     // Build response
     const response = {
       source: "kommo",
+      period,
       pipeline: "Embudo de SOPORTE",
       pipeline_id: PIPELINE_ID,
 
