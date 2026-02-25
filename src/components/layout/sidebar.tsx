@@ -21,11 +21,13 @@ import {
   LogOut,
 } from "lucide-react";
 
+import type { LucideIcon } from "lucide-react";
+
 // Navigation structure with logical groups
 interface NavItem {
   id: string;
   label: string;
-  icon: React.ComponentType<{ size?: number; className?: string }>;
+  icon: LucideIcon;
   path: string;
   highlight?: boolean;
 }
