@@ -162,19 +162,14 @@ export default function SoportePage() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [period]);
 
   useEffect(() => {
+    setLoading(true);
     fetchData();
     const interval = setInterval(fetchData, 60000);
     return () => clearInterval(interval);
   }, [fetchData]);
-
-  // Refetch when period changes
-  useEffect(() => {
-    setLoading(true);
-    fetchData();
-  }, [period, fetchData]);
 
   if (loading || !data) {
     return (
