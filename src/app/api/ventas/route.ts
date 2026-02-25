@@ -60,10 +60,10 @@ export async function GET(request: NextRequest) {
       kommo.getUsers(),
     ]);
 
-    const users = (usersData?._embedded?.users || []).map((u: any) => ({
+    const users: { id: number; name: string; email: string }[] = (usersData?._embedded?.users || []).map((u: any) => ({
       id: u.id, name: u.name, email: u.email,
     }));
-    const userMap = new Map(users.map((u: any) => [u.id, u]));
+    const userMap = new Map<number, { id: number; name: string; email: string }>(users.map((u) => [u.id, u]));
 
     // Determine which pipeline(s) to show
     const targetPipelines = pipelineFilter
