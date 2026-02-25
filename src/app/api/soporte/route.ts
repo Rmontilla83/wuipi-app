@@ -104,7 +104,6 @@ export async function GET(request: NextRequest) {
     const leads = leadsData || [];
 
     // Time boundaries
-    const now = Date.now() / 1000;
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
     const todayTs = todayStart.getTime() / 1000;
