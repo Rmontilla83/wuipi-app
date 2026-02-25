@@ -44,6 +44,24 @@ const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string }
 
 const RELEASES: Release[] = [
   {
+    version: "0.9.0",
+    date: "2026-02-25",
+    title: "Kanban Board + Ficha de Ticket",
+    description: "Board Kanban con drag & drop entre estados, vista tabla alternativa, y ficha completa del ticket con timeline de actividad.",
+    icon: Headphones,
+    status: "deployed",
+    changes: [
+      { type: "feature", text: "Board Kanban con 6 columnas de estado y drag & drop para mover tickets entre estados" },
+      { type: "feature", text: "Vista tabla alternativa con toggle Kanban/Tabla" },
+      { type: "feature", text: "Ficha del ticket (/soporte/[id]) con detalle completo, sidebar de info y timeline de actividad" },
+      { type: "feature", text: "Sistema de comentarios con notas internas (🔒) y visibles para cliente (👁)" },
+      { type: "feature", text: "Cambio de estado desde dropdown en la ficha del ticket con tracking automático" },
+      { type: "feature", text: "Cards Kanban con prioridad, categoría, SLA, técnico asignado y cliente" },
+      { type: "feature", text: "Link directo a ficha del cliente desde el ticket" },
+      { type: "improvement", text: "Optimistic updates al arrastrar tickets entre columnas" },
+    ],
+  },
+  {
     version: "0.8.0",
     date: "2026-02-25",
     title: "CRM Soporte Propio",
