@@ -43,37 +43,74 @@ function mapStatusLabel(statusId: number): string {
   }
 }
 
-// Detect category from lead name
-function detectCategory(name: string): { category: string; label: string } {
-  const lower = name.toLowerCase();
-  // Categorías técnicas de red
-  if (lower.includes("sin servicio") || lower.includes("sin internet") || lower.includes("sin conexion") || lower.includes("sin conexión")) return { category: "sin_servicio", label: "Sin Servicio" };
-  if (lower.includes("lentitud") || lower.includes("lento") || lower.includes("velocidad")) return { category: "lentitud", label: "Lentitud" };
-  if (lower.includes("intermitencia") || lower.includes("intermitente") || lower.includes("se cae")) return { category: "intermitencia", label: "Intermitencia" };
-  // Visitas L2C / Soporte en cliente (ANTES de equipos para que "visita" no caiga en otro)
-  if (lower.includes("visita") || lower.includes("alineacion") || lower.includes("alineación") || lower.includes("alineamiento")) return { category: "visita_l2c", label: "Visita L2C" };
-  // Cableado (ANTES de equipos)
-  if (lower.includes("cableado") || lower.includes("cable ")) return { category: "cableado", label: "Cableado" };
-  // Equipos
-  if (lower.includes("equipo") || lower.includes("router") || lower.includes("antena") || lower.includes("red interna") || lower.includes("nodo")) return { category: "equipos", label: "Equipos" };
-  // Administrativas
-  if (lower.includes("cambio") && lower.includes("razon")) return { category: "cambio_razon_social", label: "Cambio Razón Social" };
-  if (lower.includes("razon social")) return { category: "cambio_razon_social", label: "Cambio Razón Social" };
-  // Suspensión
-  if (lower.includes("suspendido") || lower.includes("suspension") || lower.includes("suspensión") || lower.includes("suspender")) return { category: "suspension", label: "Suspensión" };
-  // Desincorporación / Retiro
-  if (lower.includes("desincorpor") || lower.includes("retiro") || lower.includes("retirado") || lower.includes("baja")) return { category: "desincorporacion", label: "Desincorporación" };
-  // Instalación
-  if (lower.includes("instalacion") || lower.includes("instalación")) return { category: "instalacion", label: "Instalación" };
-  if (lower.includes("mudanza") || lower.includes("traslado")) return { category: "mudanza", label: "Mudanza" };
-  if (lower.includes("factur") || lower.includes("cobro") || lower.includes("pago")) return { category: "facturacion", label: "Facturación" };
-  
-  // Si el nombre parece ser solo un nombre de persona/empresa (sin descripción de problema)
-  // Patrón: no contiene palabras clave técnicas y parece un nombre propio
-  const hasKeywords = /servicio|red|cable|equipo|lent|inter|install|factur|cobr|pago|cambio|retir|suspen|visita|aline|mudanz|traslad/i.test(name);
-  if (!hasKeywords) return { category: "consulta_general", label: "Consulta General" };
+// ============================================
+// CATEGORY DETECTION
+// Primary: "Tipo de falla" custom field (field_id: 2835796)
+// Fallback: Lead name keyword matching
+// ============================================
 
-  return { category: "otro", label: "Otro" };
+const TIPO_FALLA_FIELD_ID = 2835796;
+const SECTOR_FIELD_ID = 3005584;
+const NODO_FIELD_ID = 3005586;
+
+// Map "Tipo de falla" enum_id → category
+const TIPO_FALLA_MAP: Record<number, { category: string; label: string }> = {
+  2258880: { category: "sin_servicio", label: "Sin Servicio" },           // Ausencia del servicio
+  2258882: { category: "lentitud_intermitencia", label: "Lentitud / Intermitencia" }, // Lentitud o intermitencia
+  2258884: { category: "red_interna", label: "Red Interna" },             // Red interna
+  2368796: { category: "infraestructura", label: "Infraestructura" },     // Infraestructura
+  2368798: { category: "gestion", label: "Gestión" },                     // Gestion
+  2371316: { category: "cableado", label: "Cableado" },                   // Cableado A
+  2371318: { category: "cableado", label: "Cableado" },                   // Cableado B
+  2389698: { category: "desincorporacion", label: "Desincorporación" },   // Liberacion de Servicio
+  2390314: { category: "administrativo", label: "Administrativo" },       // Administrativo
+  2391380: { category: "sin_servicio", label: "Sin Servicio" },           // Corte FO
+  2397107: { category: "bot_reactivado", label: "Bot / Reactivado" },     // Reactivado por el bot
+  2409076: { category: "sin_servicio", label: "Sin Servicio" },           // Falla masiva
+  2409078: { category: "visita_l2c", label: "Visita L2C" },              // Orden de trabajo
+  2409170: { category: "sin_servicio", label: "Sin Servicio" },           // Falla de AC
+};
+
+// Extract custom field value from lead
+function getCustomField(lead: any, fieldId: number): { value: string; enumId: number } | null {
+  const field = lead.custom_fields_values?.find((cf: any) => cf.field_id === fieldId);
+  if (!field?.values?.[0]) return null;
+  return { value: field.values[0].value, enumId: field.values[0].enum_id };
+}
+
+// Detect category: primary from "Tipo de falla", fallback to lead name
+function detectCategory(lead: any): { category: string; label: string; tipoFalla?: string; sector?: string; nodo?: string } {
+  const name = lead.name || "";
+  
+  // Extract metadata
+  const sector = getCustomField(lead, SECTOR_FIELD_ID)?.value || undefined;
+  const nodo = getCustomField(lead, NODO_FIELD_ID)?.value || undefined;
+  
+  // PRIMARY: Use "Tipo de falla" custom field
+  const tipoFalla = getCustomField(lead, TIPO_FALLA_FIELD_ID);
+  if (tipoFalla) {
+    const mapped = TIPO_FALLA_MAP[tipoFalla.enumId];
+    if (mapped) {
+      return { ...mapped, tipoFalla: tipoFalla.value, sector, nodo };
+    }
+  }
+  
+  // FALLBACK: Keyword matching on lead name
+  const lower = name.toLowerCase();
+  if (lower.includes("sin servicio") || lower.includes("sin internet") || lower.includes("sin conexi")) return { category: "sin_servicio", label: "Sin Servicio", sector, nodo };
+  if (lower.includes("lentitud") || lower.includes("lento") || lower.includes("intermitencia") || lower.includes("intermitente")) return { category: "lentitud_intermitencia", label: "Lentitud / Intermitencia", sector, nodo };
+  if (lower.includes("visita") || lower.includes("alineacion") || lower.includes("alineación")) return { category: "visita_l2c", label: "Visita L2C", sector, nodo };
+  if (lower.includes("cableado") || lower.includes("cable ")) return { category: "cableado", label: "Cableado", sector, nodo };
+  if (lower.includes("red interna") || lower.includes("router") || lower.includes("antena") || lower.includes("equipo")) return { category: "red_interna", label: "Red Interna", sector, nodo };
+  if ((lower.includes("cambio") && lower.includes("razon")) || lower.includes("razon social")) return { category: "administrativo", label: "Administrativo", sector, nodo };
+  if (lower.includes("suspendido") || lower.includes("suspension") || lower.includes("suspensión")) return { category: "administrativo", label: "Administrativo", sector, nodo };
+  if (lower.includes("desincorpor") || lower.includes("retiro") || lower.includes("liberacion")) return { category: "desincorporacion", label: "Desincorporación", sector, nodo };
+  if (lower.includes("instalacion") || lower.includes("instalación")) return { category: "infraestructura", label: "Infraestructura", sector, nodo };
+  if (lower.includes("mudanza") || lower.includes("traslado")) return { category: "gestion", label: "Gestión", sector, nodo };
+  if (lower.includes("factur") || lower.includes("cobro") || lower.includes("pago")) return { category: "administrativo", label: "Administrativo", sector, nodo };
+  if (lower.includes("gestion") || lower.includes("gestión") || lower.includes("consulta")) return { category: "gestion", label: "Gestión", sector, nodo };
+
+  return { category: "sin_clasificar", label: "Sin Clasificar", sector, nodo };
 }
 
 // Detect priority based on status and age
@@ -153,7 +190,7 @@ export async function GET(request: NextRequest) {
     // Category breakdown
     const categoryMap = new Map<string, { label: string; count: number }>();
     for (const lead of leads) {
-      const { category, label } = detectCategory(lead.name || "");
+      const { category, label } = detectCategory(lead);
       const existing = categoryMap.get(category) || { label, count: 0 };
       existing.count++;
       categoryMap.set(category, existing);
@@ -218,7 +255,7 @@ export async function GET(request: NextRequest) {
       .slice(0, 20);
 
     const recentTickets = recentLeads.map((lead: any) => {
-      const { category, label } = detectCategory(lead.name || "");
+      const { category, label } = detectCategory(lead);
       const user = userMap.get(lead.responsible_user_id);
       return {
         id: `K-${lead.id}`,
