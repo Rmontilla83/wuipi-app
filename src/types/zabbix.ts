@@ -11,7 +11,7 @@ export interface ZabbixHost {
   status: "0" | "1"; // 0=enabled, 1=disabled
   available: "0" | "1" | "2"; // 0=unknown, 1=available, 2=unavailable
   error: string;
-  groups: ZabbixHostGroup[];
+  hostgroups: ZabbixHostGroup[];  // Zabbix 7.x: returned by selectHostGroups
   tags: ZabbixTag[];
   interfaces: ZabbixInterface[];
 }
@@ -39,7 +39,6 @@ export interface ZabbixProblem {
   severity: ZabbixSeverity;
   clock: string;
   r_eventid: string;
-  hosts: { hostid: string; name: string }[];
   acknowledged: "0" | "1";
   suppressed: "0" | "1";
   tags: ZabbixTag[];
@@ -67,12 +66,12 @@ export interface ZabbixHistory {
 
 export interface ZabbixEvent {
   eventid: string;
+  objectid: string;
   clock: string;
   name: string;
   severity: ZabbixSeverity;
   value: "0" | "1"; // 0=resolved, 1=problem
   r_clock: string;
-  hosts: { hostid: string; name: string }[];
   acknowledged: "0" | "1";
 }
 

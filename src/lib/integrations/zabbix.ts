@@ -22,7 +22,7 @@ import type {
 
 // --- Config ---
 
-const ZABBIX_URL = process.env.ZABBIX_URL;       // e.g. https://45.181.126.127:9447/zabbix/api_jsonrpc.php
+const ZABBIX_URL = process.env.ZABBIX_URL;       // e.g. http://45.181.126.127:61424/zabbix/api_jsonrpc.php
 const ZABBIX_AUTH_TOKEN = process.env.ZABBIX_AUTH_TOKEN;
 
 // Self-signed SSL: Zabbix server uses a self-signed certificate.
@@ -74,15 +74,17 @@ async function zabbixCall<T>(method: string, params: Record<string, unknown> = {
     jsonrpc: "2.0",
     method,
     params,
-    auth: ZABBIX_AUTH_TOKEN,
     id: rpcId++,
   };
 
-  // Wrap in withInsecureTLS to accept self-signed certificates
+  // Zabbix 7.0+ uses Bearer token in HTTP header (not "auth" in body)
   const response = await withInsecureTLS(() =>
     fetch(ZABBIX_URL!, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${ZABBIX_AUTH_TOKEN}`,
+      },
       body: JSON.stringify(body),
     })
   );
@@ -108,7 +110,7 @@ async function getHosts(): Promise<ZabbixHost[]> {
 
   const result = await zabbixCall<ZabbixHost[]>("host.get", {
     output: ["hostid", "host", "name", "status", "available", "error"],
-    selectGroups: ["groupid", "name"],
+    selectHostGroups: ["groupid", "name"],  // Zabbix 7.x: selectHostGroups (not selectGroups)
     selectTags: ["tag", "value"],
     selectInterfaces: ["interfaceid", "ip", "type"],
     filter: { status: "0" }, // only enabled hosts
@@ -123,9 +125,9 @@ async function getProblems(): Promise<ZabbixProblem[]> {
   const cached = getCached<ZabbixProblem[]>(cacheKey);
   if (cached) return cached;
 
+  // Zabbix 7.x: problem.get doesn't support selectHosts; we resolve host names via trigger.get
   const result = await zabbixCall<ZabbixProblem[]>("problem.get", {
     output: ["eventid", "objectid", "name", "severity", "clock", "r_eventid", "acknowledged", "suppressed"],
-    selectHosts: ["hostid", "name"],
     selectTags: ["tag", "value"],
     recent: true,
     sortfield: ["eventid"],
@@ -180,9 +182,10 @@ async function getEvents(timeFrom: number, timeTill: number): Promise<ZabbixEven
   const cached = getCached<ZabbixEvent[]>(cacheKey);
   if (cached) return cached;
 
+  // Zabbix 7.x: event.get doesn't support selectHosts; we resolve host names via hosts cache
   const result = await zabbixCall<ZabbixEvent[]>("event.get", {
-    output: ["eventid", "clock", "name", "severity", "value", "r_clock", "acknowledged"],
-    selectHosts: ["hostid", "name"],
+    output: ["eventid", "clock", "name", "severity", "value", "r_clock", "acknowledged", "objectid"],
+    selectTags: ["tag", "value"],
     time_from: timeFrom,
     time_till: timeTill,
     value: 1, // only PROBLEM events
@@ -198,40 +201,40 @@ async function getEvents(timeFrom: number, timeTill: number): Promise<ZabbixEven
 // --- Helpers ---
 
 export function classifyHost(host: ZabbixHost): EquipmentType {
-  const name = host.name.toLowerCase();
-  const groupNames = host.groups.map((g) => g.name.toLowerCase());
-  const tagValues = host.tags.map((t) => `${t.tag}:${t.value}`.toLowerCase());
+  const name = host.name;
+  const nameLower = name.toLowerCase();
+  const groupNames = (host.hostgroups || []).map((g) => g.name.toLowerCase());
 
-  // Check groups first
+  // Wuipi naming convention (prefix-based): CCR_=router, SW_/Sw_=switch, PtP_=trunk,
+  // Lbs_=sector, HBS_=sector, TG_=terragraph, Ap_=AP, St_/ST_=station, RtR_=router,
+  // Ptmp_/PMPtmp_=PtMP, OLT_=OLT, UPS_=UPS, SRV_=server
+  if (/^(CCR_|RtR_)/i.test(name)) return "router";
+  if (/^(SW_|Sw_)/i.test(name)) return "switch";
+  if (/^(Ap_|AP_)/i.test(name)) return "ap";
+  if (/^(PtP_)/i.test(name)) return "trunk";
+  if (/^(OLT_)/i.test(name)) return "olt";
+  if (/^(UPS_)/i.test(name)) return "ups";
+  if (/^(SRV_|Srv_)/i.test(name)) return "server";
+
+  // Check groups (Zabbix 7.x: hostgroups field)
   for (const g of groupNames) {
-    if (g.includes("router") || g.includes("mikrotik") || g.includes("core")) return "router";
-    if (g.includes("switch")) return "switch";
-    if (g.includes("access point") || g.includes("ap") || g.includes("wireless")) return "ap";
-    if (g.includes("server") || g.includes("servidor")) return "server";
-    if (g.includes("ups")) return "ups";
-    if (g.includes("trunk") || g.includes("enlace") || g.includes("fibra")) return "trunk";
-    if (g.includes("olt")) return "olt";
+    if (g.includes("core") || g.includes("backbone")) return "router";
+    if (g.includes("switches distribu")) return "switch";
+    if (g.includes("switches cliente")) return "switch";
+    if (g.includes("access point")) return "ap";
+    if (g.includes("ptp cliente")) return "trunk";
+    if (g.includes("terragraph")) return "ap";
+    if (g.includes("hbs") || g.includes("lbs")) return "ap";
   }
 
-  // Check tags
-  for (const t of tagValues) {
-    if (t.includes("router")) return "router";
-    if (t.includes("switch")) return "switch";
-    if (t.includes("ap") || t.includes("wireless")) return "ap";
-    if (t.includes("server")) return "server";
-    if (t.includes("ups")) return "ups";
-    if (t.includes("trunk")) return "trunk";
-    if (t.includes("olt")) return "olt";
-  }
-
-  // Check host name patterns
-  if (/\b(router|rb|ccr|mikrotik|core)\b/i.test(name)) return "router";
-  if (/\b(switch|sw)\b/i.test(name)) return "switch";
-  if (/\b(ap|access.?point|ubnt|unifi|wireless)\b/i.test(name)) return "ap";
-  if (/\b(srv|server|servidor)\b/i.test(name)) return "server";
-  if (/\b(ups|apc|battery)\b/i.test(name)) return "ups";
-  if (/\b(trunk|enlace|fibra|link)\b/i.test(name)) return "trunk";
-  if (/\b(olt)\b/i.test(name)) return "olt";
+  // Fallback: generic name patterns
+  if (/\b(router|ccr|mikrotik|core|rb\d)\b/i.test(nameLower)) return "router";
+  if (/\b(switch|sw)\b/i.test(nameLower)) return "switch";
+  if (/\b(ap|access.?point|ubnt|unifi|wireless|lbs|hbs|ptmp|pmp|terragraph|tg)\b/i.test(nameLower)) return "ap";
+  if (/\b(srv|server|servidor)\b/i.test(nameLower)) return "server";
+  if (/\b(ups|apc|battery)\b/i.test(nameLower)) return "ups";
+  if (/\b(trunk|enlace|fibra|ptp|link)\b/i.test(nameLower)) return "trunk";
+  if (/\b(olt)\b/i.test(nameLower)) return "olt";
 
   return "other";
 }
@@ -331,7 +334,7 @@ export async function getInfraHosts(): Promise<InfraHost[]> {
         type: classifyHost(host),
         status: host.available === "1" ? "online" : host.available === "2" ? "offline" : "unknown",
         ip: host.interfaces[0]?.ip || "",
-        groups: host.groups.map((g) => g.name),
+        groups: (host.hostgroups || []).map((g) => g.name),
         latency: latencyItem ? parseFloat(latencyItem.lastvalue) * 1000 : null, // sec→ms
         packetLoss: lossItem ? parseFloat(lossItem.lastvalue) : null,
         bandwidthIn: bwInItem ? parseFloat(bwInItem.lastvalue) / 1_000_000 : null, // bps→Mbps
@@ -351,19 +354,50 @@ export async function getInfraProblems(): Promise<InfraProblem[]> {
   if (!isConfigured()) return mockProblems();
 
   try {
-    const problems = await getProblems();
+    const [problems, hosts] = await Promise.all([getProblems(), getHosts()]);
     const now = Math.floor(Date.now() / 1000);
 
-    return problems.map((p): InfraProblem => ({
-      id: p.eventid,
-      name: p.name,
-      severity: mapSeverity(p.severity),
-      hostId: p.hosts?.[0]?.hostid || "",
-      hostName: p.hosts?.[0]?.name || "Desconocido",
-      startTime: new Date(parseInt(p.clock) * 1000).toISOString(),
-      duration: now - parseInt(p.clock),
-      acknowledged: p.acknowledged === "1",
-    }));
+    // Build hostid→name map from cached hosts
+    const hostMap = new Map(hosts.map((h) => [h.hostid, h.name]));
+
+    // Resolve host names for problems via their trigger objectids
+    // Fetch triggers for all problem objectids to get host associations
+    const triggerIds = [...new Set(problems.map((p) => p.objectid).filter(Boolean))];
+    let triggerHostMap = new Map<string, { hostid: string; name: string }>();
+
+    if (triggerIds.length > 0) {
+      try {
+        const triggers = await zabbixCall<Array<{ triggerid: string; hosts: { hostid: string; name: string }[] }>>(
+          "trigger.get",
+          {
+            output: ["triggerid"],
+            triggerids: triggerIds,
+            selectHosts: ["hostid", "name"],
+          }
+        );
+        for (const t of triggers) {
+          if (t.hosts?.[0]) {
+            triggerHostMap.set(t.triggerid, t.hosts[0]);
+          }
+        }
+      } catch {
+        // If trigger.get also fails with selectHosts, fall back to empty map
+      }
+    }
+
+    return problems.map((p): InfraProblem => {
+      const triggerHost = triggerHostMap.get(p.objectid);
+      return {
+        id: p.eventid,
+        name: p.name,
+        severity: mapSeverity(p.severity),
+        hostId: triggerHost?.hostid || "",
+        hostName: triggerHost?.name || "Desconocido",
+        startTime: new Date(parseInt(p.clock) * 1000).toISOString(),
+        duration: now - parseInt(p.clock),
+        acknowledged: p.acknowledged === "1",
+      };
+    });
   } catch (error) {
     console.error("Zabbix getInfraProblems error:", error);
     return mockProblems();
@@ -531,13 +565,38 @@ export async function getOutageHistory(period = "24h"): Promise<OutageEvent[]> {
     const from = now - periodToSeconds(period);
     const events = await getEvents(from, now);
 
+    // Resolve host names: events have objectid (triggerid), use trigger.get to get hosts
+    const triggerIds = [...new Set(events.map((e) => e.objectid).filter(Boolean))];
+    const triggerHostMap = new Map<string, string>();
+
+    if (triggerIds.length > 0) {
+      try {
+        const triggers = await zabbixCall<Array<{ triggerid: string; hosts: { hostid: string; name: string }[] }>>(
+          "trigger.get",
+          {
+            output: ["triggerid"],
+            triggerids: triggerIds,
+            selectHosts: ["hostid", "name"],
+          }
+        );
+        for (const t of triggers) {
+          if (t.hosts?.[0]) {
+            triggerHostMap.set(t.triggerid, t.hosts[0].name);
+          }
+        }
+      } catch {
+        // Fallback: no host name resolution
+      }
+    }
+
     return events.map((e): OutageEvent => {
       const startSec = parseInt(e.clock);
       const endSec = e.r_clock && e.r_clock !== "0" ? parseInt(e.r_clock) : null;
+      const objectid = e.objectid || "";
 
       return {
         id: e.eventid,
-        hostName: e.hosts?.[0]?.name || "Desconocido",
+        hostName: triggerHostMap.get(objectid) || "Desconocido",
         eventName: e.name,
         severity: mapSeverity(e.severity),
         startTime: new Date(startSec * 1000).toISOString(),
