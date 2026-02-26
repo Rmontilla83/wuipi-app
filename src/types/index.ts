@@ -55,4 +55,5 @@ export { PAYMENT_METHOD_LABELS, INVOICE_STATUS_LABELS } from "./finance";
 export type {
   InfraHost, InfraProblem, InfraOverview, HostLatency,
   InterfaceBandwidth, APClient, OutageEvent, EquipmentType, SeverityLevel,
+  DetailedEquipmentType, InfraSiteSummary,
 } from "./zabbix";

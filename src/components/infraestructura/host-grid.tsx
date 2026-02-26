@@ -120,24 +120,14 @@ export function HostGrid({ hosts }: Props) {
                     </p>
                   </div>
                 )}
-                {host.bandwidthIn !== null && (
-                  <div>
-                    <span className="text-gray-500">BW In</span>
-                    <p className="font-bold text-cyan-400">{host.bandwidthIn.toFixed(0)} Mbps</p>
-                  </div>
-                )}
-                {host.bandwidthOut !== null && (
-                  <div>
-                    <span className="text-gray-500">BW Out</span>
-                    <p className="font-bold text-violet-400">{host.bandwidthOut.toFixed(0)} Mbps</p>
-                  </div>
-                )}
-                {host.connectedClients !== null && (
-                  <div>
-                    <span className="text-gray-500">Clientes</span>
-                    <p className="font-bold text-white">{host.connectedClients}</p>
-                  </div>
-                )}
+                <div>
+                  <span className="text-gray-500">Sitio</span>
+                  <p className="font-bold text-white">{host.site || "—"}</p>
+                </div>
+                <div>
+                  <span className="text-gray-500">Tipo</span>
+                  <p className="font-bold text-gray-300">{host.detailedTypeLabel || "—"}</p>
+                </div>
               </div>
 
               {host.lastStateChange && (

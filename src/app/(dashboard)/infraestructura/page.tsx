@@ -7,26 +7,24 @@ import { NetworkOverviewPanel } from "@/components/infraestructura/network-overv
 import { HostGrid } from "@/components/infraestructura/host-grid";
 import { ProblemsList } from "@/components/infraestructura/problems-list";
 import { LatencyCharts } from "@/components/infraestructura/latency-charts";
-import { BandwidthCharts } from "@/components/infraestructura/bandwidth-charts";
 import { APClientsList } from "@/components/infraestructura/ap-clients-list";
 import { OutageTimeline } from "@/components/infraestructura/outage-timeline";
-import type { InfraOverview, InfraHost, InfraProblem, HostLatency, InterfaceBandwidth, APClient, OutageEvent } from "@/types/zabbix";
+import type { InfraOverview, InfraHost, InfraProblem, HostLatency, APClient, OutageEvent } from "@/types/zabbix";
 import {
   Radio, RefreshCw, LayoutGrid, Server, AlertTriangle,
-  Clock, ArrowDownUp, Wifi, History,
+  Clock, Wifi, History,
 } from "lucide-react";
 
 // ============================================
 // TYPES
 // ============================================
-type Tab = "resumen" | "equipos" | "problemas" | "latencia" | "ancho-de-banda" | "clientes-ap" | "historial";
+type Tab = "resumen" | "equipos" | "problemas" | "latencia" | "clientes-ap" | "historial";
 
 interface InfraData {
   overview: InfraOverview | null;
   hosts: InfraHost[];
   problems: InfraProblem[];
   latencies: HostLatency[];
-  bandwidth: InterfaceBandwidth[];
   apClients: APClient[];
   outages: OutageEvent[];
 }
@@ -36,7 +34,6 @@ const TABS: { key: Tab; label: string; icon: typeof LayoutGrid }[] = [
   { key: "equipos", label: "Equipos", icon: Server },
   { key: "problemas", label: "Problemas", icon: AlertTriangle },
   { key: "latencia", label: "Latencia", icon: Clock },
-  { key: "ancho-de-banda", label: "Ancho de Banda", icon: ArrowDownUp },
   { key: "clientes-ap", label: "Clientes AP", icon: Wifi },
   { key: "historial", label: "Historial", icon: History },
 ];
@@ -47,7 +44,7 @@ const TABS: { key: Tab; label: string; icon: typeof LayoutGrid }[] = [
 export default function InfraestructuraPage() {
   const [tab, setTab] = useState<Tab>("resumen");
   const [data, setData] = useState<InfraData>({
-    overview: null, hosts: [], problems: [], latencies: [], bandwidth: [], apClients: [], outages: [],
+    overview: null, hosts: [], problems: [], latencies: [], apClients: [], outages: [],
   });
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -55,17 +52,16 @@ export default function InfraestructuraPage() {
 
   const fetchAll = useCallback(async () => {
     try {
-      const [overview, hosts, problems, latencies, bandwidth, apClients, outages] = await Promise.all([
+      const [overview, hosts, problems, latencies, apClients, outages] = await Promise.all([
         fetch("/api/infraestructura").then((r) => r.json()),
         fetch("/api/infraestructura/hosts").then((r) => r.json()),
         fetch("/api/infraestructura/problems").then((r) => r.json()),
         fetch("/api/infraestructura/latency?period=24h").then((r) => r.json()),
-        fetch("/api/infraestructura/bandwidth?period=24h").then((r) => r.json()),
         fetch("/api/infraestructura/clients").then((r) => r.json()),
         fetch(`/api/infraestructura/history?period=${outagePeriod}`).then((r) => r.json()),
       ]);
 
-      setData({ overview, hosts, problems, latencies, bandwidth, apClients, outages });
+      setData({ overview, hosts, problems, latencies, apClients, outages });
     } catch (err) {
       console.error("Error fetching infra data:", err);
     } finally {
@@ -247,7 +243,6 @@ export default function InfraestructuraPage() {
             {tab === "equipos" && <HostGrid hosts={data.hosts} />}
             {tab === "problemas" && <ProblemsList problems={data.problems} />}
             {tab === "latencia" && <LatencyCharts latencies={data.latencies} />}
-            {tab === "ancho-de-banda" && <BandwidthCharts bandwidth={data.bandwidth} />}
             {tab === "clientes-ap" && <APClientsList clients={data.apClients} />}
             {tab === "historial" && (
               <OutageTimeline events={data.outages} period={outagePeriod} onPeriodChange={setOutagePeriod} />

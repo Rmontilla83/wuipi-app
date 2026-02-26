@@ -3,7 +3,12 @@
 import { useState, useEffect, useCallback } from "react";
 import { TopBar } from "@/components/layout/topbar";
 import { Card } from "@/components/ui/card";
+import { KPICard } from "@/components/ui/kpi-card";
 import { ScoreRing, StatusBadge, LoadBar } from "@/components/dashboard";
+import {
+  ZabbixBanner, VistaGeneral, MapaSitios, EquiposPorTipo,
+  ProblemasActivos, LatenciaRed, EquiposCaidos,
+} from "@/components/comando/infra";
 import type { InfraOverview, InfraProblem, InfraHost } from "@/types/zabbix";
 import {
   Target, DollarSign, Headphones, Radio, TrendingUp,
@@ -271,7 +276,7 @@ function SoporteTab() {
 }
 
 // ============================================
-// TAB: INFRAESTRUCTURA (Zabbix-powered)
+// TAB: INFRAESTRUCTURA (Zabbix-powered, 6 sections)
 // ============================================
 function InfraestructuraTab({ overview, problems, hosts, loading }: {
   overview: InfraOverview | null;
@@ -279,132 +284,36 @@ function InfraestructuraTab({ overview, problems, hosts, loading }: {
   hosts: InfraHost[];
   loading: boolean;
 }) {
+  const [selectedSite, setSelectedSite] = useState<string | null>(null);
+
   if (loading) return <LoadingPlaceholder />;
 
-  const hostsDown = hosts.filter((h) => h.status === "offline");
-  const highSevProblems = problems.filter((p) => p.severity === "disaster" || p.severity === "high");
-
-  const severityStyles: Record<string, { bg: string; border: string; dot: string }> = {
-    disaster: { bg: "bg-red-500/10", border: "border-red-500/30", dot: "bg-red-500" },
-    high: { bg: "bg-red-500/10", border: "border-red-500/30", dot: "bg-red-400" },
-    average: { bg: "bg-amber-500/10", border: "border-amber-500/30", dot: "bg-amber-400" },
-    warning: { bg: "bg-yellow-500/10", border: "border-yellow-500/30", dot: "bg-yellow-400" },
-    information: { bg: "bg-blue-500/10", border: "border-blue-500/30", dot: "bg-blue-400" },
-    not_classified: { bg: "bg-gray-500/10", border: "border-gray-500/30", dot: "bg-gray-400" },
-  };
-
-  function formatDuration(seconds: number): string {
-    if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
-    if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`;
-    return `${Math.floor(seconds / 86400)}d`;
-  }
-
   return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-5 gap-4">
-        <KPICard label="Hosts totales" value={overview?.totalHosts?.toString() || "0"} icon={Server} color="cyan" />
-        <KPICard label="En línea" value={overview?.hostsUp?.toString() || "0"} icon={Wifi} color="emerald" />
-        <KPICard label="Caídos" value={overview?.hostsDown?.toString() || "0"} icon={WifiOff} color={overview && overview.hostsDown > 0 ? "red" : "emerald"} />
-        <KPICard label="Uptime" value={overview ? `${overview.uptimePercent}%` : "—"} icon={Activity} color="emerald" />
-        <KPICard label="Problemas" value={overview?.totalProblems?.toString() || "0"} icon={AlertTriangle} color={overview && overview.totalProblems > 0 ? "amber" : "emerald"} />
-      </div>
+    <div className="space-y-6">
+      {/* Zabbix disconnected banner */}
+      {overview?.zabbixConnected === false && <ZabbixBanner />}
 
-      <div className="grid grid-cols-2 gap-4">
-        {/* Problems list */}
-        <Card>
-          <div className="flex justify-between items-center mb-4">
-            <h3 className="text-base font-bold text-white flex items-center gap-2">
-              <AlertTriangle size={16} /> Problemas Activos
-            </h3>
-            {highSevProblems.length > 0 && (
-              <span className="px-2.5 py-1 bg-red-500/10 text-red-400 rounded-full text-xs font-bold">
-                {highSevProblems.length} críticos
-              </span>
-            )}
-          </div>
-          <div className="space-y-2 max-h-[350px] overflow-y-auto">
-            {problems.slice(0, 10).map((problem) => {
-              const style = severityStyles[problem.severity] || severityStyles.not_classified;
-              return (
-                <div key={problem.id} className={`p-3 ${style.bg} border ${style.border} rounded-xl`}>
-                  <div className="flex items-start gap-2">
-                    <span className={`w-2 h-2 rounded-full ${style.dot} mt-1.5 shrink-0 shadow-[0_0_6px] shadow-current`} />
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm text-white truncate">{problem.name}</p>
-                      <div className="flex gap-3 mt-1 text-xs text-gray-500">
-                        <span>{problem.hostName}</span>
-                        <span>{formatDuration(problem.duration)}</span>
-                        {problem.acknowledged && <span className="text-emerald-400">ACK</span>}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-            {problems.length === 0 && (
-              <p className="text-sm text-emerald-400 text-center py-4">Sin problemas activos</p>
-            )}
-          </div>
-        </Card>
+      {/* Section 1: Vista General */}
+      <VistaGeneral overview={overview} />
 
-        {/* Hosts status */}
-        <Card>
-          <div className="flex justify-between items-center mb-4">
-            <h3 className="text-base font-bold text-white flex items-center gap-2">
-              <Server size={16} /> Estado de Red
-            </h3>
-            <span className="text-xs text-gray-500">Zabbix Live</span>
-          </div>
+      {/* Section 2: Mapa de Sitios */}
+      <MapaSitios
+        sites={overview?.sites || []}
+        selectedSite={selectedSite}
+        onSelectSite={setSelectedSite}
+      />
 
-          {/* Hosts down */}
-          {hostsDown.length > 0 && (
-            <div className="mb-4">
-              <p className="text-xs text-red-400 font-semibold mb-2">Hosts caídos ({hostsDown.length})</p>
-              <div className="space-y-2">
-                {hostsDown.slice(0, 6).map((host) => (
-                  <div key={host.id} className="p-2.5 bg-red-500/10 border border-red-500/20 rounded-lg flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse shrink-0" />
-                    <span className="text-sm text-red-300 font-medium truncate">{host.name}</span>
-                    <span className="text-xs text-gray-600 ml-auto shrink-0">{host.ip}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+      {/* Section 3: Equipos por Tipo */}
+      <EquiposPorTipo hosts={hosts} selectedSite={selectedSite} />
 
-          {/* Summary stats */}
-          <div className="grid grid-cols-3 gap-3 mb-4">
-            <div className="p-3 bg-wuipi-bg rounded-xl border border-wuipi-border text-center">
-              <p className="text-lg font-bold text-emerald-400">{overview?.hostsUp || 0}</p>
-              <p className="text-[10px] text-gray-500">Online</p>
-            </div>
-            <div className="p-3 bg-wuipi-bg rounded-xl border border-wuipi-border text-center">
-              <p className="text-lg font-bold text-red-400">{overview?.hostsDown || 0}</p>
-              <p className="text-[10px] text-gray-500">Offline</p>
-            </div>
-            <div className="p-3 bg-wuipi-bg rounded-xl border border-wuipi-border text-center">
-              <p className="text-lg font-bold text-gray-400">{overview?.hostsUnknown || 0}</p>
-              <p className="text-[10px] text-gray-500">Desconocido</p>
-            </div>
-          </div>
+      {/* Section 4: Problemas Activos */}
+      <ProblemasActivos problems={problems} />
 
-          {/* Health score */}
-          {overview && (
-            <div className="flex items-center gap-4 p-3 bg-wuipi-bg rounded-xl border border-wuipi-border">
-              <ScoreRing score={overview.healthScore} size={64} />
-              <div>
-                <p className="text-sm font-bold text-white">Health Score</p>
-                <p className="text-xs text-gray-500">
-                  {overview.problemsBySeverity.disaster > 0 && <span className="text-red-400">{overview.problemsBySeverity.disaster} disaster </span>}
-                  {overview.problemsBySeverity.high > 0 && <span className="text-red-300">{overview.problemsBySeverity.high} high </span>}
-                  {overview.problemsBySeverity.average > 0 && <span className="text-amber-400">{overview.problemsBySeverity.average} avg </span>}
-                  {overview.problemsBySeverity.warning > 0 && <span className="text-yellow-400">{overview.problemsBySeverity.warning} warn</span>}
-                </p>
-              </div>
-            </div>
-          )}
-        </Card>
-      </div>
+      {/* Section 5: Latencia de Red */}
+      <LatenciaRed hosts={hosts} />
+
+      {/* Section 6: Equipos Caidos */}
+      <EquiposCaidos hosts={hosts} />
     </div>
   );
 }
@@ -502,33 +411,6 @@ function VentasTab() {
 // ============================================
 // SHARED COMPONENTS
 // ============================================
-function KPICard({ label, value, icon: Icon, color, sub }: {
-  label: string; value: string; icon: any; color: string; sub?: string;
-}) {
-  const colors: Record<string, string> = {
-    cyan: "text-cyan-400", emerald: "text-emerald-400", amber: "text-amber-400",
-    red: "text-red-400", violet: "text-violet-400", blue: "text-blue-400", white: "text-white",
-  };
-  const iconBg: Record<string, string> = {
-    cyan: "bg-cyan-500/10", emerald: "bg-emerald-500/10", amber: "bg-amber-500/10",
-    red: "bg-red-500/10", violet: "bg-violet-500/10", blue: "bg-blue-500/10", white: "bg-gray-500/10",
-  };
-  return (
-    <Card className="!p-4">
-      <div className="flex items-center gap-3">
-        <div className={`w-10 h-10 rounded-lg ${iconBg[color]} flex items-center justify-center`}>
-          <Icon size={18} className={colors[color]} />
-        </div>
-        <div>
-          <p className="text-xs text-gray-500">{label}</p>
-          <p className={`text-xl font-bold ${colors[color]}`}>{value}</p>
-          {sub && <p className="text-xs text-gray-600 mt-0.5">{sub}</p>}
-        </div>
-      </div>
-    </Card>
-  );
-}
-
 function MiniStat({ label, value, color }: { label: string; value: string; color: string }) {
   return (
     <div className="p-3 bg-wuipi-bg rounded-xl border border-wuipi-border">

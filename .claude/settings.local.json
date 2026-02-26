@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git:*)",
+      "Bash(xargs grep:*)",
+      "Bash(ls:*)",
+      "Bash(find C:\\\\Users\\\\rafae\\\\Downloads\\\\wuipi-app\\\\src\\\\app\\\\\\(dashboard\\)\\\\soporte:*)",
+      "Bash(mkdir:*)",
+      "Bash(npm run:*)",
+      "Bash(npx next:*)",
+      "Bash(npm install:*)",
+      "Bash(./node_modules/.bin/next build:*)",
+      "Bash(find C:\\\\Users\\\\rafae\\\\Downloads\\\\wuipi-app\\\\src\\\\app\\\\\\(dashboard\\):*)",
+      "Bash(npx tsc:*)",
+      "Bash(node:*)",
+      "Bash(npx tsx:*)",
+      "Bash(/c/Users/rafae/Downloads/wuipi-app/.env.local:*)"
+    ]
+  }
+}

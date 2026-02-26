@@ -1,4 +1,4 @@
-import { apiSuccess, apiServerError } from "@/lib/api-helpers";
+import { apiSuccess } from "@/lib/api-helpers";
 import { getInfraProblems } from "@/lib/integrations/zabbix";
 import type { NextRequest } from "next/server";
 import type { SeverityLevel } from "@/types/zabbix";
@@ -18,6 +18,7 @@ export async function GET(request: NextRequest) {
 
     return apiSuccess(problems);
   } catch (error) {
-    return apiServerError(error);
+    console.error("Zabbix problems error:", error);
+    return apiSuccess([]);
   }
 }

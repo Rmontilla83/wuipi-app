@@ -88,19 +88,36 @@ export interface ZabbixTrigger {
 
 export type EquipmentType = "router" | "switch" | "ap" | "server" | "ups" | "trunk" | "olt" | "other";
 
+export type DetailedEquipmentType =
+  | "router_core" | "router" | "switch"
+  | "enlace_siklu" | "enlace_mikrotik" | "enlace_ubiquiti" | "enlace_mimosa" | "enlace_cambium" | "enlace_af60"
+  | "sector_lbs" | "sector_hbs" | "terragraph" | "ptmp" | "station" | "access_point" | "hsu" | "other";
+
 export type SeverityLevel = "not_classified" | "information" | "warning" | "average" | "high" | "disaster";
+
+export interface InfraSiteSummary {
+  code: string;
+  totalHosts: number;
+  hostsUp: number;
+  hostsDown: number;
+  hostsWarning: number;
+}
 
 export interface InfraHost {
   id: string;
   name: string;
   type: EquipmentType;
+  detailedType: DetailedEquipmentType;
+  detailedTypeLabel: string;
   status: "online" | "offline" | "unknown";
   ip: string;
   groups: string[];
+  site: string;
   latency: number | null;       // ms
   packetLoss: number | null;    // %
   bandwidthIn: number | null;   // Mbps
   bandwidthOut: number | null;  // Mbps
+  uptime: number | null;        // seconds
   connectedClients: number | null;
   lastStateChange: string | null;
   error: string;
@@ -112,6 +129,7 @@ export interface InfraProblem {
   severity: SeverityLevel;
   hostId: string;
   hostName: string;
+  site: string;
   startTime: string;
   duration: number; // seconds
   acknowledged: boolean;
@@ -126,6 +144,8 @@ export interface InfraOverview {
   problemsBySeverity: Record<SeverityLevel, number>;
   healthScore: number;
   totalProblems: number;
+  sites: InfraSiteSummary[];
+  zabbixConnected: boolean;
   updatedAt: string;
 }
 
