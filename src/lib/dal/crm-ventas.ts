@@ -322,6 +322,56 @@ export async function updateProduct(id: string, updates: any) {
 }
 
 // ============================================
+// LEAD STATS (for Centro de Comando)
+// ============================================
+
+export async function getLeadStats() {
+  const { data: leads, error } = await supabase()
+    .from("crm_leads")
+    .select("id, stage, value, created_at, won_at, lost_at")
+    .eq("is_deleted", false);
+
+  if (error) throw new Error(error.message);
+  const all = leads || [];
+
+  const now = new Date();
+  const weekAgo = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7);
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+
+  const activeStages = ["incoming", "contacto_inicial", "info_enviada", "en_instalacion", "prueba_actualizacion", "retirado_reactivacion"];
+  const active = all.filter(l => activeStages.includes(l.stage));
+  const won = all.filter(l => l.stage === "ganado");
+  const lost = all.filter(l => l.stage === "no_concretado");
+  const createdThisWeek = all.filter(l => new Date(l.created_at) >= weekAgo);
+  const createdThisMonth = all.filter(l => new Date(l.created_at) >= monthStart);
+  const wonThisMonth = won.filter(l => l.won_at && new Date(l.won_at) >= monthStart);
+
+  const pipelineValue = active.reduce((s, l) => s + Number(l.value || 0), 0);
+  const conversionRate = all.length > 0 ? Math.round((won.length / all.length) * 100) : 0;
+
+  // By stage breakdown
+  const byStage: Record<string, { count: number; value: number }> = {};
+  for (const lead of all) {
+    if (!byStage[lead.stage]) byStage[lead.stage] = { count: 0, value: 0 };
+    byStage[lead.stage].count += 1;
+    byStage[lead.stage].value += Number(lead.value || 0);
+  }
+
+  return {
+    total: all.length,
+    active: active.length,
+    won: won.length,
+    lost: lost.length,
+    pipeline_value: pipelineValue,
+    conversion_rate: conversionRate,
+    created_this_week: createdThisWeek.length,
+    created_this_month: createdThisMonth.length,
+    won_this_month: wonThisMonth.length,
+    by_stage: byStage,
+  };
+}
+
+// ============================================
 // QUOTAS
 // ============================================
 

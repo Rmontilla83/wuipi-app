@@ -8,7 +8,7 @@ import {
   Users, Search, Plus, X, Save,
   Wifi, WifiOff, AlertTriangle, Phone, Mail,
   Clock, Edit2, Trash2, Power,
-  MapPin, FileText, CreditCard,
+  MapPin, FileText, CreditCard, Server,
 } from "lucide-react";
 
 // ============================================
@@ -37,6 +37,20 @@ interface Client {
   billing_day: number;
   notes: string;
   created_at: string;
+  // New service fields
+  plan_name: string | null;
+  plan_speed_down: number | null;
+  plan_speed_up: number | null;
+  monthly_rate: number | null;
+  service_ip: string | null;
+  service_mac: string | null;
+  service_node_code: string | null;
+  service_technology: string | null;
+  service_vlan: string | null;
+  service_router: string | null;
+  service_queue_name: string | null;
+  odoo_partner_id: number | null;
+  bequant_subscriber_id: string | null;
   plans?: { id: string; code: string; name: string; price_usd: number } | null;
 }
 
@@ -49,7 +63,14 @@ interface Plan {
   is_active: boolean;
 }
 
-const EMPTY_FORM = {
+interface NetworkNode {
+  id: string;
+  code: string;
+  name: string;
+  location: string | null;
+}
+
+const EMPTY_FORM: Record<string, any> = {
   legal_name: "",
   trade_name: "",
   document_type: "V",
@@ -69,6 +90,14 @@ const EMPTY_FORM = {
   billing_currency: "USD",
   billing_day: 1,
   notes: "",
+  // Service fields
+  service_ip: "",
+  service_mac: "",
+  service_node_code: "",
+  service_technology: "",
+  service_vlan: "",
+  service_router: "",
+  service_queue_name: "",
 };
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string; icon: any }> = {
@@ -86,6 +115,14 @@ const DOC_TYPES = [
   { value: "P", label: "P - Pasaporte" },
 ];
 
+const TECH_OPTIONS = [
+  { value: "", label: "Sin especificar" },
+  { value: "fiber", label: "Fibra óptica" },
+  { value: "wireless", label: "Inalámbrico" },
+  { value: "copper", label: "Cobre" },
+  { value: "mixed", label: "Mixto" },
+];
+
 // ============================================
 // MAIN PAGE
 // ============================================
@@ -93,8 +130,10 @@ export default function ClientesPage() {
   const router = useRouter();
   const [clients, setClients] = useState<Client[]>([]);
   const [plans, setPlans] = useState<Plan[]>([]);
+  const [nodes, setNodes] = useState<NetworkNode[]>([]);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [nodoFilter, setNodoFilter] = useState<string>("all");
   const [loading, setLoading] = useState(true);
   const [total, setTotal] = useState(0);
   const [stats, setStats] = useState({ total: 0, active: 0, suspended: 0, pending: 0 });
@@ -119,11 +158,15 @@ export default function ClientesPage() {
     return () => { if (searchTimeout.current) clearTimeout(searchTimeout.current); };
   }, [search]);
 
-  // Fetch plans on mount
+  // Fetch plans + nodes on mount
   useEffect(() => {
     fetch("/api/facturacion/catalog?type=plans")
       .then(r => r.json())
       .then(d => setPlans(d.plans || []))
+      .catch(() => {});
+    fetch("/api/facturacion/network-nodes")
+      .then(r => r.json())
+      .then(d => setNodes(Array.isArray(d) ? d : []))
       .catch(() => {});
   }, []);
 
@@ -134,6 +177,7 @@ export default function ClientesPage() {
       const params = new URLSearchParams();
       if (debouncedSearch) params.set("search", debouncedSearch);
       if (statusFilter !== "all") params.set("status", statusFilter);
+      if (nodoFilter !== "all") params.set("nodo", nodoFilter);
       const res = await fetch(`/api/facturacion/clients?${params}`);
       if (res.ok) {
         const json = await res.json();
@@ -152,7 +196,7 @@ export default function ClientesPage() {
     } finally {
       setLoading(false);
     }
-  }, [debouncedSearch, statusFilter]);
+  }, [debouncedSearch, statusFilter, nodoFilter]);
 
   useEffect(() => { fetchClients(); }, [fetchClients]);
 
@@ -187,6 +231,13 @@ export default function ClientesPage() {
       billing_currency: client.billing_currency || "USD",
       billing_day: client.billing_day || 1,
       notes: client.notes || "",
+      service_ip: client.service_ip || "",
+      service_mac: client.service_mac || "",
+      service_node_code: client.service_node_code || "",
+      service_technology: client.service_technology || "",
+      service_vlan: client.service_vlan || "",
+      service_router: client.service_router || "",
+      service_queue_name: client.service_queue_name || "",
     });
     setError("");
     setShowModal(true);
@@ -204,6 +255,13 @@ export default function ClientesPage() {
         ...form,
         plan_id: form.plan_id || null,
         installation_date: form.installation_date || null,
+        service_ip: form.service_ip || null,
+        service_mac: form.service_mac || null,
+        service_node_code: form.service_node_code || null,
+        service_technology: form.service_technology || null,
+        service_vlan: form.service_vlan || null,
+        service_router: form.service_router || null,
+        service_queue_name: form.service_queue_name || null,
       };
 
       const url = editingClient
@@ -289,7 +347,7 @@ export default function ClientesPage() {
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Buscar por nombre, cédula, código, email..."
+              placeholder="Buscar por nombre, cédula, código, IP..."
               className="w-full bg-wuipi-card border border-wuipi-border rounded-lg pl-10 pr-4 py-2.5 text-sm text-white placeholder:text-gray-600 focus:outline-none focus:border-wuipi-accent/50"
             />
           </div>
@@ -304,6 +362,18 @@ export default function ClientesPage() {
             <option value="pending">Pendientes</option>
             <option value="cancelled">Cancelados</option>
           </select>
+          {nodes.length > 0 && (
+            <select
+              value={nodoFilter}
+              onChange={(e) => setNodoFilter(e.target.value)}
+              className="bg-wuipi-card border border-wuipi-border rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none"
+            >
+              <option value="all">Todos los nodos</option>
+              {nodes.map(n => (
+                <option key={n.id} value={n.code}>{n.name}</option>
+              ))}
+            </select>
+          )}
           <button
             onClick={openCreate}
             className="flex items-center gap-2 bg-wuipi-accent text-black px-4 py-2.5 rounded-lg text-sm font-semibold hover:bg-wuipi-accent/90 transition-colors shrink-0"
@@ -320,14 +390,14 @@ export default function ClientesPage() {
             <div className="p-12 text-center">
               <Users size={48} className="mx-auto mb-4 text-gray-600" />
               <h3 className="text-lg font-semibold text-white mb-2">
-                {debouncedSearch || statusFilter !== "all" ? "Sin resultados" : "Sin clientes aún"}
+                {debouncedSearch || statusFilter !== "all" || nodoFilter !== "all" ? "Sin resultados" : "Sin clientes aún"}
               </h3>
               <p className="text-gray-500 text-sm mb-4">
-                {debouncedSearch || statusFilter !== "all"
+                {debouncedSearch || statusFilter !== "all" || nodoFilter !== "all"
                   ? "Intenta con otros filtros de búsqueda."
                   : "Agrega tu primer cliente para comenzar."}
               </p>
-              {!debouncedSearch && statusFilter === "all" && (
+              {!debouncedSearch && statusFilter === "all" && nodoFilter === "all" && (
                 <button onClick={openCreate} className="bg-wuipi-accent text-black px-4 py-2 rounded-lg text-sm font-semibold">
                   <Plus size={16} className="inline mr-1" /> Crear primer cliente
                 </button>
@@ -340,7 +410,8 @@ export default function ClientesPage() {
                   <tr className="border-b border-wuipi-border text-gray-500 text-xs uppercase">
                     <th className="text-left p-3 pl-4">Cliente</th>
                     <th className="text-left p-3">Plan</th>
-                    <th className="text-left p-3">Sector / Nodo</th>
+                    <th className="text-left p-3">Nodo</th>
+                    <th className="text-left p-3">IP</th>
                     <th className="text-left p-3">Contacto</th>
                     <th className="text-center p-3">Estado</th>
                     <th className="text-right p-3 pr-4">Acciones</th>
@@ -350,6 +421,9 @@ export default function ClientesPage() {
                   {clients.map(client => {
                     const status = STATUS_CONFIG[client.service_status] || STATUS_CONFIG.pending;
                     const StatusIcon = status.icon;
+                    const nodeName = client.service_node_code
+                      ? (nodes.find(n => n.code === client.service_node_code)?.name || client.service_node_code)
+                      : null;
                     return (
                       <tr key={client.id} onClick={() => router.push(`/clientes/${client.id}`)} className="border-b border-wuipi-border/50 hover:bg-wuipi-card-hover transition-colors cursor-pointer">
                         <td className="p-3 pl-4">
@@ -361,20 +435,32 @@ export default function ClientesPage() {
                           </div>
                         </td>
                         <td className="p-3">
-                          {client.plans ? (
+                          {client.plan_name || client.plans ? (
                             <div>
-                              <span className="text-gray-300 text-xs">{client.plans.name}</span>
-                              <span className="text-gray-600 text-xs ml-1">${client.plans.price_usd}</span>
+                              <span className="text-gray-300 text-xs">{client.plan_name || client.plans?.name}</span>
+                              {(client.monthly_rate || client.plans?.price_usd) && (
+                                <span className="text-gray-600 text-xs ml-1">${client.monthly_rate || client.plans?.price_usd}</span>
+                              )}
                             </div>
                           ) : (
                             <span className="text-gray-600 text-xs">Sin plan</span>
                           )}
                         </td>
                         <td className="p-3">
-                          <span className="text-gray-400 text-xs">
-                            {client.sector || "—"}
-                            {client.nodo && <span className="text-gray-600"> / {client.nodo}</span>}
-                          </span>
+                          {nodeName ? (
+                            <span className="text-gray-300 text-xs flex items-center gap-1">
+                              <Server size={11} className="text-gray-500" /> {nodeName}
+                            </span>
+                          ) : (
+                            <span className="text-gray-600 text-xs">—</span>
+                          )}
+                        </td>
+                        <td className="p-3">
+                          {client.service_ip ? (
+                            <span className="font-mono text-xs text-cyan-400/80">{client.service_ip}</span>
+                          ) : (
+                            <span className="text-gray-600 text-xs">—</span>
+                          )}
                         </td>
                         <td className="p-3">
                           <div className="flex flex-col gap-0.5">
@@ -500,7 +586,7 @@ export default function ClientesPage() {
                   <FormInput label="Ciudad" value={form.city} onChange={v => setField("city", v)} placeholder="Lechería, Barcelona..." />
                   <FormInput label="Estado" value={form.state} onChange={v => setField("state", v)} placeholder="Anzoátegui" />
                   <FormInput label="Sector / Urbanización" value={form.sector} onChange={v => setField("sector", v)} placeholder="Sector o urbanización" />
-                  <FormInput label="Nodo" value={form.nodo} onChange={v => setField("nodo", v)} placeholder="Lechería-Norte, etc." />
+                  <FormInput label="Nodo (texto libre)" value={form.nodo} onChange={v => setField("nodo", v)} placeholder="Lechería-Norte, etc." />
                 </div>
               </fieldset>
 
@@ -531,6 +617,37 @@ export default function ClientesPage() {
                     ]}
                   />
                   <FormInput label="Fecha de Instalación" type="date" value={form.installation_date} onChange={v => setField("installation_date", v)} />
+                </div>
+              </fieldset>
+
+              {/* Technical / Datos Técnicos */}
+              <fieldset>
+                <legend className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3 flex items-center gap-2">
+                  <Server size={12} /> Datos Técnicos
+                </legend>
+                <div className="grid grid-cols-2 gap-3">
+                  <FormSelect
+                    label="Nodo de red"
+                    value={form.service_node_code}
+                    onChange={v => setField("service_node_code", v)}
+                    options={[
+                      { value: "", label: "Sin asignar" },
+                      ...nodes.map(n => ({ value: n.code, label: n.name })),
+                    ]}
+                  />
+                  <FormSelect
+                    label="Tecnología"
+                    value={form.service_technology}
+                    onChange={v => setField("service_technology", v)}
+                    options={TECH_OPTIONS}
+                  />
+                  <FormInput label="IP de servicio" value={form.service_ip} onChange={v => setField("service_ip", v)} placeholder="10.0.0.1" />
+                  <FormInput label="MAC Address" value={form.service_mac} onChange={v => setField("service_mac", v)} placeholder="AA:BB:CC:DD:EE:FF" />
+                  <FormInput label="VLAN" value={form.service_vlan} onChange={v => setField("service_vlan", v)} placeholder="100" />
+                  <FormInput label="Router / CPE" value={form.service_router} onChange={v => setField("service_router", v)} placeholder="Modelo o serial" />
+                  <div className="col-span-2">
+                    <FormInput label="Queue Name (MikroTik)" value={form.service_queue_name} onChange={v => setField("service_queue_name", v)} placeholder="queue-cliente-xxx" />
+                  </div>
                 </div>
               </fieldset>
 

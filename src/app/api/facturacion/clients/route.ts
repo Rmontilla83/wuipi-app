@@ -10,6 +10,7 @@ export async function GET(request: NextRequest) {
     const result = await getClients({
       search: searchParams.get("search") || undefined,
       status: searchParams.get("status") || undefined,
+      nodo: searchParams.get("nodo") || undefined,
       page: parseInt(searchParams.get("page") || "1"),
       limit: Math.min(parseInt(searchParams.get("limit") || "50"), 100),
     });

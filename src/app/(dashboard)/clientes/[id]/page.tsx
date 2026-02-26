@@ -6,11 +6,12 @@ import { TopBar } from "@/components/layout/topbar";
 import { Card } from "@/components/ui/card";
 import {
   ArrowLeft, Users, Wifi, WifiOff, Power, Edit2,
-  FileText, CreditCard, Headphones, Radio, Package,
+  FileText, CreditCard, Headphones, Radio,
   Phone, Mail, MapPin, Calendar, DollarSign,
   Clock, AlertTriangle, CheckCircle,
-  RefreshCw, Receipt,
-  User, Hash, Globe, Zap,
+  RefreshCw, Receipt, TrendingUp, Server,
+  User, Hash, Globe, Zap, ExternalLink,
+  ShoppingBag, Activity,
 } from "lucide-react";
 
 /* ========== TYPES ========== */
@@ -31,6 +32,28 @@ interface BillingSummary {
   total_invoiced: number; total_paid: number; total_overdue: number;
   balance: number; invoice_count: number; payment_count: number;
 }
+interface NetworkNode {
+  id: string; code: string; name: string; location: string | null;
+  type: string | null; technology: string | null; is_active: boolean;
+}
+interface Ticket {
+  id: string; ticket_number: string; subject: string; priority: string;
+  status: string; created_at: string; resolved_at: string | null; assigned_to: string | null;
+}
+interface Lead {
+  id: string; code: string; name: string; stage: string;
+  product_id: string | null; salesperson_id: string | null;
+  source: string; value: number;
+  created_at: string; won_at: string | null; lost_at: string | null;
+  crm_products?: { name: string } | null;
+  crm_salespeople?: { full_name: string } | null;
+}
+interface InfraHost {
+  hostid: string; host: string; name: string; status: number;
+  type: string; site: string;
+  latency_ms: number | null; packet_loss: number | null;
+  uptime_days: number | null;
+}
 interface ClientDetail {
   id: string; code: string; legal_name: string; trade_name: string;
   document_type: string; document_number: string;
@@ -40,20 +63,35 @@ interface ClientDetail {
   billing_currency: string; billing_day: number; credit_balance: number;
   notes: string; kommo_contact_id: number | null;
   created_at: string; updated_at: string;
+  // New service fields
+  plan_name: string | null; plan_type: string | null;
+  plan_speed_down: number | null; plan_speed_up: number | null;
+  monthly_rate: number | null;
+  contract_start: string | null; contract_end: string | null;
+  service_ip: string | null; service_mac: string | null;
+  service_node_code: string | null; service_technology: string | null;
+  service_vlan: string | null; service_router: string | null;
+  service_queue_name: string | null;
+  odoo_partner_id: number | null; bequant_subscriber_id: string | null;
+  // Nested
   plans?: Plan | null;
   invoices: Invoice[];
   payments: Payment[];
   billing_summary: BillingSummary;
+  network_node?: NetworkNode | null;
+  tickets: Ticket[];
+  ticket_count: number;
+  leads: Lead[];
 }
 
-type Tab = "info" | "facturacion" | "soporte" | "red" | "equipos";
+type Tab = "resumen" | "finanzas" | "soporte" | "ventas" | "infraestructura";
 
 const TABS: { id: Tab; label: string; icon: typeof User }[] = [
-  { id: "info", label: "Información", icon: User },
-  { id: "facturacion", label: "Facturación", icon: CreditCard },
+  { id: "resumen", label: "Resumen", icon: User },
+  { id: "finanzas", label: "Finanzas", icon: CreditCard },
   { id: "soporte", label: "Soporte", icon: Headphones },
-  { id: "red", label: "Red", icon: Radio },
-  { id: "equipos", label: "Equipos", icon: Package },
+  { id: "ventas", label: "Ventas", icon: TrendingUp },
+  { id: "infraestructura", label: "Infraestructura", icon: Radio },
 ];
 
 const STATUS_MAP: Record<string, { label: string; color: string; bg: string; icon: typeof Wifi; bar: string }> = {
@@ -78,9 +116,50 @@ const PAY_STATUS: Record<string, { label: string; cls: string }> = {
   rejected:  { label: "Rechazado",  cls: "text-red-400 bg-red-400/10" },
 };
 
+const TICKET_STATUS: Record<string, { label: string; cls: string }> = {
+  new:             { label: "Nuevo",       cls: "text-blue-400 bg-blue-400/10" },
+  assigned:        { label: "Asignado",    cls: "text-cyan-400 bg-cyan-400/10" },
+  in_progress:     { label: "En progreso", cls: "text-amber-400 bg-amber-400/10" },
+  waiting_client:  { label: "Espera cliente", cls: "text-violet-400 bg-violet-400/10" },
+  resolved:        { label: "Resuelto",    cls: "text-emerald-400 bg-emerald-400/10" },
+  closed:          { label: "Cerrado",     cls: "text-gray-500 bg-gray-500/10" },
+};
+
+const PRIORITY_CONFIG: Record<string, { label: string; cls: string }> = {
+  critical: { label: "Crítico",  cls: "text-red-400 bg-red-400/10" },
+  high:     { label: "Alto",     cls: "text-orange-400 bg-orange-400/10" },
+  medium:   { label: "Medio",    cls: "text-amber-400 bg-amber-400/10" },
+  low:      { label: "Bajo",     cls: "text-gray-400 bg-gray-400/10" },
+};
+
+const STAGE_LABELS: Record<string, { label: string; cls: string }> = {
+  incoming:               { label: "Entrante",      cls: "text-blue-400 bg-blue-400/10" },
+  contacto_inicial:       { label: "Contacto",      cls: "text-cyan-400 bg-cyan-400/10" },
+  info_enviada:           { label: "Info enviada",   cls: "text-violet-400 bg-violet-400/10" },
+  en_instalacion:         { label: "Instalación",    cls: "text-amber-400 bg-amber-400/10" },
+  prueba_actualizacion:   { label: "Prueba/Upgrade", cls: "text-indigo-400 bg-indigo-400/10" },
+  retirado_reactivacion:  { label: "Reactivación",   cls: "text-orange-400 bg-orange-400/10" },
+  ganado:                 { label: "Ganado",          cls: "text-emerald-400 bg-emerald-400/10" },
+  no_concretado:          { label: "No concretado",  cls: "text-red-400 bg-red-400/10" },
+  no_factible:            { label: "No factible",    cls: "text-gray-500 bg-gray-500/10" },
+  no_clasificado:         { label: "Sin clasificar", cls: "text-gray-400 bg-gray-400/10" },
+};
+
+const TECH_LABELS: Record<string, string> = {
+  fiber: "Fibra óptica", wireless: "Inalámbrico", copper: "Cobre", mixed: "Mixto",
+};
+
 /* ========== HELPERS ========== */
 const fmt = (n: number) => n.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtDate = (d: string | null) => d ? new Date(d).toLocaleDateString("es-VE") : "—";
+
+function daysSince(d: string | null): string {
+  if (!d) return "—";
+  const diff = Math.floor((Date.now() - new Date(d).getTime()) / 86400000);
+  if (diff < 30) return `${diff} días`;
+  if (diff < 365) return `${Math.floor(diff / 30)} meses`;
+  return `${(diff / 365).toFixed(1)} años`;
+}
 
 /* ========== MAIN PAGE ========== */
 export default function ClientDetailPage() {
@@ -91,7 +170,7 @@ export default function ClientDetailPage() {
   const [client, setClient] = useState<ClientDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [activeTab, setActiveTab] = useState<Tab>("info");
+  const [activeTab, setActiveTab] = useState<Tab>("resumen");
   const [toggling, setToggling] = useState(false);
 
   const fetchClient = useCallback(async () => {
@@ -100,13 +179,15 @@ export default function ClientDetailPage() {
       const res = await fetch(`/api/facturacion/clients/${clientId}?detail=true`);
       if (!res.ok) throw new Error("Cliente no encontrado");
       const data = await res.json();
-      // Ensure defaults for optional nested data
       data.invoices = data.invoices || [];
       data.payments = data.payments || [];
       data.billing_summary = data.billing_summary || {
         total_invoiced: 0, total_paid: 0, total_overdue: 0,
         balance: 0, invoice_count: 0, payment_count: 0,
       };
+      data.tickets = data.tickets || [];
+      data.ticket_count = data.ticket_count || 0;
+      data.leads = data.leads || [];
       setClient(data);
     } catch (err: any) {
       setError(err.message);
@@ -152,6 +233,12 @@ export default function ClientDetailPage() {
   const st = STATUS_MAP[client.service_status] || STATUS_MAP.pending;
   const StIcon = st.icon;
 
+  // Resolve display speed: prefer denormalized fields, fall back to plans join
+  const speedDown = client.plan_speed_down || client.plans?.speed_down;
+  const speedUp = client.plan_speed_up || client.plans?.speed_up;
+  const displayPlan = client.plan_name || client.plans?.name;
+  const displayTech = client.service_technology || client.plans?.technology;
+
   return (
     <>
       <TopBar
@@ -166,7 +253,7 @@ export default function ClientDetailPage() {
       />
 
       <div className="flex-1 overflow-auto p-6 space-y-4">
-        {/* ── HEADER CARD ── */}
+        {/* HEADER CARD */}
         <Card className="!p-0 overflow-hidden">
           <div className="h-1" style={{ background: st.bar }} />
           <div className="p-5">
@@ -185,9 +272,19 @@ export default function ClientDetailPage() {
                     <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${st.color} ${st.bg}`}>
                       <StIcon size={12} /> {st.label}
                     </span>
-                    {client.plans && (
+                    {client.service_node_code && (
+                      <span className="text-xs text-gray-400 bg-wuipi-bg px-2.5 py-1 rounded-full flex items-center gap-1">
+                        <Server size={11} /> {client.network_node?.name || client.service_node_code}
+                      </span>
+                    )}
+                    {client.service_ip && (
+                      <span className="text-xs font-mono text-cyan-400/80 bg-wuipi-bg px-2.5 py-1 rounded-full">
+                        {client.service_ip}
+                      </span>
+                    )}
+                    {displayTech && (
                       <span className="text-xs text-gray-400 bg-wuipi-bg px-2.5 py-1 rounded-full">
-                        {client.plans.name} • ${client.plans.price_usd}/mes
+                        {TECH_LABELS[displayTech] || displayTech}
                       </span>
                     )}
                     <span className="text-xs text-gray-500">Cliente desde {fmtDate(client.created_at)}</span>
@@ -214,15 +311,15 @@ export default function ClientDetailPage() {
 
             {/* Quick Stats */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-5">
-              <QStat icon={DollarSign} label="Facturado" value={`$${fmt(client.billing_summary?.total_invoiced || 0)}`} color="text-cyan-400" />
-              <QStat icon={CheckCircle} label="Cobrado" value={`$${fmt(client.billing_summary?.total_paid || 0)}`} color="text-emerald-400" />
-              <QStat icon={AlertTriangle} label="Vencido" value={`$${fmt(client.billing_summary?.total_overdue || 0)}`} color={(client.billing_summary?.total_overdue || 0) > 0 ? "text-red-400" : "text-gray-500"} />
-              <QStat icon={Receipt} label="Balance" value={`$${fmt(client.billing_summary?.balance || 0)}`} color={(client.billing_summary?.balance || 0) > 0 ? "text-amber-400" : "text-emerald-400"} />
+              <QStat icon={Receipt} label="Facturas" value={`${client.billing_summary?.invoice_count || 0}`} color="text-cyan-400" />
+              <QStat icon={Headphones} label="Tickets" value={`${client.ticket_count}`} color="text-violet-400" />
+              <QStat icon={Zap} label="Plan / Velocidad" value={displayPlan ? `${displayPlan}${speedDown ? ` ${speedDown}/${speedUp}` : ""}` : "Sin plan"} color="text-emerald-400" />
+              <QStat icon={Calendar} label="Antigüedad" value={daysSince(client.created_at)} color="text-amber-400" />
             </div>
           </div>
         </Card>
 
-        {/* ── TABS ── */}
+        {/* TABS */}
         <div className="flex items-center gap-2 overflow-x-auto pb-1">
           {TABS.map(tab => {
             const active = tab.id === activeTab;
@@ -238,12 +335,12 @@ export default function ClientDetailPage() {
           })}
         </div>
 
-        {/* ── TAB CONTENT ── */}
-        {activeTab === "info" && <TabInfo client={client} />}
-        {activeTab === "facturacion" && <TabFacturacion client={client} />}
-        {activeTab === "soporte" && <TabSoporte />}
-        {activeTab === "red" && <TabRed client={client} />}
-        {activeTab === "equipos" && <TabEquipos />}
+        {/* TAB CONTENT */}
+        {activeTab === "resumen" && <TabResumen client={client} />}
+        {activeTab === "finanzas" && <TabFinanzas client={client} />}
+        {activeTab === "soporte" && <TabSoporte client={client} />}
+        {activeTab === "ventas" && <TabVentas client={client} />}
+        {activeTab === "infraestructura" && <TabInfraestructura client={client} />}
       </div>
     </>
   );
@@ -254,9 +351,9 @@ function QStat({ icon: Icon, label, value, color }: { icon: typeof DollarSign; l
   return (
     <div className="flex items-center gap-3 p-3 bg-wuipi-bg rounded-xl border border-wuipi-border">
       <Icon size={16} className={color} />
-      <div>
+      <div className="min-w-0">
         <p className="text-xs text-gray-500">{label}</p>
-        <p className={`text-sm font-bold ${color}`}>{value}</p>
+        <p className={`text-sm font-bold ${color} truncate`}>{value}</p>
       </div>
     </div>
   );
@@ -275,60 +372,92 @@ function IRow({ icon: Icon, label, value }: { icon: typeof Mail; label: string; 
   );
 }
 
-/* ========== TAB: INFO ========== */
-function TabInfo({ client }: { client: ClientDetail }) {
+/* ========== TAB 1: RESUMEN ========== */
+function TabResumen({ client }: { client: ClientDetail }) {
+  const speedDown = client.plan_speed_down || client.plans?.speed_down;
+  const speedUp = client.plan_speed_up || client.plans?.speed_up;
+  const displayPlan = client.plan_name || client.plans?.name;
+  const displayTech = client.service_technology || client.plans?.technology;
+
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-      <Card>
-        <h3 className="text-sm font-semibold text-gray-400 mb-4 flex items-center gap-2"><Phone size={14} /> Contacto</h3>
-        <div className="space-y-3">
-          <IRow icon={Mail} label="Email" value={client.email} />
-          <IRow icon={Phone} label="Teléfono" value={client.phone} />
-          {client.phone_alt && <IRow icon={Phone} label="Tel. Alternativo" value={client.phone_alt} />}
-          {client.contact_person && <IRow icon={User} label="Persona de contacto" value={client.contact_person} />}
-        </div>
-      </Card>
-
-      <Card>
-        <h3 className="text-sm font-semibold text-gray-400 mb-4 flex items-center gap-2"><MapPin size={14} /> Ubicación</h3>
-        <div className="space-y-3">
-          {client.address && <IRow icon={MapPin} label="Dirección" value={client.address} />}
-          <IRow icon={Globe} label="Ciudad / Estado" value={`${client.city || "—"}, ${client.state || "—"}`} />
-          <IRow icon={Hash} label="Sector" value={client.sector} />
-          <IRow icon={Radio} label="Nodo" value={client.nodo || "Sin asignar"} />
-        </div>
-      </Card>
-
-      <Card>
-        <h3 className="text-sm font-semibold text-gray-400 mb-4 flex items-center gap-2"><Wifi size={14} /> Servicio</h3>
-        <div className="space-y-3">
-          <IRow icon={Zap} label="Plan" value={client.plans ? `${client.plans.name} (${client.plans.speed_down}/${client.plans.speed_up} Mbps)` : "Sin plan"} />
-          <IRow icon={Calendar} label="Instalación" value={fmtDate(client.installation_date)} />
-          <IRow icon={Hash} label="Tecnología" value={client.plans?.technology} />
-        </div>
-      </Card>
-
-      <Card>
-        <h3 className="text-sm font-semibold text-gray-400 mb-4 flex items-center gap-2"><CreditCard size={14} /> Config. Facturación</h3>
-        <div className="space-y-3">
-          <IRow icon={DollarSign} label="Moneda" value={client.billing_currency === "USD" ? "Dólares (USD)" : "Bolívares (VES)"} />
-          <IRow icon={Calendar} label="Día de facturación" value={`Día ${client.billing_day} de cada mes`} />
-          <IRow icon={CreditCard} label="Saldo a favor" value={`$${Number(client.credit_balance || 0).toFixed(2)}`} />
-        </div>
-      </Card>
-
-      {client.notes && (
-        <Card className="md:col-span-2">
-          <h3 className="text-sm font-semibold text-gray-400 mb-3 flex items-center gap-2"><FileText size={14} /> Notas</h3>
-          <p className="text-sm text-gray-300 whitespace-pre-wrap">{client.notes}</p>
+    <div className="space-y-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* Contacto */}
+        <Card>
+          <h3 className="text-sm font-semibold text-gray-400 mb-4 flex items-center gap-2"><Phone size={14} /> Contacto</h3>
+          <div className="space-y-3">
+            <IRow icon={Mail} label="Email" value={client.email} />
+            <IRow icon={Phone} label="Teléfono" value={client.phone} />
+            {client.phone_alt && <IRow icon={Phone} label="Tel. Alternativo" value={client.phone_alt} />}
+            {client.contact_person && <IRow icon={User} label="Persona de contacto" value={client.contact_person} />}
+          </div>
         </Card>
-      )}
+
+        {/* Ubicación */}
+        <Card>
+          <h3 className="text-sm font-semibold text-gray-400 mb-4 flex items-center gap-2"><MapPin size={14} /> Ubicación</h3>
+          <div className="space-y-3">
+            {client.address && <IRow icon={MapPin} label="Dirección" value={client.address} />}
+            <IRow icon={Globe} label="Ciudad / Estado" value={`${client.city || "—"}, ${client.state || "—"}`} />
+            <IRow icon={Hash} label="Sector" value={client.sector} />
+            <IRow icon={Radio} label="Nodo" value={client.nodo || "Sin asignar"} />
+          </div>
+        </Card>
+
+        {/* Datos del Servicio */}
+        <Card>
+          <h3 className="text-sm font-semibold text-gray-400 mb-4 flex items-center gap-2"><Server size={14} /> Datos del Servicio</h3>
+          <div className="space-y-3">
+            <IRow icon={Globe} label="IP de servicio" value={client.service_ip} />
+            <IRow icon={Hash} label="MAC Address" value={client.service_mac} />
+            <IRow icon={Server} label="Nodo de red" value={client.network_node ? `${client.network_node.name} (${client.service_node_code})` : (client.service_node_code || "Sin asignar")} />
+            <IRow icon={Hash} label="VLAN" value={client.service_vlan} />
+            <IRow icon={Radio} label="Router / CPE" value={client.service_router} />
+            <IRow icon={Zap} label="Tecnología" value={displayTech ? (TECH_LABELS[displayTech] || displayTech) : null} />
+            <IRow icon={Hash} label="Queue Name" value={client.service_queue_name} />
+          </div>
+        </Card>
+
+        {/* Plan */}
+        <Card>
+          <h3 className="text-sm font-semibold text-gray-400 mb-4 flex items-center gap-2"><Wifi size={14} /> Plan</h3>
+          <div className="space-y-3">
+            <IRow icon={Zap} label="Plan" value={displayPlan || "Sin plan"} />
+            {speedDown && <IRow icon={Activity} label="Velocidad" value={`${speedDown}/${speedUp || "?"} Mbps`} />}
+            <IRow icon={DollarSign} label="Tarifa mensual" value={client.monthly_rate ? `$${fmt(client.monthly_rate)}` : (client.plans?.price_usd ? `$${fmt(client.plans.price_usd)}` : null)} />
+            <IRow icon={Calendar} label="Inicio contrato" value={fmtDate(client.contract_start)} />
+            <IRow icon={Calendar} label="Fin contrato" value={fmtDate(client.contract_end)} />
+            <IRow icon={Calendar} label="Instalación" value={fmtDate(client.installation_date)} />
+          </div>
+        </Card>
+      </div>
+
+      {/* Bottom row: Notes + External IDs */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {client.notes && (
+          <Card>
+            <h3 className="text-sm font-semibold text-gray-400 mb-3 flex items-center gap-2"><FileText size={14} /> Notas</h3>
+            <p className="text-sm text-gray-300 whitespace-pre-wrap">{client.notes}</p>
+          </Card>
+        )}
+
+        {(client.odoo_partner_id || client.bequant_subscriber_id || client.kommo_contact_id) && (
+          <Card>
+            <h3 className="text-sm font-semibold text-gray-400 mb-3 flex items-center gap-2"><ExternalLink size={14} /> IDs Externos</h3>
+            <div className="space-y-3">
+              {client.odoo_partner_id && <IRow icon={Hash} label="Odoo Partner ID" value={client.odoo_partner_id.toString()} />}
+              {client.bequant_subscriber_id && <IRow icon={Hash} label="Bequant Subscriber" value={client.bequant_subscriber_id} />}
+              {client.kommo_contact_id && <IRow icon={Hash} label="Kommo Contact ID" value={client.kommo_contact_id.toString()} />}
+            </div>
+          </Card>
+        )}
+      </div>
     </div>
   );
 }
 
-/* ========== TAB: FACTURACION ========== */
-function TabFacturacion({ client }: { client: ClientDetail }) {
+/* ========== TAB 2: FINANZAS ========== */
+function TabFinanzas({ client }: { client: ClientDetail }) {
   const bs = client.billing_summary || { total_invoiced: 0, total_paid: 0, total_overdue: 0, balance: 0, invoice_count: 0, payment_count: 0 };
   const collRate = bs.total_invoiced > 0 ? ((bs.total_paid / bs.total_invoiced) * 100) : 0;
   const invoices = client.invoices || [];
@@ -336,6 +465,21 @@ function TabFacturacion({ client }: { client: ClientDetail }) {
 
   return (
     <div className="space-y-4">
+      {/* Odoo Banner */}
+      {client.odoo_partner_id ? (
+        <div className="flex items-center gap-3 p-3 bg-emerald-500/5 border border-emerald-500/20 rounded-xl">
+          <CheckCircle size={16} className="text-emerald-400 shrink-0" />
+          <p className="text-sm text-emerald-400">
+            Conectado con Odoo — Partner ID: <span className="font-mono">{client.odoo_partner_id}</span>
+          </p>
+        </div>
+      ) : (
+        <div className="flex items-center gap-3 p-3 bg-amber-500/5 border border-amber-500/20 rounded-xl">
+          <AlertTriangle size={16} className="text-amber-400 shrink-0" />
+          <p className="text-sm text-amber-400">Sin conexión con Odoo — La facturación detallada se gestiona desde Odoo</p>
+        </div>
+      )}
+
       {/* Summary */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <Card className="!p-4 text-center">
@@ -441,96 +585,236 @@ function TabFacturacion({ client }: { client: ClientDetail }) {
   );
 }
 
-/* ========== TAB: SOPORTE (placeholder - pending CRM Soporte) ========== */
-function TabSoporte() {
-  return (
-    <Card>
-      <div className="text-center py-12">
-        <Headphones size={48} className="mx-auto mb-4 text-gray-600" />
-        <h3 className="text-lg font-semibold text-gray-400 mb-2">Historial de Soporte</h3>
-        <p className="text-sm text-gray-600 max-w-md mx-auto">
-          El módulo de CRM de Soporte está en desarrollo. Aquí podrás ver todos los tickets,
-          historial de resolución, SLA y calificaciones del cliente.
-        </p>
-        <div className="mt-6 grid grid-cols-3 gap-4 max-w-sm mx-auto">
-          <div className="p-3 bg-wuipi-bg rounded-xl border border-wuipi-border text-center">
-            <p className="text-2xl font-bold text-gray-500">0</p>
-            <p className="text-xs text-gray-600">Tickets</p>
-          </div>
-          <div className="p-3 bg-wuipi-bg rounded-xl border border-wuipi-border text-center">
-            <p className="text-2xl font-bold text-gray-500">—</p>
-            <p className="text-xs text-gray-600">SLA</p>
-          </div>
-          <div className="p-3 bg-wuipi-bg rounded-xl border border-wuipi-border text-center">
-            <p className="text-2xl font-bold text-gray-500">—</p>
-            <p className="text-xs text-gray-600">Satisfacción</p>
-          </div>
-        </div>
-      </div>
-    </Card>
-  );
-}
+/* ========== TAB 3: SOPORTE ========== */
+function TabSoporte({ client }: { client: ClientDetail }) {
+  const router = useRouter();
+  const tickets = client.tickets || [];
+  const total = client.ticket_count || tickets.length;
+  const open = tickets.filter(t => t.status === "new" || t.status === "assigned").length;
+  const inProgress = tickets.filter(t => t.status === "in_progress" || t.status === "waiting_client").length;
+  const resolved = tickets.filter(t => t.status === "resolved" || t.status === "closed").length;
 
-/* ========== TAB: RED (placeholder - pending MikroTik integration) ========== */
-function TabRed({ client }: { client: ClientDetail }) {
   return (
     <div className="space-y-4">
-      <Card>
-        <h3 className="text-sm font-semibold text-gray-400 mb-4 flex items-center gap-2"><Radio size={14} /> Información de Red</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="space-y-3">
-            <IRow icon={Radio} label="Nodo" value={client.nodo || "Sin asignar"} />
-            <IRow icon={Hash} label="Sector" value={client.sector} />
-            <IRow icon={Zap} label="Tecnología" value={client.plans?.technology} />
-          </div>
-          <div className="space-y-3">
-            <IRow icon={Hash} label="IP Asignada" value="— (pendiente integración)" />
-            <IRow icon={Hash} label="Router Serial" value="— (pendiente)" />
-            <IRow icon={Hash} label="ONU Serial" value="— (pendiente)" />
-          </div>
-        </div>
-      </Card>
+      {/* Stats row */}
+      <div className="grid grid-cols-4 gap-3">
+        <Card className="!p-4 text-center">
+          <p className="text-xs text-gray-500 mb-1">Total</p>
+          <p className="text-2xl font-bold text-white">{total}</p>
+        </Card>
+        <Card className="!p-4 text-center">
+          <p className="text-xs text-gray-500 mb-1">Abiertos</p>
+          <p className="text-2xl font-bold text-amber-400">{open}</p>
+        </Card>
+        <Card className="!p-4 text-center">
+          <p className="text-xs text-gray-500 mb-1">En progreso</p>
+          <p className="text-2xl font-bold text-cyan-400">{inProgress}</p>
+        </Card>
+        <Card className="!p-4 text-center">
+          <p className="text-xs text-gray-500 mb-1">Resueltos</p>
+          <p className="text-2xl font-bold text-emerald-400">{resolved}</p>
+        </Card>
+      </div>
 
+      {/* Tickets table */}
       <Card>
-        <div className="text-center py-8">
-          <Radio size={36} className="mx-auto mb-3 text-gray-600" />
-          <h3 className="text-base font-semibold text-gray-400 mb-2">Monitoreo en Tiempo Real</h3>
-          <p className="text-sm text-gray-600 max-w-md mx-auto">
-            La integración con MikroTik RouterOS está pendiente. Aquí se mostrará: estado de conexión,
-            tráfico en tiempo real, latencia, sesión PPPoE y acciones de gestión remota.
-          </p>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-sm font-semibold text-gray-400 flex items-center gap-2"><Headphones size={14} /> Tickets</h3>
+          <button
+            onClick={() => router.push("/soporte")}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-wuipi-accent/10 text-wuipi-accent border border-wuipi-accent/20 hover:bg-wuipi-accent/20 transition-colors"
+          >
+            Crear Ticket
+          </button>
         </div>
+
+        {tickets.length === 0 ? (
+          <div className="text-center py-10">
+            <Headphones size={36} className="mx-auto mb-3 text-gray-600" />
+            <p className="text-sm text-gray-500 mb-1">Sin tickets registrados</p>
+            <p className="text-xs text-gray-600">Los tickets se crean desde el módulo de Soporte</p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-gray-500 text-xs border-b border-wuipi-border">
+                  <th className="text-left pb-2 font-medium">Nº</th>
+                  <th className="text-left pb-2 font-medium">Asunto</th>
+                  <th className="text-center pb-2 font-medium">Prioridad</th>
+                  <th className="text-center pb-2 font-medium">Estado</th>
+                  <th className="text-left pb-2 font-medium">Fecha</th>
+                </tr>
+              </thead>
+              <tbody>
+                {tickets.map(t => {
+                  const ts = TICKET_STATUS[t.status] || { label: t.status, cls: "text-gray-400 bg-gray-400/10" };
+                  const pr = PRIORITY_CONFIG[t.priority] || { label: t.priority, cls: "text-gray-400 bg-gray-400/10" };
+                  return (
+                    <tr key={t.id} onClick={() => router.push(`/soporte/${t.id}`)} className="border-b border-wuipi-border/50 hover:bg-wuipi-card-hover transition-colors cursor-pointer">
+                      <td className="py-2.5 font-mono text-gray-300">{t.ticket_number}</td>
+                      <td className="py-2.5 text-gray-200">{t.subject}</td>
+                      <td className="py-2.5 text-center">
+                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${pr.cls}`}>{pr.label}</span>
+                      </td>
+                      <td className="py-2.5 text-center">
+                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${ts.cls}`}>{ts.label}</span>
+                      </td>
+                      <td className="py-2.5 text-gray-400">{fmtDate(t.created_at)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </Card>
     </div>
   );
 }
 
-/* ========== TAB: EQUIPOS (placeholder - pending Inventario) ========== */
-function TabEquipos() {
+/* ========== TAB 4: VENTAS ========== */
+function TabVentas({ client }: { client: ClientDetail }) {
+  const leads = client.leads || [];
+
   return (
-    <Card>
-      <div className="text-center py-12">
-        <Package size={48} className="mx-auto mb-4 text-gray-600" />
-        <h3 className="text-lg font-semibold text-gray-400 mb-2">Equipos Asignados</h3>
-        <p className="text-sm text-gray-600 max-w-md mx-auto">
-          El módulo de Inventario está en desarrollo. Aquí verás los equipos asignados a este cliente:
-          router, ONU, cable, conectores, y su historial de cambios.
-        </p>
-        <div className="mt-6 grid grid-cols-3 gap-4 max-w-sm mx-auto">
-          <div className="p-3 bg-wuipi-bg rounded-xl border border-wuipi-border text-center">
-            <p className="text-2xl font-bold text-gray-500">0</p>
-            <p className="text-xs text-gray-600">Router</p>
+    <div className="space-y-4">
+      <Card>
+        <h3 className="text-sm font-semibold text-gray-400 mb-4 flex items-center gap-2"><ShoppingBag size={14} /> Historial de Leads</h3>
+
+        {leads.length === 0 ? (
+          <div className="text-center py-10">
+            <TrendingUp size={36} className="mx-auto mb-3 text-gray-600" />
+            <p className="text-sm text-gray-500 mb-1">Cliente ingresado directamente</p>
+            <p className="text-xs text-gray-600">No hay leads de CRM Ventas vinculados a este cliente</p>
           </div>
-          <div className="p-3 bg-wuipi-bg rounded-xl border border-wuipi-border text-center">
-            <p className="text-2xl font-bold text-gray-500">0</p>
-            <p className="text-xs text-gray-600">ONU</p>
+        ) : (
+          <div className="space-y-3">
+            {leads.map(lead => {
+              const stg = STAGE_LABELS[lead.stage] || { label: lead.stage, cls: "text-gray-400 bg-gray-400/10" };
+              return (
+                <div key={lead.id} className="p-4 bg-wuipi-bg rounded-xl border border-wuipi-border">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-xs text-gray-400">{lead.code}</span>
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${stg.cls}`}>{stg.label}</span>
+                    </div>
+                    <span className="text-xs text-gray-500">{fmtDate(lead.created_at)}</span>
+                  </div>
+                  <div className="flex items-center gap-4 text-xs text-gray-400 flex-wrap">
+                    {lead.crm_products?.name && (
+                      <span className="flex items-center gap-1"><Zap size={11} /> {lead.crm_products.name}</span>
+                    )}
+                    {lead.crm_salespeople?.full_name && (
+                      <span className="flex items-center gap-1"><User size={11} /> {lead.crm_salespeople.full_name}</span>
+                    )}
+                    {lead.value > 0 && (
+                      <span className="flex items-center gap-1"><DollarSign size={11} /> ${fmt(lead.value)}</span>
+                    )}
+                    {lead.won_at && (
+                      <span className="text-emerald-400">Ganado: {fmtDate(lead.won_at)}</span>
+                    )}
+                    {lead.lost_at && (
+                      <span className="text-red-400">Perdido: {fmtDate(lead.lost_at)}</span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
           </div>
-          <div className="p-3 bg-wuipi-bg rounded-xl border border-wuipi-border text-center">
-            <p className="text-2xl font-bold text-gray-500">0</p>
-            <p className="text-xs text-gray-600">Otros</p>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+/* ========== TAB 5: INFRAESTRUCTURA ========== */
+function TabInfraestructura({ client }: { client: ClientDetail }) {
+  const [infraHost, setInfraHost] = useState<InfraHost | null>(null);
+  const [infraLoading, setInfraLoading] = useState(false);
+  const [infraChecked, setInfraChecked] = useState(false);
+
+  useEffect(() => {
+    if (!client.service_ip) {
+      setInfraChecked(true);
+      return;
+    }
+    setInfraLoading(true);
+    fetch("/api/infraestructura/hosts")
+      .then(r => r.json())
+      .then((hosts: InfraHost[]) => {
+        const match = hosts.find(h => h.host === client.service_ip || h.name?.includes(client.service_ip!));
+        setInfraHost(match || null);
+      })
+      .catch(() => {})
+      .finally(() => {
+        setInfraLoading(false);
+        setInfraChecked(true);
+      });
+  }, [client.service_ip]);
+
+  if (!client.service_ip) {
+    return (
+      <Card>
+        <div className="text-center py-10">
+          <Radio size={36} className="mx-auto mb-3 text-gray-600" />
+          <p className="text-sm text-gray-500 mb-1">Sin IP de servicio asignada</p>
+          <p className="text-xs text-gray-600">Asigna una IP de servicio al cliente para vincular con el monitoreo de red</p>
+        </div>
+      </Card>
+    );
+  }
+
+  if (infraLoading || !infraChecked) {
+    return (
+      <Card>
+        <div className="flex items-center justify-center py-12">
+          <RefreshCw size={20} className="animate-spin text-gray-500" />
+          <span className="ml-2 text-gray-500 text-sm">Buscando equipo en monitoreo...</span>
+        </div>
+      </Card>
+    );
+  }
+
+  if (!infraHost) {
+    return (
+      <Card>
+        <div className="text-center py-10">
+          <Radio size={36} className="mx-auto mb-3 text-gray-600" />
+          <p className="text-sm text-gray-500 mb-1">Sin equipo monitoreado asociado</p>
+          <p className="text-xs text-gray-600">
+            IP <span className="font-mono text-cyan-400/80">{client.service_ip}</span> no encontrada en el sistema de monitoreo (Zabbix)
+          </p>
+        </div>
+      </Card>
+    );
+  }
+
+  const isUp = infraHost.status === 1;
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <h3 className="text-sm font-semibold text-gray-400 mb-4 flex items-center gap-2"><Radio size={14} /> Monitoreo del Equipo</h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="space-y-3">
+            <div className="flex items-center gap-2 mb-3">
+              <span className={`w-3 h-3 rounded-full ${isUp ? "bg-emerald-400" : "bg-red-400"} animate-pulse`} />
+              <span className={`text-sm font-semibold ${isUp ? "text-emerald-400" : "text-red-400"}`}>
+                {isUp ? "En línea" : "Fuera de línea"}
+              </span>
+            </div>
+            <IRow icon={Server} label="Host" value={infraHost.name || infraHost.host} />
+            <IRow icon={Hash} label="Tipo" value={infraHost.type || "—"} />
+            <IRow icon={MapPin} label="Sitio" value={infraHost.site || "—"} />
+          </div>
+          <div className="space-y-3">
+            <IRow icon={Activity} label="Latencia" value={infraHost.latency_ms != null ? `${infraHost.latency_ms.toFixed(1)} ms` : "—"} />
+            <IRow icon={AlertTriangle} label="Pérdida de paquetes" value={infraHost.packet_loss != null ? `${infraHost.packet_loss.toFixed(1)}%` : "—"} />
+            <IRow icon={Clock} label="Uptime" value={infraHost.uptime_days != null ? `${infraHost.uptime_days.toFixed(1)} días` : "—"} />
           </div>
         </div>
-      </div>
-    </Card>
+      </Card>
+    </div>
   );
 }

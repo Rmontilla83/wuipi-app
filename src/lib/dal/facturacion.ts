@@ -21,6 +21,7 @@ export async function nextSequence(seqId: string): Promise<string> {
 export async function getClients(options?: {
   search?: string;
   status?: string;
+  nodo?: string;
   page?: number;
   limit?: number;
 }) {
@@ -36,9 +37,10 @@ export async function getClients(options?: {
     .range(offset, offset + limit - 1);
 
   if (options?.status) query = query.eq("service_status", options.status);
+  if (options?.nodo) query = query.eq("service_node_code", options.nodo);
   if (options?.search) {
     query = query.or(
-      `legal_name.ilike.%${options.search}%,trade_name.ilike.%${options.search}%,code.ilike.%${options.search}%,document_number.ilike.%${options.search}%`
+      `legal_name.ilike.%${options.search}%,trade_name.ilike.%${options.search}%,code.ilike.%${options.search}%,document_number.ilike.%${options.search}%,service_ip.ilike.%${options.search}%`
     );
   }
 
@@ -90,29 +92,49 @@ export async function deleteClient(id: string) {
 // --- CLIENT DETAIL (ficha integral) ---
 
 export async function getClientDetail(id: string) {
+  const db = supabase();
+
   // Get client with plan
-  const { data: client, error } = await supabase()
+  const { data: client, error } = await db
     .from("clients")
     .select("*, plans(id, code, name, price_usd, speed_down, speed_up, technology)")
     .eq("id", id)
     .single();
   if (error) throw new Error(error.message);
 
-  // Get invoices
-  const { data: invoices } = await supabase()
-    .from("invoices")
-    .select("id, invoice_number, issue_date, due_date, currency, total, amount_paid, balance_due, status")
-    .eq("client_id", id)
-    .order("issue_date", { ascending: false })
-    .limit(20);
-
-  // Get payments
-  const { data: payments } = await supabase()
-    .from("payments")
-    .select("id, payment_number, payment_date, amount, currency, status, reference_number, payment_methods(name)")
-    .eq("client_id", id)
-    .order("payment_date", { ascending: false })
-    .limit(20);
+  // Parallel queries: invoices, payments, network node, tickets, leads
+  const [
+    { data: invoices },
+    { data: payments },
+    networkNodeResult,
+    { data: tickets, count: ticketCount },
+    { data: leads },
+  ] = await Promise.all([
+    db.from("invoices")
+      .select("id, invoice_number, issue_date, due_date, currency, total, amount_paid, balance_due, status")
+      .eq("client_id", id)
+      .order("issue_date", { ascending: false })
+      .limit(20),
+    db.from("payments")
+      .select("id, payment_number, payment_date, amount, currency, status, reference_number, payment_methods(name)")
+      .eq("client_id", id)
+      .order("payment_date", { ascending: false })
+      .limit(20),
+    client.service_node_code
+      ? db.from("network_nodes").select("*").eq("code", client.service_node_code).maybeSingle()
+      : Promise.resolve({ data: null }),
+    db.from("tickets")
+      .select("id, ticket_number, subject, priority, status, created_at, resolved_at, assigned_to", { count: "exact" })
+      .eq("client_id", id)
+      .eq("is_deleted", false)
+      .order("created_at", { ascending: false })
+      .limit(10),
+    db.from("crm_leads")
+      .select("id, code, name, stage, product_id, salesperson_id, source, value, created_at, won_at, lost_at, crm_products(name), crm_salespeople(full_name)")
+      .or(`client_id.eq.${id},converted_client_id.eq.${id}`)
+      .eq("is_deleted", false)
+      .order("created_at", { ascending: false }),
+  ]);
 
   // Calculate billing summary
   const allInvoices = invoices || [];
@@ -133,7 +155,56 @@ export async function getClientDetail(id: string) {
       invoice_count: allInvoices.length,
       payment_count: allPayments.length,
     },
+    network_node: networkNodeResult?.data || null,
+    tickets: tickets || [],
+    ticket_count: ticketCount || 0,
+    leads: leads || [],
   };
+}
+
+// --- NETWORK NODES ---
+
+export async function getNetworkNodes() {
+  const { data, error } = await supabase()
+    .from("network_nodes")
+    .select("*")
+    .eq("is_active", true)
+    .order("name");
+  if (error) throw new Error(error.message);
+  return data || [];
+}
+
+// --- CLIENT TICKETS (paginated) ---
+
+export async function getClientTickets(clientId: string, options?: { page?: number; limit?: number }) {
+  const page = options?.page || 1;
+  const limit = options?.limit || 20;
+  const offset = (page - 1) * limit;
+
+  const { data, error, count } = await supabase()
+    .from("tickets")
+    .select("id, ticket_number, subject, priority, status, created_at, resolved_at, assigned_to", { count: "exact" })
+    .eq("client_id", clientId)
+    .eq("is_deleted", false)
+    .order("created_at", { ascending: false })
+    .range(offset, offset + limit - 1);
+
+  if (error) throw new Error(error.message);
+  return { data: data || [], total: count || 0, page, limit };
+}
+
+// --- CLIENT LEAD HISTORY ---
+
+export async function getClientLeadHistory(clientId: string) {
+  const { data, error } = await supabase()
+    .from("crm_leads")
+    .select("id, code, name, stage, product_id, salesperson_id, source, value, created_at, won_at, lost_at, crm_products(name), crm_salespeople(full_name)")
+    .or(`client_id.eq.${clientId},converted_client_id.eq.${clientId}`)
+    .eq("is_deleted", false)
+    .order("created_at", { ascending: false });
+
+  if (error) throw new Error(error.message);
+  return data || [];
 }
 
 // --- PLANS ---

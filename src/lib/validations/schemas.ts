@@ -23,6 +23,26 @@ export const clientCreateSchema = z.object({
   billing_currency: z.enum(["USD", "VES"]).default("USD"),
   billing_day: z.number().int().min(1).max(28).default(1),
   notes: z.string().optional().nullable(),
+  // Service plan fields (denormalized for quick access)
+  plan_name: z.string().max(100).optional().nullable(),
+  plan_type: z.string().max(50).optional().nullable(),
+  plan_speed_down: z.number().int().min(0).optional().nullable(),
+  plan_speed_up: z.number().int().min(0).optional().nullable(),
+  monthly_rate: z.number().min(0).optional().nullable(),
+  // Contract dates
+  contract_start: z.string().optional().nullable(),
+  contract_end: z.string().optional().nullable(),
+  // Technical service fields
+  service_ip: z.string().max(45).optional().nullable(),
+  service_mac: z.string().max(17).optional().nullable(),
+  service_node_code: z.string().max(50).optional().nullable(),
+  service_technology: z.enum(["fiber", "wireless", "copper", "mixed"]).optional().nullable(),
+  service_vlan: z.string().max(20).optional().nullable(),
+  service_router: z.string().max(100).optional().nullable(),
+  service_queue_name: z.string().max(100).optional().nullable(),
+  // External IDs
+  odoo_partner_id: z.number().int().optional().nullable(),
+  bequant_subscriber_id: z.string().max(100).optional().nullable(),
 });
 
 export const clientUpdateSchema = clientCreateSchema.partial();
