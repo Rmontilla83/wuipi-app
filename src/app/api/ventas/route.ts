@@ -27,13 +27,6 @@ function mapStatusColor(pipeline: any, statusId: number): string {
   return status?.color ? `#${status.color}` : "#6b7280";
 }
 
-function detectPriority(lead: any): string {
-  const price = lead.price || 0;
-  if (price >= 100) return "high";
-  if (price >= 50) return "medium";
-  return "low";
-}
-
 export async function GET(request: NextRequest) {
   try {
     if (!kommo.isConfigured()) {
@@ -43,36 +36,21 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const period = searchParams.get("period") || "30d";
     const pipelineFilter = searchParams.get("pipeline_id");
-    const debug = searchParams.get("debug") === "true";
 
-    // Debug mode: raw API test
-    if (debug) {
-      try {
-        const rawLeads = await kommo.getLeads(1, 5);
-        const rawPipelines = await kommo.getPipelines();
-        return NextResponse.json({
-          debug: true,
-          leads_response_keys: rawLeads ? Object.keys(rawLeads) : null,
-          leads_embedded: rawLeads?._embedded ? Object.keys(rawLeads._embedded) : null,
-          leads_count: rawLeads?._embedded?.leads?.length ?? "no leads key",
-          leads_sample: rawLeads?._embedded?.leads?.[0] ? { id: rawLeads._embedded.leads[0].id, name: rawLeads._embedded.leads[0].name, status_id: rawLeads._embedded.leads[0].status_id, pipeline_id: rawLeads._embedded.leads[0].pipeline_id } : null,
-          pipelines_count: rawPipelines?._embedded?.pipelines?.length ?? 0,
-          raw_leads_status: rawLeads ? "ok" : "null",
-          raw_leads_type: typeof rawLeads,
-        });
-      } catch (err: any) {
-        return NextResponse.json({ debug: true, error: err.message });
-      }
-    }
-
-    // Parse period
+    // Parse period → timestamp boundary
     let fromTs: number | undefined;
     const now = Math.floor(Date.now() / 1000);
     switch (period) {
-      case "today": { const td = new Date(); td.setHours(0,0,0,0); fromTs = Math.floor(td.getTime()/1000); break; }
-      case "7d": fromTs = now - 7 * 86400; break;
+      case "today": {
+        const td = new Date();
+        td.setHours(0, 0, 0, 0);
+        fromTs = Math.floor(td.getTime() / 1000);
+        break;
+      }
+      case "7d":  fromTs = now - 7  * 86400; break;
       case "30d": fromTs = now - 30 * 86400; break;
       case "90d": fromTs = now - 90 * 86400; break;
+      case "all": fromTs = undefined; break;
     }
 
     // Fetch pipelines + users + leads in parallel
@@ -86,39 +64,43 @@ export async function GET(request: NextRequest) {
     }));
     const userMap = new Map<number, { id: number; name: string; email: string }>(users.map((u) => [u.id, u]));
 
-    // Determine which pipeline(s) to show
+    // Determine target pipeline(s)
     const targetPipelines = pipelineFilter
       ? pipelines.filter((p: any) => p.id === parseInt(pipelineFilter))
       : pipelines;
 
-    // Fetch ALL leads (no pipeline filter in API - filter server-side)
+    // Fetch ALL leads (no API-level filter — Kommo's filter params are unreliable)
     const rawLeads = await kommo.getAllLeads();
-    
-    // Filter by selected pipeline(s) if needed
+
+    // === FILTER 1: By pipeline ===
     const targetPipelineIds = new Set(targetPipelines.map((p: any) => p.id));
-    const allLeads = rawLeads.filter((l: any) => targetPipelineIds.has(l.pipeline_id));
+    const pipelineFiltered = rawLeads.filter((l: any) => targetPipelineIds.has(l.pipeline_id));
+
+    // === FILTER 2: By period (created_at OR updated_at within range) ===
+    // We filter by updated_at so that leads that were ACTIVE in the period show up
+    const allLeads = fromTs
+      ? pipelineFiltered.filter((l: any) => l.updated_at >= fromTs || l.created_at >= fromTs)
+      : pipelineFiltered;
 
     // Time boundaries
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
     const todayTs = todayStart.getTime() / 1000;
-    const fromTs_num = fromTs || 0; // for period-based metrics
 
     // Build pipeline summaries
     const pipelineSummaries = targetPipelines.map((pipeline: any) => {
       const pipelineLeads = allLeads.filter((l: any) => l.pipeline_id === pipeline.id);
       const statuses = pipeline._embedded?.statuses || [];
-      
+
       // Won/Lost status IDs (Kommo convention: 142 = won, 143 = lost)
       const wonStatusId = 142;
       const lostStatusId = 143;
-      
+
       const won = pipelineLeads.filter((l: any) => l.status_id === wonStatusId);
       const lost = pipelineLeads.filter((l: any) => l.status_id === lostStatusId);
       const active = pipelineLeads.filter((l: any) => l.status_id !== wonStatusId && l.status_id !== lostStatusId);
       const createdToday = pipelineLeads.filter((l: any) => l.created_at >= todayTs);
 
-      // Pipeline value
       const totalValue = active.reduce((s: number, l: any) => s + (l.price || 0), 0);
       const wonValue = won.reduce((s: number, l: any) => s + (l.price || 0), 0);
 
@@ -217,7 +199,7 @@ export async function GET(request: NextRequest) {
       source: "kommo-ventas",
       subdomain: "wuipidrive",
       period,
-      
+
       // Global KPIs
       total_leads: allLeads.length,
       active_leads: totalActive,
@@ -240,6 +222,9 @@ export async function GET(request: NextRequest) {
     });
   } catch (error: any) {
     console.error("Ventas API error:", error);
-    return NextResponse.json({ error: error.message || "Failed to fetch ventas data", source: "error" }, { status: 500 });
+    return NextResponse.json(
+      { error: error.message || "Failed to fetch ventas data", source: "error" },
+      { status: 500 }
+    );
   }
 }
