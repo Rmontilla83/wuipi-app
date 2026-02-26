@@ -85,6 +85,69 @@ export const planSchema = z.object({
 });
 
 // ============================================
+// CRM VENTAS SCHEMAS
+// ============================================
+
+const CRM_STAGES = [
+  "incoming", "contacto_inicial", "info_enviada", "en_instalacion",
+  "no_factible", "no_concretado", "no_clasificado",
+  "retirado_reactivacion", "prueba_actualizacion", "ganado",
+] as const;
+
+const CRM_SOURCES = ["whatsapp", "web", "referido", "social", "other"] as const;
+const CRM_ACTIVITY_TYPES = ["note", "call", "visit", "stage_change", "assignment", "email", "system"] as const;
+
+export const crmLeadCreateSchema = z.object({
+  name: z.string().min(2, "El nombre debe tener al menos 2 caracteres").max(255),
+  phone: z.string().max(30).optional().nullable(),
+  phone_alt: z.string().max(30).optional().nullable(),
+  email: z.string().email("Email inválido").optional().nullable().or(z.literal("")),
+  address: z.string().optional().nullable(),
+  city: z.string().max(100).optional().nullable(),
+  state: z.string().max(100).optional().nullable(),
+  sector: z.string().max(100).optional().nullable(),
+  nodo: z.string().max(50).optional().nullable(),
+  document_type: z.enum(["V", "J", "E", "G", "P"]).optional().nullable(),
+  document_number: z.string().max(20).optional().nullable(),
+  stage: z.enum(CRM_STAGES).default("incoming"),
+  product_id: z.string().uuid("Producto inválido").optional().nullable(),
+  salesperson_id: z.string().uuid("Vendedor inválido").optional().nullable(),
+  source: z.enum(CRM_SOURCES).default("other"),
+  value: z.number().min(0, "El valor no puede ser negativo").default(0),
+  notes: z.string().optional().nullable(),
+});
+
+export const crmLeadUpdateSchema = crmLeadCreateSchema.partial();
+
+export const crmLeadMoveSchema = z.object({
+  stage: z.enum(CRM_STAGES, { message: "Etapa inválida" }),
+});
+
+export const crmActivityCreateSchema = z.object({
+  lead_id: z.string().uuid("Lead inválido"),
+  type: z.enum(CRM_ACTIVITY_TYPES, { message: "Tipo de actividad inválido" }),
+  description: z.string().min(1, "La descripción es requerida"),
+  metadata: z.any().optional().nullable(),
+  created_by: z.string().optional().nullable(),
+});
+
+export const crmSalespersonSchema = z.object({
+  full_name: z.string().min(2, "El nombre debe tener al menos 2 caracteres").max(255),
+  email: z.string().email("Email inválido").optional().nullable().or(z.literal("")),
+  phone: z.string().max(30).optional().nullable(),
+  type: z.enum(["internal", "external"]).default("internal"),
+  is_active: z.boolean().default(true),
+  profile_id: z.string().uuid().optional().nullable(),
+});
+
+export const crmQuotaSchema = z.object({
+  salesperson_id: z.string().uuid("Vendedor inválido"),
+  month: z.string().min(1, "El mes es requerido"),
+  target_count: z.number().int().min(0, "La meta no puede ser negativa").default(0),
+  target_amount: z.number().min(0, "El monto no puede ser negativo").default(0),
+});
+
+// ============================================
 // HELPER: validate and return typed data or error
 // ============================================
 export function validate<T>(schema: z.ZodSchema<T>, data: unknown): { success: true; data: T } | { success: false; error: string; details: z.ZodIssue[] } {
