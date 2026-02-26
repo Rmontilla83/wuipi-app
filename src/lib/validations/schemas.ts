@@ -36,7 +36,7 @@ export const clientCreateSchema = z.object({
   service_ip: z.string().max(45).optional().nullable(),
   service_mac: z.string().max(17).optional().nullable(),
   service_node_code: z.string().max(50).optional().nullable(),
-  service_technology: z.enum(["fiber", "wireless", "copper", "mixed"]).optional().nullable(),
+  service_technology: z.enum(["fiber", "wireless", "terragraph", "copper", "mixed"]).optional().nullable(),
   service_vlan: z.string().max(20).optional().nullable(),
   service_router: z.string().max(100).optional().nullable(),
   service_queue_name: z.string().max(100).optional().nullable(),

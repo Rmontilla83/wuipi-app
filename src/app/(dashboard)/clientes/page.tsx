@@ -117,9 +117,9 @@ const DOC_TYPES = [
 
 const TECH_OPTIONS = [
   { value: "", label: "Sin especificar" },
-  { value: "fiber", label: "Fibra óptica" },
-  { value: "wireless", label: "Inalámbrico" },
-  { value: "copper", label: "Cobre" },
+  { value: "fiber", label: "Fibra Óptica" },
+  { value: "wireless", label: "Beamforming" },
+  { value: "terragraph", label: "Terragraph" },
   { value: "mixed", label: "Mixto" },
 ];
 

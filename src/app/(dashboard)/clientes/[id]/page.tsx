@@ -146,7 +146,7 @@ const STAGE_LABELS: Record<string, { label: string; cls: string }> = {
 };
 
 const TECH_LABELS: Record<string, string> = {
-  fiber: "Fibra óptica", wireless: "Inalámbrico", copper: "Cobre", mixed: "Mixto",
+  fiber: "Fibra Óptica", wireless: "Beamforming", terragraph: "Terragraph", copper: "Cobre", mixed: "Mixto",
 };
 
 /* ========== HELPERS ========== */

@@ -111,9 +111,11 @@ function OverviewCards({ financeStats, infraOverview, ticketStats, ventasStats }
   const modules = [
     {
       label: "Finanzas", icon: "💰",
-      score: financeStats?.collection_rate ?? 0,
-      status: (financeStats?.collection_rate ?? 0) > 85 ? "operational" as const : (financeStats?.collection_rate ?? 0) > 70 ? "warning" as const : "critical" as const,
-      detail: financeStats ? `$${financeStats.invoiced_usd.toLocaleString()} facturado` : "Cargando...",
+      score: financeStats ? (financeStats.invoices_this_month === 0 ? 100 : financeStats.collection_rate) : 0,
+      status: financeStats
+        ? (financeStats.invoices_this_month === 0 ? "operational" as const : financeStats.collection_rate > 85 ? "operational" as const : financeStats.collection_rate > 70 ? "warning" as const : "critical" as const)
+        : "operational" as const,
+      detail: financeStats ? (financeStats.invoices_this_month === 0 ? "Pendiente conexión con Odoo" : `$${financeStats.invoiced_usd.toLocaleString()} facturado`) : "Cargando...",
     },
     {
       label: "Soporte", icon: "🎧",
@@ -160,8 +162,21 @@ function FinancieroTab({ stats, loading }: { stats: FinanceStats | null; loading
 
   const fmt = (n: number) => n.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+  // Show Odoo pending banner when there's no invoicing data
+  const hasInvoicingData = stats.invoices_this_month > 0 || stats.invoiced_usd > 0 || stats.invoiced_ves > 0;
+
   return (
     <div className="space-y-4">
+      {!hasInvoicingData && (
+        <div className="flex items-center gap-3 p-4 bg-amber-500/5 border border-amber-500/20 rounded-xl">
+          <DollarSign size={20} className="text-amber-400 shrink-0" />
+          <div>
+            <p className="text-sm font-medium text-amber-400">Pendiente conexión con Odoo</p>
+            <p className="text-xs text-gray-500 mt-0.5">La facturación detallada se gestionará desde Odoo. Los datos de clientes y cobros se mostrarán aquí una vez conectado.</p>
+          </div>
+        </div>
+      )}
+
       {/* Main KPIs */}
       <div className="grid grid-cols-4 gap-4">
         <KPICard
