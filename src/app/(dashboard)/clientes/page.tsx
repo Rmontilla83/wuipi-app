@@ -8,7 +8,7 @@ import {
   Users, Search, Plus, X, Save,
   Wifi, WifiOff, AlertTriangle, Phone, Mail,
   Clock, Edit2, Trash2, Power,
-  MapPin, FileText, CreditCard, Server,
+  MapPin, FileText, CreditCard, Server, Upload,
 } from "lucide-react";
 
 // ============================================
@@ -374,6 +374,12 @@ export default function ClientesPage() {
               ))}
             </select>
           )}
+          <button
+            onClick={() => router.push("/clientes/importar")}
+            className="flex items-center gap-2 border border-wuipi-border text-gray-400 hover:text-white px-4 py-2.5 rounded-lg text-sm font-medium transition-colors shrink-0"
+          >
+            <Upload size={16} /> Importar
+          </button>
           <button
             onClick={openCreate}
             className="flex items-center gap-2 bg-wuipi-accent text-black px-4 py-2.5 rounded-lg text-sm font-semibold hover:bg-wuipi-accent/90 transition-colors shrink-0"
