@@ -43,6 +43,27 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const period = searchParams.get("period") || "30d";
     const pipelineFilter = searchParams.get("pipeline_id");
+    const debug = searchParams.get("debug") === "true";
+
+    // Debug mode: raw API test
+    if (debug) {
+      try {
+        const rawLeads = await kommo.getLeads(1, 5);
+        const rawPipelines = await kommo.getPipelines();
+        return NextResponse.json({
+          debug: true,
+          leads_response_keys: rawLeads ? Object.keys(rawLeads) : null,
+          leads_embedded: rawLeads?._embedded ? Object.keys(rawLeads._embedded) : null,
+          leads_count: rawLeads?._embedded?.leads?.length ?? "no leads key",
+          leads_sample: rawLeads?._embedded?.leads?.[0] ? { id: rawLeads._embedded.leads[0].id, name: rawLeads._embedded.leads[0].name, status_id: rawLeads._embedded.leads[0].status_id, pipeline_id: rawLeads._embedded.leads[0].pipeline_id } : null,
+          pipelines_count: rawPipelines?._embedded?.pipelines?.length ?? 0,
+          raw_leads_status: rawLeads ? "ok" : "null",
+          raw_leads_type: typeof rawLeads,
+        });
+      } catch (err: any) {
+        return NextResponse.json({ debug: true, error: err.message });
+      }
+    }
 
     // Parse period
     let fromTs: number | undefined;
