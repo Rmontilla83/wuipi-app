@@ -84,7 +84,7 @@ interface ClientDetail {
   leads: Lead[];
 }
 
-type Tab = "resumen" | "finanzas" | "soporte" | "ventas" | "infraestructura";
+type Tab = "resumen" | "finanzas" | "soporte" | "ventas" | "infraestructura" | "qoe";
 
 const TABS: { id: Tab; label: string; icon: typeof User }[] = [
   { id: "resumen", label: "Resumen", icon: User },
@@ -92,6 +92,7 @@ const TABS: { id: Tab; label: string; icon: typeof User }[] = [
   { id: "soporte", label: "Soporte", icon: Headphones },
   { id: "ventas", label: "Ventas", icon: TrendingUp },
   { id: "infraestructura", label: "Infraestructura", icon: Radio },
+  { id: "qoe", label: "QoE", icon: Activity },
 ];
 
 const STATUS_MAP: Record<string, { label: string; color: string; bg: string; icon: typeof Wifi; bar: string }> = {
@@ -341,6 +342,7 @@ export default function ClientDetailPage() {
         {activeTab === "soporte" && <TabSoporte client={client} />}
         {activeTab === "ventas" && <TabVentas client={client} />}
         {activeTab === "infraestructura" && <TabInfraestructura client={client} />}
+        {activeTab === "qoe" && <TabQoE client={client} />}
       </div>
     </>
   );
@@ -815,6 +817,276 @@ function TabInfraestructura({ client }: { client: ClientDetail }) {
           </div>
         </div>
       </Card>
+    </div>
+  );
+}
+
+/* ========== TAB 6: QoE (Bequant) ========== */
+interface BequantMetricsData {
+  bandwidth: { uplink: number; downlink: number };
+  latency: number;
+  retransmissions: number;
+  congestion: number;
+  trafficAtMaxSpeed: number;
+  volume: { uplink: number; downlink: number };
+}
+interface BequantDPIData {
+  apps: Array<{ name: string; percentage: number; bytes: number }>;
+}
+interface QoEScoreData {
+  score: number;
+  level: "excellent" | "acceptable" | "degraded";
+  factors: { speedVsPlan: number; latency: number; retransmissions: number; congestion: number };
+}
+interface BequantResponseData {
+  connected: boolean;
+  message?: string;
+  subscriber?: { ip: string; policyName: string; groupName: string };
+  metrics?: BequantMetricsData;
+  dpi?: BequantDPIData;
+  qoe?: QoEScoreData;
+}
+
+const QOE_COLORS: Record<string, { color: string; bg: string; emoji: string; label: string }> = {
+  excellent: { color: "text-emerald-400", bg: "bg-emerald-400/10", emoji: "🟢", label: "Excelente" },
+  acceptable: { color: "text-amber-400", bg: "bg-amber-400/10", emoji: "🟡", label: "Aceptable" },
+  degraded: { color: "text-red-400", bg: "bg-red-400/10", emoji: "🔴", label: "Degradado" },
+};
+
+function TabQoE({ client }: { client: ClientDetail }) {
+  const [data, setData] = useState<BequantResponseData | null>(null);
+  const [qoeLoading, setQoeLoading] = useState(false);
+  const [period, setPeriod] = useState<"24h" | "7d" | "30d">("24h");
+  const [checked, setChecked] = useState(false);
+
+  const planSpeed = client.plan_speed_down || client.plans?.speed_down;
+
+  useEffect(() => {
+    if (!client.service_ip) {
+      setChecked(true);
+      return;
+    }
+    setQoeLoading(true);
+    const params = new URLSearchParams({ period });
+    if (planSpeed) params.set("planSpeed", planSpeed.toString());
+    fetch(`/api/bequant/${client.service_ip}?${params}`)
+      .then(r => r.json())
+      .then(setData)
+      .catch(() => setData({ connected: false, message: "Error de conexión" }))
+      .finally(() => { setQoeLoading(false); setChecked(true); });
+  }, [client.service_ip, period, planSpeed]);
+
+  if (!client.service_ip) {
+    return (
+      <Card>
+        <div className="text-center py-10">
+          <Activity size={36} className="mx-auto mb-3 text-gray-600" />
+          <p className="text-sm text-gray-500 mb-1">Sin IP de servicio asignada</p>
+          <p className="text-xs text-gray-600">Asigna una IP para consultar métricas de QoE</p>
+        </div>
+      </Card>
+    );
+  }
+
+  if (qoeLoading || !checked) {
+    return (
+      <Card>
+        <div className="flex items-center justify-center py-12">
+          <RefreshCw size={20} className="animate-spin text-gray-500" />
+          <span className="ml-2 text-gray-500 text-sm">Consultando Bequant...</span>
+        </div>
+      </Card>
+    );
+  }
+
+  if (!data || !data.connected) {
+    return (
+      <Card>
+        <div className="text-center py-10">
+          <Activity size={36} className="mx-auto mb-3 text-gray-600" />
+          <p className="text-sm text-gray-500 mb-1">QoE — Pendiente conexión con Bequant</p>
+          <p className="text-xs text-gray-600">
+            {data?.message || "Las métricas de calidad de experiencia estarán disponibles una vez configurado Bequant"}
+          </p>
+        </div>
+      </Card>
+    );
+  }
+
+  // Connected but subscriber not found
+  if (!data.metrics) {
+    return (
+      <Card>
+        <div className="text-center py-10">
+          <Activity size={36} className="mx-auto mb-3 text-gray-600" />
+          <p className="text-sm text-gray-500 mb-1">{data.message || "Suscriptor no encontrado"}</p>
+          <p className="text-xs text-gray-600">
+            IP <span className="font-mono text-cyan-400/80">{client.service_ip}</span> no registrada en Bequant
+          </p>
+        </div>
+      </Card>
+    );
+  }
+
+  const m = data.metrics;
+  const qoe = data.qoe;
+  const dpi = data.dpi;
+  const qoeStyle = qoe ? QOE_COLORS[qoe.level] : QOE_COLORS.acceptable;
+  const fmtBytes = (b: number) => {
+    if (b >= 1e9) return `${(b / 1e9).toFixed(1)} GB`;
+    if (b >= 1e6) return `${(b / 1e6).toFixed(1)} MB`;
+    return `${(b / 1e3).toFixed(0)} KB`;
+  };
+  const fmtSpeed = (bps: number) => {
+    if (bps >= 1e6) return `${(bps / 1e6).toFixed(1)} Mbps`;
+    if (bps >= 1e3) return `${(bps / 1e3).toFixed(0)} Kbps`;
+    return `${bps} bps`;
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Period selector */}
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-gray-400 flex items-center gap-2"><Activity size={14} /> Calidad de Experiencia (QoE)</h3>
+        <div className="flex items-center gap-1 bg-wuipi-bg rounded-lg border border-wuipi-border p-0.5">
+          {(["24h", "7d", "30d"] as const).map(p => (
+            <button
+              key={p}
+              onClick={() => setPeriod(p)}
+              className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                period === p ? "bg-wuipi-accent/10 text-wuipi-accent" : "text-gray-500 hover:text-gray-300"
+              }`}
+            >
+              {p === "24h" ? "24 horas" : p === "7d" ? "7 días" : "30 días"}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* QoE Score + Speed */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {qoe && (
+          <Card className="text-center">
+            <p className="text-xs text-gray-500 mb-3">Score QoE</p>
+            <div className={`text-6xl font-bold mb-2 ${qoeStyle.color}`}>{qoe.score}</div>
+            <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium ${qoeStyle.color} ${qoeStyle.bg}`}>
+              {qoeStyle.emoji} {qoeStyle.label}
+            </span>
+          </Card>
+        )}
+
+        <Card>
+          <p className="text-xs text-gray-500 mb-3">Velocidad Real vs Contratada</p>
+          <div className="space-y-3">
+            <div>
+              <div className="flex justify-between text-xs mb-1">
+                <span className="text-gray-400">Descarga</span>
+                <span className="text-cyan-400">{fmtSpeed(m.bandwidth.downlink)}</span>
+              </div>
+              <div className="h-3 bg-wuipi-bg rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-cyan-500/60 rounded-full transition-all"
+                  style={{ width: `${planSpeed ? Math.min(100, (m.bandwidth.downlink / 1e6 / planSpeed) * 100) : 50}%` }}
+                />
+              </div>
+              {planSpeed && <p className="text-xs text-gray-600 mt-0.5 text-right">de {planSpeed} Mbps</p>}
+            </div>
+            <div>
+              <div className="flex justify-between text-xs mb-1">
+                <span className="text-gray-400">Subida</span>
+                <span className="text-violet-400">{fmtSpeed(m.bandwidth.uplink)}</span>
+              </div>
+              <div className="h-3 bg-wuipi-bg rounded-full overflow-hidden">
+                <div className="h-full bg-violet-500/60 rounded-full" style={{ width: `${Math.min(100, m.trafficAtMaxSpeed)}%` }} />
+              </div>
+            </div>
+          </div>
+        </Card>
+
+        <Card>
+          <p className="text-xs text-gray-500 mb-3">Métricas de Red</p>
+          <div className="space-y-3">
+            <IRow icon={Activity} label="Latencia" value={`${m.latency.toFixed(1)} ms`} />
+            <IRow icon={AlertTriangle} label="Retransmisiones TCP" value={`${m.retransmissions.toFixed(1)}%`} />
+            <IRow icon={Zap} label="Congestión" value={`${m.congestion.toFixed(1)}%`} />
+          </div>
+        </Card>
+      </div>
+
+      {/* Volume + QoE Factors */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <Card>
+          <h3 className="text-sm font-semibold text-gray-400 mb-4">Consumo de datos</h3>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="p-4 bg-wuipi-bg rounded-xl border border-wuipi-border text-center">
+              <p className="text-xs text-gray-500 mb-1">Descarga</p>
+              <p className="text-2xl font-bold text-cyan-400">{fmtBytes(m.volume.downlink)}</p>
+            </div>
+            <div className="p-4 bg-wuipi-bg rounded-xl border border-wuipi-border text-center">
+              <p className="text-xs text-gray-500 mb-1">Subida</p>
+              <p className="text-2xl font-bold text-violet-400">{fmtBytes(m.volume.uplink)}</p>
+            </div>
+          </div>
+        </Card>
+
+        {qoe && (
+          <Card>
+            <h3 className="text-sm font-semibold text-gray-400 mb-4">Factores QoE</h3>
+            <div className="space-y-3">
+              {[
+                { label: "Velocidad vs Plan", value: qoe.factors.speedVsPlan, color: "bg-cyan-500" },
+                { label: "Latencia", value: qoe.factors.latency, color: "bg-emerald-500" },
+                { label: "Retransmisiones", value: qoe.factors.retransmissions, color: "bg-amber-500" },
+                { label: "Congestión", value: qoe.factors.congestion, color: "bg-violet-500" },
+              ].map(f => (
+                <div key={f.label}>
+                  <div className="flex justify-between text-xs mb-1">
+                    <span className="text-gray-400">{f.label}</span>
+                    <span className="text-gray-300">{f.value}%</span>
+                  </div>
+                  <div className="h-2 bg-wuipi-bg rounded-full overflow-hidden">
+                    <div className={`h-full ${f.color}/60 rounded-full`} style={{ width: `${f.value}%` }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Card>
+        )}
+      </div>
+
+      {/* DPI */}
+      {dpi && dpi.apps.length > 0 && (
+        <Card>
+          <h3 className="text-sm font-semibold text-gray-400 mb-4">Top Aplicaciones (DPI)</h3>
+          <div className="space-y-2">
+            {dpi.apps.slice(0, 10).map(app => (
+              <div key={app.name} className="flex items-center gap-3">
+                <span className="text-sm text-gray-300 w-32 truncate">{app.name}</span>
+                <div className="flex-1 h-6 bg-wuipi-bg rounded-lg overflow-hidden flex items-center">
+                  <div
+                    className="h-full bg-wuipi-accent/20 rounded-lg flex items-center px-2"
+                    style={{ width: `${Math.max(app.percentage, 5)}%` }}
+                  >
+                    <span className="text-xs font-medium text-wuipi-accent">{app.percentage.toFixed(1)}%</span>
+                  </div>
+                </div>
+                <span className="text-xs text-gray-500 w-16 text-right">{fmtBytes(app.bytes)}</span>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      {data.subscriber && (
+        <Card>
+          <h3 className="text-sm font-semibold text-gray-400 mb-3">Suscriptor Bequant</h3>
+          <div className="grid grid-cols-3 gap-3">
+            <IRow icon={Globe} label="IP" value={data.subscriber.ip} />
+            <IRow icon={Zap} label="Política" value={data.subscriber.policyName} />
+            <IRow icon={Hash} label="Grupo" value={data.subscriber.groupName} />
+          </div>
+        </Card>
+      )}
     </div>
   );
 }
