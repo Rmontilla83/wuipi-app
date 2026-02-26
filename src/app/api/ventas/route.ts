@@ -70,10 +70,10 @@ export async function GET(request: NextRequest) {
       ? pipelines.filter((p: any) => p.id === parseInt(pipelineFilter))
       : pipelines;
 
-    // Fetch leads for all target pipelines
+    // Fetch leads for all target pipelines (NO date filter - we need all active leads)
     const allLeads: any[] = [];
     for (const pipeline of targetPipelines) {
-      const leads = await kommo.getAllLeads({ pipelineId: pipeline.id, from: fromTs });
+      const leads = await kommo.getAllLeads({ pipelineId: pipeline.id });
       allLeads.push(...leads);
     }
 
@@ -81,6 +81,7 @@ export async function GET(request: NextRequest) {
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
     const todayTs = todayStart.getTime() / 1000;
+    const fromTs_num = fromTs || 0; // for period-based metrics
 
     // Build pipeline summaries
     const pipelineSummaries = targetPipelines.map((pipeline: any) => {
