@@ -128,7 +128,7 @@ export const crmActivityCreateSchema = z.object({
   type: z.enum(CRM_ACTIVITY_TYPES, { message: "Tipo de actividad inválido" }),
   description: z.string().min(1, "La descripción es requerida"),
   metadata: z.any().optional().nullable(),
-  created_by: z.string().optional().nullable(),
+  created_by: z.string().optional(),
 });
 
 export const crmSalespersonSchema = z.object({

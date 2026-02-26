@@ -338,8 +338,8 @@ export async function getQuotas(month: string) {
 export async function upsertQuota(quota: {
   salesperson_id: string;
   month: string;
-  target_count: number;
-  target_amount: number;
+  target_count?: number;
+  target_amount?: number;
 }) {
   const { data, error } = await supabase()
     .from("crm_quotas")

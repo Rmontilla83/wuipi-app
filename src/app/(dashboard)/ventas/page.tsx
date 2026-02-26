@@ -10,6 +10,7 @@ import {
   ArrowRight, TicketCheck, Database, Filter,
   ShoppingCart, Banknote,
 } from "lucide-react";
+import CRMVentasTab from "@/components/crm-ventas/crm-ventas-tab";
 
 // ============================================
 // TYPES
@@ -118,7 +119,6 @@ export default function VentasPage() {
               mainTab === "crm" ? "bg-wuipi-accent/10 text-wuipi-accent border-wuipi-accent/20" : "text-gray-500 hover:text-gray-300 border-transparent hover:bg-wuipi-card-hover"
             }`}>
             <TicketCheck size={16} /> CRM Ventas
-            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-400/10 text-amber-400 border border-amber-400/20">Próximo</span>
           </button>
         </div>
 
@@ -129,7 +129,7 @@ export default function VentasPage() {
             fetchData={fetchData} setRefreshing={setRefreshing}
           />
         )}
-        {mainTab === "crm" && <CRMVentasPlaceholder />}
+        {mainTab === "crm" && <CRMVentasTab />}
       </div>
     </>
   );
@@ -496,68 +496,3 @@ function KPI({ icon: Icon, label, value, sub, color = "text-white" }: {
   );
 }
 
-// ============================================
-// CRM VENTAS PLACEHOLDER
-// ============================================
-function CRMVentasPlaceholder() {
-  const features = [
-    { icon: Database, title: "Pipeline Propio", desc: "Lead → Contactado → Visita Técnica → Propuesta → Aprobado → Instalación" },
-    { icon: Users, title: "Auto-crear Cliente", desc: "Al cerrar venta: crea cliente + primera factura + orden de instalación automáticamente" },
-    { icon: Target, title: "Seguimiento", desc: "Actividades, llamadas, visitas — todo registrado y con recordatorios" },
-    { icon: TrendingUp, title: "Reportes", desc: "Forecast, funnel analytics, rendimiento por vendedor y por zona" },
-  ];
-
-  return (
-    <div className="space-y-4">
-      <Card className="!p-0 overflow-hidden">
-        <div className="h-1 bg-amber-400" />
-        <div className="p-5">
-          <div className="flex items-center gap-4">
-            <div className="w-12 h-12 rounded-xl bg-amber-400/10 border border-amber-400/20 flex items-center justify-center">
-              <TrendingUp size={24} className="text-amber-400" />
-            </div>
-            <div className="flex-1">
-              <h2 className="text-lg font-bold text-white">CRM de Ventas Propio</h2>
-              <p className="text-sm text-gray-400">Pipeline de ventas en Supabase — próxima fase</p>
-            </div>
-            <span className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-400/10 text-emerald-400 border border-emerald-400/20">
-              Visor Kommo activo
-            </span>
-          </div>
-        </div>
-      </Card>
-
-      <div className="grid grid-cols-2 gap-4">
-        {features.map((f, i) => {
-          const Icon = f.icon;
-          return (
-            <Card key={i}>
-              <div className="flex items-start gap-3">
-                <div className="w-8 h-8 rounded-lg bg-wuipi-accent/10 border border-wuipi-accent/20 flex items-center justify-center shrink-0">
-                  <Icon size={16} className="text-wuipi-accent" />
-                </div>
-                <div>
-                  <p className="text-sm font-semibold text-white">{f.title}</p>
-                  <p className="text-xs text-gray-500 mt-0.5">{f.desc}</p>
-                </div>
-              </div>
-            </Card>
-          );
-        })}
-      </div>
-
-      <Card className="!bg-emerald-500/5 border-emerald-500/10">
-        <div className="flex items-start gap-3">
-          <ExternalLink size={16} className="text-emerald-400 mt-0.5 shrink-0" />
-          <div>
-            <p className="text-sm font-semibold text-emerald-400">Transición gradual desde Kommo</p>
-            <p className="text-xs text-gray-400 mt-1">
-              El Visor Kommo Ventas seguirá activo mientras se construye el CRM propio.
-              Los datos históricos de Kommo se mantendrán como referencia.
-            </p>
-          </div>
-        </div>
-      </Card>
-    </div>
-  );
-}
