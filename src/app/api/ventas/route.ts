@@ -76,11 +76,9 @@ export async function GET(request: NextRequest) {
     const targetPipelineIds = new Set(targetPipelines.map((p: any) => p.id));
     const pipelineFiltered = rawLeads.filter((l: any) => targetPipelineIds.has(l.pipeline_id));
 
-    // === FILTER 2: By period (created_at OR updated_at within range) ===
-    // We filter by updated_at so that leads that were ACTIVE in the period show up
-    const allLeads = fromTs
-      ? pipelineFiltered.filter((l: any) => l.updated_at >= fromTs || l.created_at >= fromTs)
-      : pipelineFiltered;
+    // All leads (no period filter — Kommo leads are cumulative, filtering by
+    // date hides historical pipeline data). Period is used only for "created in period" metrics.
+    const allLeads = pipelineFiltered;
 
     // Time boundaries
     const todayStart = new Date();
@@ -194,6 +192,9 @@ export async function GET(request: NextRequest) {
     const totalValue = allLeads.filter((l: any) => l.status_id !== 142 && l.status_id !== 143).reduce((s: number, l: any) => s + (l.price || 0), 0);
     const totalWonValue = allLeads.filter((l: any) => l.status_id === 142).reduce((s: number, l: any) => s + (l.price || 0), 0);
     const createdToday = allLeads.filter((l: any) => l.created_at >= todayTs).length;
+    const createdInPeriod = fromTs
+      ? allLeads.filter((l: any) => l.created_at >= fromTs).length
+      : allLeads.length;
 
     return NextResponse.json({
       source: "kommo-ventas",
@@ -206,6 +207,7 @@ export async function GET(request: NextRequest) {
       won: totalWon,
       lost: totalLost,
       created_today: createdToday,
+      created_in_period: createdInPeriod,
       pipeline_value: totalValue,
       won_value: totalWonValue,
       conversion_rate: allLeads.length > 0 ? Math.round((totalWon / allLeads.length) * 1000) / 10 : 0,
