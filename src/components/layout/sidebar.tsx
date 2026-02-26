@@ -13,6 +13,7 @@ import {
   Headphones,
   TrendingUp,
   Banknote,
+  Radio,
   Building2,
   Users,
   Globe,
@@ -53,6 +54,7 @@ const NAV_GROUPS: NavGroup[] = [
       { id: "soporte", label: "CRM Soporte", icon: Headphones, path: "/soporte" },
       { id: "ventas", label: "CRM Ventas", icon: TrendingUp, path: "/ventas" },
       { id: "cobranzas", label: "CRM Cobranzas", icon: Banknote, path: "/cobranzas" },
+      { id: "infraestructura", label: "Infraestructura", icon: Radio, path: "/infraestructura" },
     ],
   },
   {

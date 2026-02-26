@@ -37,11 +37,11 @@ export interface ModuleHealth {
 
 // Dashboard permission map — matches sidebar nav IDs
 export const ROLE_PERMISSIONS: Record<UserRole, string[]> = {
-  admin:           ["comando", "supervisor", "soporte", "ventas", "cobranzas", "erp", "clientes", "portal-admin", "configuracion", "actualizaciones"],
-  gerente:         ["comando", "supervisor", "soporte", "ventas", "cobranzas", "erp", "clientes", "configuracion", "actualizaciones"],
+  admin:           ["comando", "supervisor", "soporte", "ventas", "cobranzas", "infraestructura", "erp", "clientes", "portal-admin", "configuracion", "actualizaciones"],
+  gerente:         ["comando", "supervisor", "soporte", "ventas", "cobranzas", "infraestructura", "erp", "clientes", "configuracion", "actualizaciones"],
   finanzas:        ["comando", "cobranzas", "erp", "clientes"],
   soporte:         ["comando", "soporte", "clientes"],
-  infraestructura: ["comando", "clientes"],
+  infraestructura: ["comando", "infraestructura", "clientes"],
   tecnico:         ["soporte"],
   vendedor:        ["comando", "ventas", "clientes"],
   cliente:         ["portal"],
@@ -52,3 +52,7 @@ export type { SupportOverview, Ticket, TechnicianStats, ZoneStats, CategoryStats
 export { CATEGORY_LABELS, CATEGORY_COLORS, STATUS_LABELS, PRIORITY_LABELS } from "./support";
 export type { FinanceOverview, Invoice, ClientDebt, BCVRate, RevenueMetrics, TaxSummary, CollectionSummary } from "./finance";
 export { PAYMENT_METHOD_LABELS, INVOICE_STATUS_LABELS } from "./finance";
+export type {
+  InfraHost, InfraProblem, InfraOverview, HostLatency,
+  InterfaceBandwidth, APClient, OutageEvent, EquipmentType, SeverityLevel,
+} from "./zabbix";
