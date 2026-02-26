@@ -6,8 +6,8 @@ import { Card } from "@/components/ui/card";
 import { KPICard } from "@/components/ui/kpi-card";
 import { ScoreRing, StatusBadge, LoadBar } from "@/components/dashboard";
 import {
-  ZabbixBanner, VistaGeneral, MapaSitios, EquiposPorTipo,
-  ProblemasActivos, LatenciaRed, EquiposCaidos,
+  ZabbixBanner, AlertBanner, KPIRow, MapaSitios,
+  ProblemasActivos, PeoresRed, DetalleEquipos,
 } from "@/components/comando/infra";
 import type { InfraOverview, InfraProblem, InfraHost } from "@/types/zabbix";
 import {
@@ -276,7 +276,7 @@ function SoporteTab() {
 }
 
 // ============================================
-// TAB: INFRAESTRUCTURA (Zabbix-powered, 6 sections)
+// TAB: INFRAESTRUCTURA (Zabbix-powered, executive dashboard)
 // ============================================
 function InfraestructuraTab({ overview, problems, hosts, loading }: {
   overview: InfraOverview | null;
@@ -293,27 +293,28 @@ function InfraestructuraTab({ overview, problems, hosts, loading }: {
       {/* Zabbix disconnected banner */}
       {overview?.zabbixConnected === false && <ZabbixBanner />}
 
-      {/* Section 1: Vista General */}
-      <VistaGeneral overview={overview} />
+      {/* ZONA 1: Alert Banner — only when hosts are down */}
+      <AlertBanner hosts={hosts} />
 
-      {/* Section 2: Mapa de Sitios */}
+      {/* ZONA 2: KPI Row — 4 large cards */}
+      <KPIRow overview={overview} hosts={hosts} />
+
+      {/* ZONA 3: Site Map — clickable grid with status bars */}
       <MapaSitios
         sites={overview?.sites || []}
+        problems={problems}
         selectedSite={selectedSite}
         onSelectSite={setSelectedSite}
       />
 
-      {/* Section 3: Equipos por Tipo */}
-      <EquiposPorTipo hosts={hosts} selectedSite={selectedSite} />
+      {/* ZONA 4: Active Problems — HIGH/AVG by default, toggle for warnings */}
+      <ProblemasActivos problems={problems} selectedSite={selectedSite} />
 
-      {/* Section 4: Problemas Activos */}
-      <ProblemasActivos problems={problems} />
+      {/* ZONA 5: Worst Latency + Worst Packet Loss */}
+      <PeoresRed hosts={hosts} selectedSite={selectedSite} />
 
-      {/* Section 5: Latencia de Red */}
-      <LatenciaRed hosts={hosts} />
-
-      {/* Section 6: Equipos Caidos */}
-      <EquiposCaidos hosts={hosts} />
+      {/* ZONA 6: Collapsible equipment table */}
+      <DetalleEquipos hosts={hosts} selectedSite={selectedSite} />
     </div>
   );
 }

@@ -1,7 +1,7 @@
-export { ZabbixBanner } from "./zabbix-banner";
-export { VistaGeneral } from "./vista-general";
+export { AlertBanner } from "./alert-banner";
+export { KPIRow } from "./kpi-row";
 export { MapaSitios } from "./mapa-sitios";
-export { EquiposPorTipo } from "./equipos-por-tipo";
 export { ProblemasActivos } from "./problemas-activos";
-export { LatenciaRed } from "./latencia-red";
-export { EquiposCaidos } from "./equipos-caidos";
+export { PeoresRed } from "./peores-red";
+export { DetalleEquipos } from "./detalle-equipos";
+export { ZabbixBanner } from "./zabbix-banner";
