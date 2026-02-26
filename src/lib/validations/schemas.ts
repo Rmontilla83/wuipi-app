@@ -148,6 +148,67 @@ export const crmQuotaSchema = z.object({
 });
 
 // ============================================
+// CRM COBRANZAS SCHEMAS
+// ============================================
+
+const CRM_COLLECTION_STAGES = [
+  "leads_entrantes", "contacto_inicial", "info_enviada", "no_clasificado",
+  "gestion_suspendidos", "gestion_pre_retiro", "gestion_cobranza",
+  "recuperado", "retirado_definitivo",
+] as const;
+
+const CRM_COLLECTION_SOURCES = ["internal", "system", "kommo"] as const;
+const CRM_COLLECTION_ACTIVITY_TYPES = ["note", "call", "visit", "stage_change", "payment_promise", "payment_received", "assignment", "system"] as const;
+
+export const crmCollectionCreateSchema = z.object({
+  client_id: z.string().uuid("Cliente inválido"),
+  client_name: z.string().min(2, "El nombre del cliente es requerido").max(255),
+  client_phone: z.string().max(30).optional().nullable(),
+  client_email: z.string().email("Email inválido").optional().nullable().or(z.literal("")),
+  stage: z.enum(CRM_COLLECTION_STAGES).default("leads_entrantes"),
+  collector_id: z.string().uuid("Cobrador inválido").optional().nullable(),
+  amount_due: z.number().min(0, "El monto no puede ser negativo").default(0),
+  amount_paid: z.number().min(0, "El monto no puede ser negativo").default(0),
+  currency: z.enum(["USD", "VES"]).default("USD"),
+  days_overdue: z.number().int().min(0).default(0),
+  last_payment_date: z.string().optional().nullable(),
+  months_overdue: z.number().int().min(0).default(0),
+  plan_name: z.string().max(100).optional().nullable(),
+  source: z.enum(CRM_COLLECTION_SOURCES).default("internal"),
+  notes: z.string().optional().nullable(),
+});
+
+export const crmCollectionUpdateSchema = crmCollectionCreateSchema.partial();
+
+export const crmCollectionMoveSchema = z.object({
+  stage: z.enum(CRM_COLLECTION_STAGES, { message: "Etapa inválida" }),
+});
+
+export const crmCollectionActivityCreateSchema = z.object({
+  collection_id: z.string().uuid("Caso inválido"),
+  type: z.enum(CRM_COLLECTION_ACTIVITY_TYPES, { message: "Tipo de actividad inválido" }),
+  description: z.string().min(1, "La descripción es requerida"),
+  metadata: z.any().optional().nullable(),
+  created_by: z.string().optional(),
+});
+
+export const crmCollectorSchema = z.object({
+  full_name: z.string().min(2, "El nombre debe tener al menos 2 caracteres").max(255),
+  email: z.string().email("Email inválido").optional().nullable().or(z.literal("")),
+  phone: z.string().max(30).optional().nullable(),
+  type: z.enum(["internal", "external"]).default("internal"),
+  is_active: z.boolean().default(true),
+  profile_id: z.string().uuid().optional().nullable(),
+});
+
+export const crmCollectionQuotaSchema = z.object({
+  collector_id: z.string().uuid("Cobrador inválido"),
+  month: z.string().min(1, "El mes es requerido"),
+  target_count: z.number().int().min(0, "La meta no puede ser negativa").default(0),
+  target_amount: z.number().min(0, "El monto no puede ser negativo").default(0),
+});
+
+// ============================================
 // HELPER: validate and return typed data or error
 // ============================================
 export function validate<T>(schema: z.ZodSchema<T>, data: unknown): { success: true; data: T } | { success: false; error: string; details: z.ZodIssue[] } {
