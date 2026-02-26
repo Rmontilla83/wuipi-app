@@ -4,11 +4,12 @@ import { useState, useEffect, useCallback } from "react";
 import { TopBar } from "@/components/layout/topbar";
 import { Card } from "@/components/ui/card";
 import { ScoreRing, StatusBadge, LoadBar } from "@/components/dashboard";
+import type { InfraOverview, InfraProblem, InfraHost } from "@/types/zabbix";
 import {
   Target, DollarSign, Headphones, Radio, TrendingUp,
   RefreshCw, AlertTriangle, Clock, Users, Wifi, WifiOff,
   ArrowUpRight, ArrowDownRight, Activity, Zap,
-  Receipt, CreditCard, BarChart3, UserPlus, Phone,
+  Receipt, CreditCard, BarChart3, UserPlus, Phone, Server,
 } from "lucide-react";
 
 // ============================================
@@ -61,7 +62,10 @@ function TabButton({ tab, current, icon: Icon, label, color, onClick }: {
 // ============================================
 // OVERVIEW CARDS (top row, always visible)
 // ============================================
-function OverviewCards({ financeStats }: { financeStats: FinanceStats | null }) {
+function OverviewCards({ financeStats, infraOverview }: { financeStats: FinanceStats | null; infraOverview: InfraOverview | null }) {
+  const infraScore = infraOverview?.healthScore ?? 0;
+  const infraStatus = infraScore > 85 ? "operational" as const : infraScore > 60 ? "warning" as const : "critical" as const;
+
   const modules = [
     {
       label: "Finanzas", icon: "💰",
@@ -74,8 +78,10 @@ function OverviewCards({ financeStats }: { financeStats: FinanceStats | null }) 
       detail: "23 tickets abiertos",
     },
     {
-      label: "Red", icon: "📡", score: 94, status: "operational" as const,
-      detail: "6 nodos activos",
+      label: "Red", icon: "📡",
+      score: infraScore,
+      status: infraStatus,
+      detail: infraOverview ? `${infraOverview.hostsUp}/${infraOverview.totalHosts} hosts online` : "Cargando...",
     },
     {
       label: "Ventas", icon: "📈", score: 85, status: "operational" as const,
@@ -265,102 +271,138 @@ function SoporteTab() {
 }
 
 // ============================================
-// TAB: INFRAESTRUCTURA
+// TAB: INFRAESTRUCTURA (Zabbix-powered)
 // ============================================
-function InfraestructuraTab() {
-  const nodes = [
-    { name: "OLT Lechería-Norte", status: "degraded" as const, clients: 245, uptime: "99.1%", load: 72, alerts: 2 },
-    { name: "OLT Lechería-Sur", status: "online" as const, clients: 189, uptime: "99.9%", load: 45, alerts: 0 },
-    { name: "OLT Barcelona-Centro", status: "online" as const, clients: 312, uptime: "99.8%", load: 61, alerts: 0 },
-    { name: "OLT Barcelona-Sur", status: "warning" as const, clients: 198, uptime: "99.5%", load: 87, alerts: 1 },
-    { name: "OLT Puerto La Cruz", status: "online" as const, clients: 276, uptime: "99.7%", load: 53, alerts: 0 },
-    { name: "Core Router Principal", status: "online" as const, clients: 0, uptime: "99.99%", load: 34, alerts: 0 },
-  ];
+function InfraestructuraTab({ overview, problems, hosts, loading }: {
+  overview: InfraOverview | null;
+  problems: InfraProblem[];
+  hosts: InfraHost[];
+  loading: boolean;
+}) {
+  if (loading) return <LoadingPlaceholder />;
 
-  const criticalAlerts = nodes.reduce((sum, n) => sum + n.alerts, 0);
+  const hostsDown = hosts.filter((h) => h.status === "offline");
+  const highSevProblems = problems.filter((p) => p.severity === "disaster" || p.severity === "high");
 
-  const alerts = [
-    { id: 1, type: "critical", msg: "OLT Lechería-Norte: latencia >150ms", time: "Hace 3 min" },
-    { id: 2, type: "warning", msg: "Barcelona-Sur al 87% de capacidad", time: "Hace 2h" },
-    { id: 3, type: "critical", msg: "5 clientes zona Lechería sin servicio", time: "Hace 5 min" },
-    { id: 4, type: "info", msg: "Mantenimiento OLT Sur programado mañana 2am", time: "Hace 4h" },
-  ];
-
-  const alertStyles: Record<string, { bg: string; border: string; dot: string }> = {
-    critical: { bg: "bg-red-500/10", border: "border-red-500/30", dot: "bg-red-400" },
-    warning: { bg: "bg-amber-500/10", border: "border-amber-500/30", dot: "bg-amber-400" },
-    info: { bg: "bg-blue-500/10", border: "border-blue-500/30", dot: "bg-blue-400" },
+  const severityStyles: Record<string, { bg: string; border: string; dot: string }> = {
+    disaster: { bg: "bg-red-500/10", border: "border-red-500/30", dot: "bg-red-500" },
+    high: { bg: "bg-red-500/10", border: "border-red-500/30", dot: "bg-red-400" },
+    average: { bg: "bg-amber-500/10", border: "border-amber-500/30", dot: "bg-amber-400" },
+    warning: { bg: "bg-yellow-500/10", border: "border-yellow-500/30", dot: "bg-yellow-400" },
+    information: { bg: "bg-blue-500/10", border: "border-blue-500/30", dot: "bg-blue-400" },
+    not_classified: { bg: "bg-gray-500/10", border: "border-gray-500/30", dot: "bg-gray-400" },
   };
+
+  function formatDuration(seconds: number): string {
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
+    if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`;
+    return `${Math.floor(seconds / 86400)}d`;
+  }
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-4 gap-4">
-        <KPICard label="Nodos activos" value={nodes.length.toString()} icon={Radio} color="cyan" />
-        <KPICard label="Clientes conectados" value={nodes.reduce((s, n) => s + n.clients, 0).toString()} icon={Wifi} color="emerald" />
-        <KPICard label="Uptime general" value="99.6%" icon={Activity} color="emerald" />
-        <KPICard label="Alertas activas" value={criticalAlerts.toString()} icon={AlertTriangle} color={criticalAlerts > 0 ? "red" : "emerald"} />
+      <div className="grid grid-cols-5 gap-4">
+        <KPICard label="Hosts totales" value={overview?.totalHosts?.toString() || "0"} icon={Server} color="cyan" />
+        <KPICard label="En línea" value={overview?.hostsUp?.toString() || "0"} icon={Wifi} color="emerald" />
+        <KPICard label="Caídos" value={overview?.hostsDown?.toString() || "0"} icon={WifiOff} color={overview && overview.hostsDown > 0 ? "red" : "emerald"} />
+        <KPICard label="Uptime" value={overview ? `${overview.uptimePercent}%` : "—"} icon={Activity} color="emerald" />
+        <KPICard label="Problemas" value={overview?.totalProblems?.toString() || "0"} icon={AlertTriangle} color={overview && overview.totalProblems > 0 ? "amber" : "emerald"} />
       </div>
 
       <div className="grid grid-cols-2 gap-4">
+        {/* Problems list */}
         <Card>
           <div className="flex justify-between items-center mb-4">
-            <h3 className="text-base font-bold text-white">📡 Estado de Nodos</h3>
-            <span className="text-xs text-gray-500">PRTG Live</span>
-          </div>
-          <div className="space-y-3">
-            {nodes.map((node) => (
-              <div key={node.name} className="p-3 bg-wuipi-bg rounded-xl border border-wuipi-border">
-                <div className="flex justify-between items-center mb-2">
-                  <span className="text-sm font-semibold text-white">{node.name}</span>
-                  <StatusBadge status={node.status} />
-                </div>
-                <LoadBar value={node.load} />
-                <div className="flex gap-4 mt-2 text-xs text-gray-500">
-                  {node.clients > 0 && <span>👥 {node.clients}</span>}
-                  <span>⬆ {node.uptime}</span>
-                  <span>📊 {node.load}%</span>
-                  {node.alerts > 0 && <span className="text-red-400">⚠ {node.alerts}</span>}
-                </div>
-              </div>
-            ))}
-          </div>
-        </Card>
-
-        <Card>
-          <div className="flex justify-between items-center mb-4">
-            <h3 className="text-base font-bold text-white">🔔 Alertas de Red</h3>
-            {criticalAlerts > 0 && (
+            <h3 className="text-base font-bold text-white flex items-center gap-2">
+              <AlertTriangle size={16} /> Problemas Activos
+            </h3>
+            {highSevProblems.length > 0 && (
               <span className="px-2.5 py-1 bg-red-500/10 text-red-400 rounded-full text-xs font-bold">
-                {criticalAlerts} críticas
+                {highSevProblems.length} críticos
               </span>
             )}
           </div>
-          <div className="space-y-2">
-            {alerts.map((alert) => {
-              const style = alertStyles[alert.type] || alertStyles.info;
+          <div className="space-y-2 max-h-[350px] overflow-y-auto">
+            {problems.slice(0, 10).map((problem) => {
+              const style = severityStyles[problem.severity] || severityStyles.not_classified;
               return (
-                <div key={alert.id} className={`p-3 ${style.bg} border ${style.border} rounded-xl flex items-start gap-3`}>
-                  <span className={`w-2 h-2 rounded-full ${style.dot} mt-1.5 shrink-0 shadow-[0_0_6px] shadow-current`} />
-                  <div>
-                    <p className="text-sm text-white">{alert.msg}</p>
-                    <p className="text-xs text-gray-500 mt-1">{alert.time}</p>
+                <div key={problem.id} className={`p-3 ${style.bg} border ${style.border} rounded-xl`}>
+                  <div className="flex items-start gap-2">
+                    <span className={`w-2 h-2 rounded-full ${style.dot} mt-1.5 shrink-0 shadow-[0_0_6px] shadow-current`} />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm text-white truncate">{problem.name}</p>
+                      <div className="flex gap-3 mt-1 text-xs text-gray-500">
+                        <span>{problem.hostName}</span>
+                        <span>{formatDuration(problem.duration)}</span>
+                        {problem.acknowledged && <span className="text-emerald-400">ACK</span>}
+                      </div>
+                    </div>
                   </div>
                 </div>
               );
             })}
+            {problems.length === 0 && (
+              <p className="text-sm text-emerald-400 text-center py-4">Sin problemas activos</p>
+            )}
           </div>
-          <div className="mt-4 grid grid-cols-2 gap-3">
-            <div className="p-3 bg-wuipi-bg rounded-xl border border-wuipi-border">
-              <p className="text-xs text-gray-500">Ancho de banda</p>
-              <p className="text-lg font-bold text-cyan-400">4.2 Gbps</p>
-              <p className="text-xs text-gray-500">de 10 Gbps</p>
+        </Card>
+
+        {/* Hosts status */}
+        <Card>
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="text-base font-bold text-white flex items-center gap-2">
+              <Server size={16} /> Estado de Red
+            </h3>
+            <span className="text-xs text-gray-500">Zabbix Live</span>
+          </div>
+
+          {/* Hosts down */}
+          {hostsDown.length > 0 && (
+            <div className="mb-4">
+              <p className="text-xs text-red-400 font-semibold mb-2">Hosts caídos ({hostsDown.length})</p>
+              <div className="space-y-2">
+                {hostsDown.slice(0, 6).map((host) => (
+                  <div key={host.id} className="p-2.5 bg-red-500/10 border border-red-500/20 rounded-lg flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse shrink-0" />
+                    <span className="text-sm text-red-300 font-medium truncate">{host.name}</span>
+                    <span className="text-xs text-gray-600 ml-auto shrink-0">{host.ip}</span>
+                  </div>
+                ))}
+              </div>
             </div>
-            <div className="p-3 bg-wuipi-bg rounded-xl border border-wuipi-border">
-              <p className="text-xs text-gray-500">Paquetes perdidos</p>
-              <p className="text-lg font-bold text-emerald-400">0.02%</p>
-              <p className="text-xs text-gray-500">Últimas 24h</p>
+          )}
+
+          {/* Summary stats */}
+          <div className="grid grid-cols-3 gap-3 mb-4">
+            <div className="p-3 bg-wuipi-bg rounded-xl border border-wuipi-border text-center">
+              <p className="text-lg font-bold text-emerald-400">{overview?.hostsUp || 0}</p>
+              <p className="text-[10px] text-gray-500">Online</p>
+            </div>
+            <div className="p-3 bg-wuipi-bg rounded-xl border border-wuipi-border text-center">
+              <p className="text-lg font-bold text-red-400">{overview?.hostsDown || 0}</p>
+              <p className="text-[10px] text-gray-500">Offline</p>
+            </div>
+            <div className="p-3 bg-wuipi-bg rounded-xl border border-wuipi-border text-center">
+              <p className="text-lg font-bold text-gray-400">{overview?.hostsUnknown || 0}</p>
+              <p className="text-[10px] text-gray-500">Desconocido</p>
             </div>
           </div>
+
+          {/* Health score */}
+          {overview && (
+            <div className="flex items-center gap-4 p-3 bg-wuipi-bg rounded-xl border border-wuipi-border">
+              <ScoreRing score={overview.healthScore} size={64} />
+              <div>
+                <p className="text-sm font-bold text-white">Health Score</p>
+                <p className="text-xs text-gray-500">
+                  {overview.problemsBySeverity.disaster > 0 && <span className="text-red-400">{overview.problemsBySeverity.disaster} disaster </span>}
+                  {overview.problemsBySeverity.high > 0 && <span className="text-red-300">{overview.problemsBySeverity.high} high </span>}
+                  {overview.problemsBySeverity.average > 0 && <span className="text-amber-400">{overview.problemsBySeverity.average} avg </span>}
+                  {overview.problemsBySeverity.warning > 0 && <span className="text-yellow-400">{overview.problemsBySeverity.warning} warn</span>}
+                </p>
+              </div>
+            </div>
+          )}
         </Card>
       </div>
     </div>
@@ -522,6 +564,12 @@ export default function ComandoPage() {
   const [financeStats, setFinanceStats] = useState<FinanceStats | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // Infra state
+  const [infraOverview, setInfraOverview] = useState<InfraOverview | null>(null);
+  const [infraProblems, setInfraProblems] = useState<InfraProblem[]>([]);
+  const [infraHosts, setInfraHosts] = useState<InfraHost[]>([]);
+  const [infraLoading, setInfraLoading] = useState(true);
+
   const loadFinanceStats = useCallback(async () => {
     try {
       const res = await fetch("/api/facturacion/stats");
@@ -536,9 +584,30 @@ export default function ComandoPage() {
     }
   }, []);
 
+  const loadInfraData = useCallback(async () => {
+    try {
+      const [overview, problems, hosts] = await Promise.all([
+        fetch("/api/infraestructura").then((r) => r.json()),
+        fetch("/api/infraestructura/problems").then((r) => r.json()),
+        fetch("/api/infraestructura/hosts").then((r) => r.json()),
+      ]);
+      setInfraOverview(overview);
+      setInfraProblems(problems);
+      setInfraHosts(hosts);
+    } catch (err) {
+      console.error("Error loading infra data:", err);
+    } finally {
+      setInfraLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     loadFinanceStats();
-  }, [loadFinanceStats]);
+    loadInfraData();
+    // Auto-refresh infra data every 60s
+    const interval = setInterval(loadInfraData, 60000);
+    return () => clearInterval(interval);
+  }, [loadFinanceStats, loadInfraData]);
 
   return (
     <>
@@ -547,7 +616,7 @@ export default function ComandoPage() {
         icon={<Target size={22} />}
         actions={
           <button
-            onClick={loadFinanceStats}
+            onClick={() => { loadFinanceStats(); loadInfraData(); }}
             className="flex items-center gap-2 px-3 py-2 rounded-lg border border-wuipi-border text-gray-400 hover:text-white text-sm transition-colors"
           >
             <RefreshCw size={14} /> Actualizar
@@ -557,7 +626,7 @@ export default function ComandoPage() {
 
       <div className="flex-1 overflow-auto p-6 space-y-4">
         {/* Overview Cards — always visible */}
-        <OverviewCards financeStats={financeStats} />
+        <OverviewCards financeStats={financeStats} infraOverview={infraOverview} />
 
         {/* Tab Selector */}
         <div className="flex gap-2 border-b border-wuipi-border pb-3">
@@ -570,7 +639,7 @@ export default function ComandoPage() {
         {/* Tab Content */}
         {tab === "financiero" && <FinancieroTab stats={financeStats} loading={loading} />}
         {tab === "soporte" && <SoporteTab />}
-        {tab === "infraestructura" && <InfraestructuraTab />}
+        {tab === "infraestructura" && <InfraestructuraTab overview={infraOverview} problems={infraProblems} hosts={infraHosts} loading={infraLoading} />}
         {tab === "ventas" && <VentasTab />}
       </div>
     </>
