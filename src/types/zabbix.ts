@@ -101,6 +101,7 @@ export interface InfraSiteSummary {
   hostsUp: number;
   hostsDown: number;
   hostsWarning: number;
+  avgLatency: number | null;  // ms
 }
 
 export interface InfraHost {

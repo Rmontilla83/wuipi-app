@@ -285,14 +285,20 @@ const KNOWN_SITES = [
 ];
 
 export function extractSite(hostName: string): string {
-  // Match site code from patterns like CCR_AVI_..., PtP_AVI-..., Lbs_AVI_..., etc.
-  // Site codes typically appear after the first underscore
-  const parts = hostName.replace(/-/g, "_").split("_");
+  // Normalize: replace dashes/dots with underscores, split into tokens
+  const parts = hostName.replace(/[-./]/g, "_").split("_");
   for (const part of parts) {
     const upper = part.toUpperCase();
     if (KNOWN_SITES.includes(upper)) return upper;
   }
-  return "N/A";
+  // Case-insensitive substring match for 3-letter site codes embedded in longer tokens
+  const nameUpper = hostName.toUpperCase();
+  for (const site of KNOWN_SITES) {
+    // Match site code surrounded by non-alpha boundaries (e.g. "Hbs_Reb_S01" → REB)
+    const re = new RegExp(`(?:^|[^A-Z])${site}(?:$|[^A-Z])`);
+    if (re.test(nameUpper)) return site;
+  }
+  return "OTROS";
 }
 
 export function mapSeverity(severity: ZabbixSeverity): SeverityLevel {
@@ -320,11 +326,38 @@ export async function getInfraOverview(): Promise<InfraOverview> {
   if (!isConfigured()) throw new Error("Zabbix no configurado");
 
   const [hosts, problems] = await Promise.all([getHosts(), getProblems()]);
+  const hostids = hosts.map((h) => h.hostid);
 
-  const hostsUp = hosts.filter((h) => h.available === "1").length;
-  const hostsDown = hosts.filter((h) => h.available === "2").length;
-  const hostsUnknown = hosts.filter((h) => h.available === "0").length;
+  // Fetch icmpping + icmppingsec for all hosts to determine real status
+  const items = hostids.length > 0
+    ? await getItems(hostids, ["icmpping", "icmppingsec"])
+    : [];
+
+  const pingByHost = new Map<string, string>();    // hostid → "1"/"0"
+  const latencyByHost = new Map<string, number>();  // hostid → ms
+  for (const item of items) {
+    if (item.key_ === "icmpping") {
+      pingByHost.set(item.hostid, item.lastvalue);
+    } else if (item.key_.startsWith("icmppingsec")) {
+      latencyByHost.set(item.hostid, parseFloat(item.lastvalue) * 1000);
+    }
+  }
+
+  // Count status based on icmpping
+  let hostsUp = 0, hostsDown = 0, hostsUnknown = 0;
+  for (const h of hosts) {
+    const ping = pingByHost.get(h.hostid);
+    if (ping === "1") hostsUp++;
+    else if (ping === "0") hostsDown++;
+    else hostsUnknown++;
+  }
   const totalHosts = hosts.length;
+
+  // Health Score = % of hosts responding to ping
+  const hostsWithPing = hostsUp + hostsDown;
+  const healthScore = hostsWithPing > 0
+    ? Math.round((hostsUp / hostsWithPing) * 100)
+    : 0;
 
   const uptimePercent = totalHosts > 0
     ? Math.round(((hostsUp / totalHosts) * 100) * 100) / 100
@@ -337,30 +370,37 @@ export async function getInfraOverview(): Promise<InfraOverview> {
     problemsBySeverity[mapSeverity(p.severity)]++;
   }
 
-  const disasterWeight = problemsBySeverity.disaster * 15;
-  const highWeight = problemsBySeverity.high * 8;
-  const avgWeight = problemsBySeverity.average * 4;
-  const warnWeight = problemsBySeverity.warning * 1;
-  const downPenalty = totalHosts > 0 ? (hostsDown / totalHosts) * 40 : 0;
-  const healthScore = Math.max(0, Math.min(100,
-    Math.round(100 - disasterWeight - highWeight - avgWeight - warnWeight - downPenalty)
-  ));
-
-  // Build site summaries
-  const siteMap = new Map<string, { up: number; down: number; warning: number; total: number }>();
+  // Build site summaries with latency
+  const siteMap = new Map<string, { up: number; down: number; unknown: number; total: number; latencies: number[] }>();
   for (const h of hosts) {
     const site = extractSite(h.name);
-    if (site === "N/A") continue;
-    const entry = siteMap.get(site) || { up: 0, down: 0, warning: 0, total: 0 };
+    const entry = siteMap.get(site) || { up: 0, down: 0, unknown: 0, total: 0, latencies: [] };
     entry.total++;
-    if (h.available === "1") entry.up++;
-    else if (h.available === "2") entry.down++;
-    else entry.warning++;
+    const ping = pingByHost.get(h.hostid);
+    if (ping === "1") entry.up++;
+    else if (ping === "0") entry.down++;
+    else entry.unknown++;
+    const lat = latencyByHost.get(h.hostid);
+    if (lat !== undefined && lat > 0) entry.latencies.push(lat);
     siteMap.set(site, entry);
   }
   const sites: InfraSiteSummary[] = Array.from(siteMap.entries())
-    .map(([code, s]) => ({ code, totalHosts: s.total, hostsUp: s.up, hostsDown: s.down, hostsWarning: s.warning }))
-    .sort((a, b) => b.totalHosts - a.totalHosts);
+    .map(([code, s]) => ({
+      code,
+      totalHosts: s.total,
+      hostsUp: s.up,
+      hostsDown: s.down,
+      hostsWarning: s.unknown,
+      avgLatency: s.latencies.length > 0
+        ? Math.round((s.latencies.reduce((a, b) => a + b, 0) / s.latencies.length) * 10) / 10
+        : null,
+    }))
+    .sort((a, b) => {
+      // Sites with down hosts first, then by total hosts desc
+      if (a.hostsDown > 0 && b.hostsDown === 0) return -1;
+      if (a.hostsDown === 0 && b.hostsDown > 0) return 1;
+      return b.totalHosts - a.totalHosts;
+    });
 
   return {
     totalHosts, hostsUp, hostsDown, hostsUnknown, uptimePercent,
@@ -376,9 +416,9 @@ export async function getInfraHosts(): Promise<InfraHost[]> {
   const hosts = await getHosts();
   const hostids = hosts.map((h) => h.hostid);
 
-  // Fetch ICMP and uptime items for all hosts
+  // Fetch icmpping (UP/DOWN), ICMP metrics, and uptime for all hosts
   const items = hostids.length > 0
-    ? await getItems(hostids, ["icmppingsec", "icmppingloss", "system.hw.uptime"])
+    ? await getItems(hostids, ["icmpping", "icmppingsec", "icmppingloss", "system.hw.uptime"])
     : [];
 
   const itemsByHost = new Map<string, ZabbixItem[]>();
@@ -390,10 +430,18 @@ export async function getInfraHosts(): Promise<InfraHost[]> {
 
   return hosts.map((host): InfraHost => {
     const hostItems = itemsByHost.get(host.hostid) || [];
+    // icmpping: lastvalue "1" = UP, "0" = DOWN
+    const pingItem = hostItems.find((i) => i.key_ === "icmpping");
     const latencyItem = hostItems.find((i) => i.key_.startsWith("icmppingsec"));
     const lossItem = hostItems.find((i) => i.key_.startsWith("icmppingloss"));
     const uptimeItem = hostItems.find((i) => i.key_.startsWith("system.hw.uptime"));
     const detailed = classifyHostDetailed(host.name);
+
+    // Determine status from icmpping item, not from host.available
+    let status: "online" | "offline" | "unknown" = "unknown";
+    if (pingItem) {
+      status = pingItem.lastvalue === "1" ? "online" : "offline";
+    }
 
     return {
       id: host.hostid,
@@ -401,7 +449,7 @@ export async function getInfraHosts(): Promise<InfraHost[]> {
       type: classifyHost(host),
       detailedType: detailed.detailedType,
       detailedTypeLabel: detailed.detailedTypeLabel,
-      status: host.available === "1" ? "online" : host.available === "2" ? "offline" : "unknown",
+      status,
       ip: host.interfaces[0]?.ip || "",
       groups: (host.hostgroups || []).map((g) => g.name),
       site: extractSite(host.name),
