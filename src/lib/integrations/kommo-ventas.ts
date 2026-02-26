@@ -58,27 +58,22 @@ export async function getLeads(page: number = 1, limit: number = 250, filter?: R
   return kommoFetch<any>("/leads", params);
 }
 
-export async function getAllLeads(options?: { from?: number; to?: number; pipelineId?: number }): Promise<any[]> {
+export async function getAllLeads(options?: { from?: number; to?: number }): Promise<any[]> {
   const allLeads: any[] = [];
   let page = 1;
   const maxPages = 40;
 
   while (page <= maxPages) {
-    try {
-      const filter: Record<string, string> = {};
-      if (options?.from) filter["filter[created_at][from]"] = options.from.toString();
-      if (options?.to) filter["filter[created_at][to]"] = options.to.toString();
-      if (options?.pipelineId) filter["filter[pipe]"] = options.pipelineId.toString();
+    const filter: Record<string, string> = {};
+    if (options?.from) filter["filter[created_at][from]"] = options.from.toString();
+    if (options?.to) filter["filter[created_at][to]"] = options.to.toString();
 
-      const data = await getLeads(page, 250, filter);
-      const leads = data?._embedded?.leads || [];
-      if (leads.length === 0) break;
-      allLeads.push(...leads);
-      if (!data._links?.next) break;
-      page++;
-    } catch {
-      break;
-    }
+    const data = await getLeads(page, 250, filter);
+    const leads = data?._embedded?.leads || [];
+    if (leads.length === 0) break;
+    allLeads.push(...leads);
+    if (!data._links?.next) break;
+    page++;
   }
 
   return allLeads;

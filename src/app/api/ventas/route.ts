@@ -91,12 +91,12 @@ export async function GET(request: NextRequest) {
       ? pipelines.filter((p: any) => p.id === parseInt(pipelineFilter))
       : pipelines;
 
-    // Fetch leads for all target pipelines (NO date filter - we need all active leads)
-    const allLeads: any[] = [];
-    for (const pipeline of targetPipelines) {
-      const leads = await kommo.getAllLeads({ pipelineId: pipeline.id });
-      allLeads.push(...leads);
-    }
+    // Fetch ALL leads (no pipeline filter in API - filter server-side)
+    const rawLeads = await kommo.getAllLeads();
+    
+    // Filter by selected pipeline(s) if needed
+    const targetPipelineIds = new Set(targetPipelines.map((p: any) => p.id));
+    const allLeads = rawLeads.filter((l: any) => targetPipelineIds.has(l.pipeline_id));
 
     // Time boundaries
     const todayStart = new Date();
