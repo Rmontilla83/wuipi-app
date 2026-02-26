@@ -7,7 +7,8 @@ import {
   Megaphone, Rocket, Wrench, Sparkles, Bug, Shield,
   ChevronDown, ChevronRight, CheckCircle2, Clock,
   Package, Database, Layout, Users, CreditCard,
-  Radio, Brain, Globe, Headphones,
+  Radio, Brain, Globe, Headphones, Activity,
+  FileSpreadsheet, Server,
 } from "lucide-react";
 
 /* ========== TYPES ========== */
@@ -43,6 +44,74 @@ const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string }
 };
 
 const RELEASES: Release[] = [
+  {
+    version: "1.4.0",
+    date: "2026-02-26",
+    title: "Importador Masivo de Clientes",
+    description: "Carga masiva de clientes desde Excel o CSV con mapeo de columnas, validación y upsert automático.",
+    icon: FileSpreadsheet,
+    status: "deployed",
+    changes: [
+      { type: "feature", text: "Página /clientes/importar con drag & drop para archivos .xlsx, .xls y .csv" },
+      { type: "feature", text: "Auto-mapeo inteligente de columnas (detecta nombres, cédulas, IPs, etc.)" },
+      { type: "feature", text: "Vista previa de datos antes de importar con validación de campos obligatorios" },
+      { type: "feature", text: "Importación en lotes de 50 con barra de progreso y resumen final" },
+      { type: "feature", text: "Upsert por documento: actualiza si existe, crea si es nuevo" },
+      { type: "feature", text: "Detección de IPs duplicadas y filas sin nombre" },
+      { type: "improvement", text: "Botón 'Importar' en el listado de clientes junto a 'Nuevo Cliente'" },
+    ],
+  },
+  {
+    version: "1.3.0",
+    date: "2026-02-26",
+    title: "Consolidación: La Tarjeta del Cliente como Núcleo",
+    description: "Reestructuración completa del cliente como hub central con 6 tabs, datos reales en Centro de Comando y nuevos campos de servicio.",
+    icon: Users,
+    status: "deployed",
+    changes: [
+      { type: "feature", text: "Ficha del cliente con 6 tabs: Resumen, Finanzas, Soporte, Ventas, Infraestructura, QoE" },
+      { type: "feature", text: "Tab Resumen con datos de servicio (IP, MAC, nodo, VLAN, router, tecnología)" },
+      { type: "feature", text: "Tab Soporte con tickets reales del cliente y acceso directo a crear ticket" },
+      { type: "feature", text: "Tab Ventas con historial de leads asociados al cliente" },
+      { type: "feature", text: "Tab Infraestructura con estado Zabbix del equipo por IP de servicio" },
+      { type: "feature", text: "Tab QoE con integración Bequant: score, latencia, retransmisiones, DPI" },
+      { type: "feature", text: "Listado de clientes con columnas Nodo, IP, filtro por nodo y campos técnicos en modal" },
+      { type: "feature", text: "Centro de Comando: datos reales de tickets y CRM en vez de mock data" },
+      { type: "feature", text: "API endpoints: /api/tickets/stats, /api/crm-ventas/stats, /api/facturacion/network-nodes" },
+      { type: "improvement", text: "Banner de conexión pendiente con Odoo en tab Finanzas" },
+    ],
+  },
+  {
+    version: "1.2.0",
+    date: "2026-02-26",
+    title: "Dashboard Ejecutivo de Infraestructura",
+    description: "Rediseño del dashboard de infraestructura con layout de 6 zonas y datos reales de Zabbix.",
+    icon: Server,
+    status: "deployed",
+    changes: [
+      { type: "feature", text: "Layout de 6 zonas: KPIs, mapa de red, alertas, uptime ranking, tráfico y latencia" },
+      { type: "feature", text: "Datos en tiempo real desde Zabbix API con icmpping para estado de hosts" },
+      { type: "feature", text: "Ranking de uptime por host con barras visuales" },
+      { type: "improvement", text: "Migración de PRTG a Zabbix 7.x como fuente de monitoreo" },
+      { type: "fix", text: "Corrección de detección de estado usando icmpping en vez de campo available" },
+    ],
+  },
+  {
+    version: "1.1.0",
+    date: "2026-02-26",
+    title: "Preparación Bequant + UX Polish",
+    description: "Integración preparada para Bequant QoE, tecnologías de servicio actualizadas y pulido de interfaz.",
+    icon: Activity,
+    status: "deployed",
+    changes: [
+      { type: "feature", text: "Tipos e integración completa para Bequant QoE API (subscriber, metrics, DPI)" },
+      { type: "feature", text: "Calculadora de QoE Score con ponderación: velocidad 35%, latencia 25%, retransmisiones 20%, congestión 20%" },
+      { type: "feature", text: "API route /api/bequant/[ip] con parámetros de período y velocidad contratada" },
+      { type: "improvement", text: "Tecnologías de servicio actualizadas: Fibra Óptica, Beamforming, Terragraph" },
+      { type: "improvement", text: "Empty states mejorados en Centro de Comando para módulos sin datos" },
+      { type: "fix", text: "Score del módulo Financiero no muestra 'critical' cuando no hay facturas" },
+    ],
+  },
   {
     version: "1.0.0",
     date: "2026-02-25",
