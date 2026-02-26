@@ -22,8 +22,22 @@ import type {
 
 // --- Config ---
 
-const ZABBIX_URL = process.env.ZABBIX_URL;       // e.g. https://zabbix.wuipi.com/api_jsonrpc.php
+const ZABBIX_URL = process.env.ZABBIX_URL;       // e.g. https://45.181.126.127:9447/zabbix/api_jsonrpc.php
 const ZABBIX_AUTH_TOKEN = process.env.ZABBIX_AUTH_TOKEN;
+
+// Self-signed SSL: Zabbix server uses a self-signed certificate.
+// We scope the TLS override to only affect Zabbix API calls.
+function withInsecureTLS<T>(fn: () => Promise<T>): Promise<T> {
+  const prev = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+  return fn().finally(() => {
+    if (prev === undefined) {
+      delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+    } else {
+      process.env.NODE_TLS_REJECT_UNAUTHORIZED = prev;
+    }
+  });
+}
 
 export function isConfigured(): boolean {
   return !!(ZABBIX_URL && ZABBIX_AUTH_TOKEN);
@@ -64,11 +78,14 @@ async function zabbixCall<T>(method: string, params: Record<string, unknown> = {
     id: rpcId++,
   };
 
-  const response = await fetch(ZABBIX_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
+  // Wrap in withInsecureTLS to accept self-signed certificates
+  const response = await withInsecureTLS(() =>
+    fetch(ZABBIX_URL!, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    })
+  );
 
   if (!response.ok) {
     throw new Error(`Zabbix API HTTP ${response.status}: ${response.statusText}`);
