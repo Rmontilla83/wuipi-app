@@ -160,7 +160,7 @@ export async function generateBriefing(
   // Prefer Gemini Flash (cheap), fallback to Claude
   if (engines.gemini) {
     try {
-      const content = await callGeminiFlash(systemPrompt, userContent, 1000);
+      const content = await callGeminiFlash(systemPrompt, userContent, 2000);
       return { content, engine: "gemini" };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

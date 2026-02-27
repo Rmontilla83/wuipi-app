@@ -64,15 +64,20 @@ export async function POST() {
     // 3. Generate briefing (Gemini Flash preferred, Claude fallback)
     const { content: rawText, engine } = await generateBriefing(BRIEFING_SYSTEM_PROMPT, context);
 
-    // 4. Parse JSON from response
+    // 4. Parse JSON from response (strip markdown code blocks, thinking tags, etc.)
     let briefing;
     try {
-      const jsonMatch = rawText.match(/\{[\s\S]*\}/);
-      briefing = JSON.parse(jsonMatch ? jsonMatch[0] : rawText);
+      let cleaned = rawText
+        .replace(/```(?:json)?\s*/gi, "")
+        .replace(/```/g, "")
+        .replace(/<think>[\s\S]*?<\/think>/gi, "")
+        .trim();
+      const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+      briefing = JSON.parse(jsonMatch ? jsonMatch[0] : cleaned);
     } catch {
-      console.error(`[Supervisor] Failed to parse ${engine} briefing JSON:`, rawText);
+      console.error(`[Supervisor] Failed to parse ${engine} briefing JSON. Raw (first 500):`, rawText.slice(0, 500));
       return NextResponse.json(
-        { error: `Error al parsear respuesta de ${engine}`, raw: rawText },
+        { error: `Error al parsear respuesta de ${engine}`, raw: rawText.slice(0, 500) },
         { status: 500 }
       );
     }
