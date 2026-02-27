@@ -173,7 +173,7 @@ export async function chatWithSupervisor(
   history: Array<{ role: "user" | "assistant"; content: string }>,
 ): Promise<AIResponse> {
   const engines = getAvailableEngines();
-  const selectedEngine = classifyQuestion(message);
+  const isComplex = classifyQuestion(message) === "claude";
 
   // Build full messages array
   const messages: Array<{ role: "user" | "assistant"; content: string }> = [];
@@ -187,21 +187,21 @@ export async function chatWithSupervisor(
   }
   messages.push({ role: "user", content: message });
 
-  // Complex question → try Claude first
-  if (selectedEngine === "claude" && engines.claude) {
+  // Complex question + Claude available → use Claude
+  if (isComplex && engines.claude) {
     try {
       console.log(`[AI Router] Complex question detected → Claude Sonnet`);
       const content = await callClaudeSonnet(systemPrompt, messages, 1500);
       return { content, engine: "claude" };
     } catch (err) {
-      console.error("[AI Router] Claude failed for complex chat, trying Gemini:", err);
+      console.error("[AI Router] Claude failed, falling back to Gemini:", err);
     }
   }
 
-  // Simple question or Claude fallback → Gemini Flash
+  // Default path: Gemini Flash handles everything (simple + complex fallback)
   if (engines.gemini) {
     try {
-      console.log(`[AI Router] ${selectedEngine === "gemini" ? "Simple question" : "Fallback"} → Gemini Flash`);
+      console.log(`[AI Router] ${isComplex ? "Complex (no Claude)" : "Simple"} → Gemini Flash`);
       const content = await callGeminiFlashChat(systemPrompt, messages, 1000);
       return { content, engine: "gemini" };
     } catch (err) {
@@ -209,8 +209,8 @@ export async function chatWithSupervisor(
     }
   }
 
-  // Last resort: try whichever engine is available
-  if (engines.claude && selectedEngine !== "claude") {
+  // Last resort: Claude for anything if Gemini is down
+  if (engines.claude) {
     const content = await callClaudeSonnet(systemPrompt, messages, 1500);
     return { content, engine: "claude" };
   }
