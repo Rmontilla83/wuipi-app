@@ -53,40 +53,48 @@ export function classifyQuestion(message: string): AIEngine {
 // ============================================
 
 const GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
-const GEMINI_MODEL = "gemini-2.5-flash-preview-05-20";
+const GEMINI_MODELS = ["gemini-2.5-flash", "gemini-1.5-flash"];
+
+async function geminiRequest(body: object): Promise<any> {
+  let lastError = "";
+  for (const model of GEMINI_MODELS) {
+    const url = `${GEMINI_API_BASE}/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (res.status === 404) {
+      lastError = `${model}: 404 not found`;
+      console.warn(`[AI Router] Model ${model} not available, trying next...`);
+      continue;
+    }
+    if (!res.ok) {
+      const errBody = await res.text();
+      throw new Error(`Gemini API ${res.status} (${model}): ${errBody.slice(0, 200)}`);
+    }
+    const data = await res.json();
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    if (!text) {
+      const reason = data.candidates?.[0]?.finishReason || "unknown";
+      throw new Error(`Gemini (${model}) returned empty (finishReason: ${reason})`);
+    }
+    console.log(`[AI Router] Gemini ${model} — ok`);
+    return text;
+  }
+  throw new Error(`No Gemini model available: ${lastError}`);
+}
 
 async function callGeminiFlash(
   systemPrompt: string,
   userContent: string,
   maxTokens: number = 1000,
 ): Promise<string> {
-  const url = `${GEMINI_API_BASE}/${GEMINI_MODEL}:generateContent?key=${process.env.GEMINI_API_KEY}`;
-
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      system_instruction: { parts: [{ text: systemPrompt }] },
-      contents: [{ role: "user", parts: [{ text: userContent }] }],
-      generationConfig: { maxOutputTokens: maxTokens },
-    }),
+  return geminiRequest({
+    system_instruction: { parts: [{ text: systemPrompt }] },
+    contents: [{ role: "user", parts: [{ text: userContent }] }],
+    generationConfig: { maxOutputTokens: maxTokens },
   });
-
-  if (!res.ok) {
-    const errBody = await res.text();
-    throw new Error(`Gemini API ${res.status}: ${errBody.slice(0, 200)}`);
-  }
-
-  const data = await res.json();
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
-
-  if (!text) {
-    const reason = data.candidates?.[0]?.finishReason || "unknown";
-    throw new Error(`Gemini returned empty response (finishReason: ${reason})`);
-  }
-
-  console.log(`[AI Router] Gemini Flash — ~${Math.round(userContent.length / 4)} input tokens, ~${Math.round(text.length / 4)} output tokens`);
-  return text;
 }
 
 async function callGeminiFlashChat(
@@ -94,39 +102,16 @@ async function callGeminiFlashChat(
   history: Array<{ role: "user" | "assistant"; content: string }>,
   maxTokens: number = 1000,
 ): Promise<string> {
-  const url = `${GEMINI_API_BASE}/${GEMINI_MODEL}:generateContent?key=${process.env.GEMINI_API_KEY}`;
-
   const contents = history.map(m => ({
     role: m.role === "assistant" ? "model" : "user",
     parts: [{ text: m.content }],
   }));
 
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      system_instruction: { parts: [{ text: systemPrompt }] },
-      contents,
-      generationConfig: { maxOutputTokens: maxTokens },
-    }),
+  return geminiRequest({
+    system_instruction: { parts: [{ text: systemPrompt }] },
+    contents,
+    generationConfig: { maxOutputTokens: maxTokens },
   });
-
-  if (!res.ok) {
-    const errBody = await res.text();
-    throw new Error(`Gemini API ${res.status}: ${errBody.slice(0, 200)}`);
-  }
-
-  const data = await res.json();
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
-
-  if (!text) {
-    const reason = data.candidates?.[0]?.finishReason || "unknown";
-    throw new Error(`Gemini returned empty response (finishReason: ${reason})`);
-  }
-
-  const lastMessage = history[history.length - 1]?.content || "";
-  console.log(`[AI Router] Gemini Flash Chat — ~${Math.round(lastMessage.length / 4)} input tokens, ~${Math.round(text.length / 4)} output tokens`);
-  return text;
 }
 
 // ============================================
