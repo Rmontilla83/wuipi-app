@@ -1,7 +1,7 @@
-import { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { apiError, apiServerError } from "@/lib/api-helpers";
 import { chatWithSupervisor, isAnyEngineConfigured } from "@/lib/ai/model-router";
-import { NextResponse } from "next/server";
+import { gatherBusinessData } from "@/lib/supervisor/gather-data";
 
 export const dynamic = "force-dynamic";
 
@@ -19,16 +19,12 @@ export async function POST(request: NextRequest) {
       return apiError("Message required", 400);
     }
 
-    // 1. Gather business data
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+    // 1. Gather business data (direct call, no HTTP self-fetch)
     let businessData: any = {};
     try {
-      const res = await fetch(`${baseUrl}/api/supervisor/data`, {
-        cache: "no-store",
-      });
-      if (res.ok) businessData = await res.json();
+      businessData = await gatherBusinessData();
     } catch (e) {
-      console.error("[Supervisor Chat] Error fetching business data:", e);
+      console.error("[Supervisor Chat] Error gathering business data:", e);
     }
 
     // 2. Build system prompt with context

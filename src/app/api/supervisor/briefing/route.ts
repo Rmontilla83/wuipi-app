@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { apiServerError } from "@/lib/api-helpers";
 import { generateBriefing, isAnyEngineConfigured } from "@/lib/ai/model-router";
+import { gatherBusinessData } from "@/lib/supervisor/gather-data";
 
 export const dynamic = "force-dynamic";
 
@@ -49,16 +50,12 @@ export async function POST() {
       );
     }
 
-    // 1. Gather business data
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+    // 1. Gather business data (direct call, no HTTP self-fetch)
     let businessData: any = {};
     try {
-      const res = await fetch(`${baseUrl}/api/supervisor/data`, {
-        cache: "no-store",
-      });
-      if (res.ok) businessData = await res.json();
+      businessData = await gatherBusinessData();
     } catch (e) {
-      console.error("[Supervisor] Error fetching business data:", e);
+      console.error("[Supervisor] Error gathering business data:", e);
     }
 
     // 2. Build context
