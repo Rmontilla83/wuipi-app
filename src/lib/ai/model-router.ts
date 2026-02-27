@@ -53,7 +53,7 @@ export function classifyQuestion(message: string): AIEngine {
 // ============================================
 
 const GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
-const GEMINI_MODEL = "gemini-2.0-flash-001";
+const GEMINI_MODEL = "gemini-2.5-flash-preview-05-20";
 
 async function callGeminiFlash(
   systemPrompt: string,
