@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { apiServerError } from "@/lib/api-helpers";
+import { generateBriefing, isAnyEngineConfigured } from "@/lib/ai/model-router";
 
 export const dynamic = "force-dynamic";
 
-const BRIEFING_SYSTEM_PROMPT = `Eres el Supervisor IA de Wuipi Telecomunicaciones, un ISP en Venezuela (Anzoátegui).
+const BRIEFING_SYSTEM_PROMPT = `Eres el Supervisor IA de Wuipi Telecomunicaciones, un ISP en Venezuela (Anzoategui).
 Tu rol es ser un COO virtual que analiza datos operativos y genera insights accionables.
 
 Analiza los datos proporcionados y genera un briefing ejecutivo en formato JSON con esta estructura exacta:
@@ -16,7 +17,7 @@ Analiza los datos proporcionados y genera un briefing ejecutivo en formato JSON 
     "eficiencia_soporte": { "value": string, "label": string, "trend": "up" | "down" | "stable" },
     "crecimiento": { "value": string, "label": string, "trend": "up" | "down" | "stable" }
   },
-  "summary": string (parrafo ejecutivo de 3-4 oraciones, directo y accionable, en español),
+  "summary": string (parrafo ejecutivo de 3-4 oraciones, directo y accionable, en espanol),
   "insights": [
     {
       "severity": "critical" | "high" | "medium" | "low",
@@ -34,17 +35,16 @@ Reglas:
 - Correlaciona datos: si un nodo tiene muchos problemas Y muchos tickets, es un insight critico
 - Los insights deben ser maximo 5, priorizados por impacto
 - Si no hay datos de alguna fuente, no inventes — menciona que falta esa visibilidad
-- Habla en español
+- Habla en espanol
 - No uses emojis en el summary ni en las descripciones
 - Se especifico con numeros y nombres de nodos/equipos
 - Responde SOLO con el JSON, sin texto adicional ni backticks`;
 
 export async function POST() {
   try {
-    const apiKey = process.env.ANTHROPIC_API_KEY;
-    if (!apiKey) {
+    if (!isAnyEngineConfigured()) {
       return NextResponse.json(
-        { error: "ANTHROPIC_API_KEY no configurada", configured: false },
+        { error: "No hay modelo IA configurado. Agregar GEMINI_API_KEY o ANTHROPIC_API_KEY.", configured: false },
         { status: 503 }
       );
     }
@@ -61,40 +61,21 @@ export async function POST() {
       console.error("[Supervisor] Error fetching business data:", e);
     }
 
-    // 2. Build context for Claude
+    // 2. Build context
     const context = buildContext(businessData);
 
-    // 3. Call Claude
-    const { default: Anthropic } = await import("@anthropic-ai/sdk");
-    const client = new Anthropic({ apiKey });
-
-    const response = await client.messages.create({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 2000,
-      system: BRIEFING_SYSTEM_PROMPT,
-      messages: [
-        {
-          role: "user",
-          content: `Fecha y hora actual: ${new Date().toLocaleString("es-VE", { timeZone: "America/Caracas" })}\n\nDatos del negocio:\n${context}`,
-        },
-      ],
-    });
-
-    const rawText = (response.content as any[])
-      .filter((b) => b.type === "text")
-      .map((b) => b.text)
-      .join("");
+    // 3. Generate briefing (Gemini Flash preferred, Claude fallback)
+    const { content: rawText, engine } = await generateBriefing(BRIEFING_SYSTEM_PROMPT, context);
 
     // 4. Parse JSON from response
     let briefing;
     try {
-      // Try to extract JSON from potential markdown code blocks
       const jsonMatch = rawText.match(/\{[\s\S]*\}/);
       briefing = JSON.parse(jsonMatch ? jsonMatch[0] : rawText);
     } catch {
-      console.error("[Supervisor] Failed to parse briefing JSON:", rawText);
+      console.error(`[Supervisor] Failed to parse ${engine} briefing JSON:`, rawText);
       return NextResponse.json(
-        { error: "Error al parsear respuesta de Claude", raw: rawText },
+        { error: `Error al parsear respuesta de ${engine}`, raw: rawText },
         { status: 500 }
       );
     }
@@ -102,7 +83,7 @@ export async function POST() {
     return NextResponse.json({
       ...briefing,
       generated_at: new Date().toISOString(),
-      engine: "claude",
+      engine,
       sources: businessData.sources || {},
     });
   } catch (error) {
@@ -113,7 +94,6 @@ export async function POST() {
 function buildContext(data: any): string {
   const parts: string[] = [];
 
-  // Infra
   if (data.infra) {
     const i = data.infra;
     parts.push(`INFRAESTRUCTURA (Zabbix):
@@ -125,7 +105,6 @@ function buildContext(data: any): string {
 - Sitios: ${i.sites?.map((s: any) => `${s.code}: ${s.hostsUp}/${s.totalHosts} online${s.avgLatency ? `, latencia ${s.avgLatency}ms` : ""}`).join(" | ")}`);
   }
 
-  // Problems detail
   if (data.problems?.length > 0) {
     const critical = data.problems.filter((p: any) => p.severity === "high" || p.severity === "disaster");
     if (critical.length > 0) {
@@ -138,7 +117,6 @@ ${critical.map((p: any) => `- [${p.severity}] ${p.name} en ${p.hostName} (${p.si
     }
   }
 
-  // Tickets
   if (data.tickets) {
     const t = data.tickets;
     parts.push(`SOPORTE (Tickets):
@@ -148,7 +126,6 @@ ${critical.map((p: any) => `- [${p.severity}] ${p.name} en ${p.hostName} (${p.si
 - Activos totales: ${t.active}`);
   }
 
-  // Leads
   if (data.leads) {
     const l = data.leads;
     parts.push(`VENTAS (CRM):
@@ -160,7 +137,6 @@ ${critical.map((p: any) => `- [${p.severity}] ${p.name} en ${p.hostName} (${p.si
 - Por etapa: ${JSON.stringify(l.by_stage)}`);
   }
 
-  // Clients
   if (data.clients) {
     const c = data.clients;
     parts.push(`CLIENTES:
@@ -170,12 +146,10 @@ ${critical.map((p: any) => `- [${p.severity}] ${p.name} en ${p.hostName} (${p.si
 - Por tecnologia: ${JSON.stringify(c.by_technology)}`);
   }
 
-  // Nodes
   if (data.nodes?.length > 0) {
     parts.push(`NODOS DE RED: ${data.nodes.map((n: any) => `${n.code} (${n.name})`).join(", ")}`);
   }
 
-  // Missing data warnings
   const missing: string[] = [];
   if (!data.sources?.zabbix) missing.push("Zabbix (infraestructura)");
   if (!data.sources?.tickets) missing.push("Tickets (soporte)");

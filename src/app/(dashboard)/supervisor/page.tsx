@@ -60,6 +60,18 @@ const CATEGORY_ICONS: Record<string, typeof Server> = {
   clientes: Users,
 };
 
+// Engine badge styles
+function EngineBadge({ engine }: { engine: string }) {
+  const isGemini = engine === "gemini";
+  return (
+    <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${
+      isGemini ? "bg-emerald-500/10 text-emerald-400" : "bg-violet-500/10 text-violet-400"
+    }`}>
+      {engine}
+    </span>
+  );
+}
+
 const SUGGESTED_QUESTIONS = [
   "Dame un resumen ejecutivo",
   "¿Qué nodos necesitan atencion?",
@@ -72,10 +84,11 @@ const SUGGESTED_QUESTIONS = [
 // ============================================
 // INSIGHT CARD
 // ============================================
-function InsightCard({ insight, expanded, onToggle }: {
+function InsightCard({ insight, expanded, onToggle, engine }: {
   insight: BriefingInsight;
   expanded: boolean;
   onToggle: () => void;
+  engine?: string;
 }) {
   const sc = SEVERITY_CONFIG[insight.severity];
   const CatIcon = CATEGORY_ICONS[insight.category] || AlertTriangle;
@@ -91,7 +104,7 @@ function InsightCard({ insight, expanded, onToggle }: {
         <span className={`w-2.5 h-2.5 rounded-full mt-1.5 shrink-0 ${sc.dot} ${sc.glow ? "shadow-[0_0_8px] shadow-red-400" : ""}`} />
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1 flex-wrap">
-            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase bg-violet-500/10 text-violet-400">claude</span>
+            <EngineBadge engine={engine || "gemini"} />
             <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${sc.bg} ${sc.accent}`}>{sc.label}</span>
             <span className="flex items-center gap-1 text-[10px] text-gray-600">
               <CatIcon size={10} /> {insight.category}
@@ -249,7 +262,7 @@ export default function SupervisorPage() {
     } catch {
       setChatMessages(prev => [
         ...prev,
-        { id: `e-${Date.now()}`, role: "assistant", content: "Error al consultar. Intenta de nuevo.", engine: "claude" as const, timestamp: new Date().toISOString() },
+        { id: `e-${Date.now()}`, role: "assistant", content: "Error al consultar. Intenta de nuevo.", engine: "gemini" as const, timestamp: new Date().toISOString() },
       ]);
     } finally {
       setIsTyping(false);
@@ -268,7 +281,7 @@ export default function SupervisorPage() {
             <AlertCircle size={48} className="mx-auto mb-4 text-amber-400" />
             <h3 className="text-lg font-bold text-white mb-2">Supervisor IA no configurado</h3>
             <p className="text-sm text-gray-400 mb-4">
-              Para activar el Supervisor IA, agrega la variable de entorno <code className="text-amber-400">ANTHROPIC_API_KEY</code> en la configuracion del proyecto.
+              Para activar el Supervisor IA, agrega <code className="text-emerald-400">GEMINI_API_KEY</code> y/o <code className="text-violet-400">ANTHROPIC_API_KEY</code> en la configuracion del proyecto.
             </p>
           </Card>
         </div>
@@ -375,7 +388,7 @@ export default function SupervisorPage() {
             <div>
               <h2 className="text-lg font-bold text-white">Supervisor IA</h2>
               <p className="text-sm text-gray-400">
-                COO Virtual · Claude Sonnet
+                COO Virtual · Gemini Flash + Claude Sonnet
                 {clientCount !== null && <span className="ml-2 text-gray-500">· {clientCount} clientes</span>}
               </p>
             </div>
@@ -429,7 +442,7 @@ export default function SupervisorPage() {
               {/* Summary */}
               <div className="p-4 bg-wuipi-bg rounded-lg border border-wuipi-border">
                 <div className="flex items-center gap-2 mb-2">
-                  <span className="px-2 py-0.5 bg-violet-500/10 text-violet-400 rounded text-[10px] font-bold uppercase">{briefing.engine}</span>
+                  <EngineBadge engine={briefing.engine} />
                   <span className="text-[10px] text-gray-600">Generado a las {generatedTime}</span>
                   {/* Source badges */}
                   {briefing.sources && Object.entries(briefing.sources).map(([key, ok]) => (
@@ -460,6 +473,7 @@ export default function SupervisorPage() {
                   <InsightCard
                     key={idx}
                     insight={ins}
+                    engine={briefing.engine}
                     expanded={expandedInsight === `ins-${idx}`}
                     onToggle={() => setExpandedInsight(expandedInsight === `ins-${idx}` ? null : `ins-${idx}`)}
                   />
@@ -512,9 +526,7 @@ export default function SupervisorPage() {
                   }`}>
                     {msg.role === "assistant" && msg.engine && (
                       <div className="flex items-center gap-2 mb-2">
-                        <span className="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase bg-violet-500/10 text-violet-400">
-                          {msg.engine}
-                        </span>
+                        <EngineBadge engine={msg.engine} />
                         <span className="text-[10px] text-gray-600">Supervisor IA</span>
                       </div>
                     )}

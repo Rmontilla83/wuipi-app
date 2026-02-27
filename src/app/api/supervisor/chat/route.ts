@@ -1,14 +1,15 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { apiError, apiServerError } from "@/lib/api-helpers";
+import { chatWithSupervisor, isAnyEngineConfigured } from "@/lib/ai/model-router";
+import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(request: NextRequest) {
   try {
-    const apiKey = process.env.ANTHROPIC_API_KEY;
-    if (!apiKey) {
+    if (!isAnyEngineConfigured()) {
       return NextResponse.json(
-        { content: "Supervisor IA no configurado. Agregar ANTHROPIC_API_KEY.", engine: "claude" },
+        { content: "Supervisor IA no configurado. Agregar GEMINI_API_KEY o ANTHROPIC_API_KEY.", engine: "gemini" },
         { status: 503 }
       );
     }
@@ -30,7 +31,7 @@ export async function POST(request: NextRequest) {
       console.error("[Supervisor Chat] Error fetching business data:", e);
     }
 
-    // 2. Build context
+    // 2. Build system prompt with context
     const contextText = buildChatContext(businessData);
 
     const systemPrompt = `Eres el Supervisor IA de Wuipi Telecomunicaciones, un ISP en Venezuela (Anzoategui).
@@ -43,41 +44,20 @@ El usuario es el gerente/dueno de la empresa. Tienes acceso a datos en tiempo re
 Datos actuales del negocio:
 ${contextText}
 
-Responde en español, se directo y especifico con numeros.
+Responde en espanol, se directo y especifico con numeros.
 Si te preguntan algo que no tienes datos para responder (ej: finanzas detalladas, Odoo no esta conectado aun), dilo honestamente.
 No inventes datos.
 Puedes hacer recomendaciones basadas en los datos disponibles.
 Formatea con markdown basico (bold, listas) para legibilidad.`;
 
-    // 3. Build messages array with history
-    const messages: Array<{ role: "user" | "assistant"; content: string }> = [];
-    if (history?.length) {
-      for (const msg of history.slice(-10)) {
-        messages.push({
-          role: msg.role === "user" ? "user" : "assistant",
-          content: msg.content,
-        });
-      }
-    }
-    messages.push({ role: "user", content: message });
+    // 3. Route to best model (Gemini Flash for simple, Claude for complex)
+    const { content, engine } = await chatWithSupervisor(
+      systemPrompt,
+      message,
+      history || [],
+    );
 
-    // 4. Call Claude
-    const { default: Anthropic } = await import("@anthropic-ai/sdk");
-    const client = new Anthropic({ apiKey });
-
-    const response = await client.messages.create({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 2000,
-      system: systemPrompt,
-      messages,
-    });
-
-    const content = (response.content as any[])
-      .filter((b) => b.type === "text")
-      .map((b) => b.text)
-      .join("");
-
-    return NextResponse.json({ content, engine: "claude" });
+    return NextResponse.json({ content, engine });
   } catch (error) {
     console.error("[Supervisor Chat] Error:", error);
     return apiServerError(error);
