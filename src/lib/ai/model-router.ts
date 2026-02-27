@@ -141,26 +141,32 @@ export async function generateBriefing(
   const engines = getAvailableEngines();
   const userContent = `Fecha y hora actual: ${new Date().toLocaleString("es-VE", { timeZone: "America/Caracas" })}\n\nDatos del negocio:\n${context}`;
 
+  console.log("[AI Router] generateBriefing engines:", engines);
+
   // Prefer Gemini Flash (cheap), fallback to Claude
   if (engines.gemini) {
     try {
       const content = await callGeminiFlash(systemPrompt, userContent, 1000);
       return { content, engine: "gemini" };
     } catch (err) {
-      console.error("[AI Router] Gemini Flash failed for briefing, trying Claude:", err);
+      console.error("[AI Router] Gemini Flash failed for briefing:", err);
     }
   }
 
   if (engines.claude) {
-    const content = await callClaudeSonnet(
-      systemPrompt,
-      [{ role: "user", content: userContent }],
-      1500,
-    );
-    return { content, engine: "claude" };
+    try {
+      const content = await callClaudeSonnet(
+        systemPrompt,
+        [{ role: "user", content: userContent }],
+        1500,
+      );
+      return { content, engine: "claude" };
+    } catch (err) {
+      console.error("[AI Router] Claude failed for briefing:", err);
+    }
   }
 
-  throw new Error("No AI engine configured");
+  throw new Error("No AI engine configured or all engines failed");
 }
 
 // ============================================

@@ -43,6 +43,13 @@ Reglas:
 
 export async function POST() {
   try {
+    console.log("[Supervisor Briefing] ENV check:", {
+      GEMINI_API_KEY_exists: !!process.env.GEMINI_API_KEY,
+      GEMINI_API_KEY_length: process.env.GEMINI_API_KEY?.length || 0,
+      ANTHROPIC_API_KEY_exists: !!process.env.ANTHROPIC_API_KEY,
+      isAnyConfigured: isAnyEngineConfigured(),
+    });
+
     if (!isAnyEngineConfigured()) {
       return NextResponse.json(
         { error: "No hay modelo IA configurado. Agregar GEMINI_API_KEY o ANTHROPIC_API_KEY.", configured: false },
