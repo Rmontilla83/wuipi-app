@@ -94,11 +94,16 @@ async function callGeminiFlash(
   systemPrompt: string,
   userContent: string,
   maxTokens: number = 1000,
+  jsonMode: boolean = false,
 ): Promise<string> {
+  const generationConfig: Record<string, any> = { maxOutputTokens: maxTokens };
+  if (jsonMode) {
+    generationConfig.responseMimeType = "application/json";
+  }
   return geminiRequest({
     system_instruction: { parts: [{ text: systemPrompt }] },
     contents: [{ role: "user", parts: [{ text: userContent }] }],
-    generationConfig: { maxOutputTokens: maxTokens },
+    generationConfig,
   });
 }
 
@@ -165,7 +170,7 @@ export async function generateBriefing(
   // Prefer Gemini Flash (cheap), fallback to Claude
   if (engines.gemini) {
     try {
-      const content = await callGeminiFlash(systemPrompt, userContent, 2000);
+      const content = await callGeminiFlash(systemPrompt, userContent, 2000, true);
       return { content, engine: "gemini" };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

@@ -64,22 +64,28 @@ export async function POST() {
     // 3. Generate briefing (Gemini Flash preferred, Claude fallback)
     const { content: rawText, engine } = await generateBriefing(BRIEFING_SYSTEM_PROMPT, context);
 
-    // 4. Parse JSON from response (strip markdown code blocks, thinking tags, etc.)
+    // 4. Parse JSON from response
     let briefing;
     try {
-      let cleaned = rawText
-        .replace(/```(?:json)?\s*/gi, "")
-        .replace(/```/g, "")
-        .replace(/<think>[\s\S]*?<\/think>/gi, "")
-        .trim();
-      const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-      briefing = JSON.parse(jsonMatch ? jsonMatch[0] : cleaned);
+      // Try direct parse first (Gemini JSON mode returns clean JSON)
+      briefing = JSON.parse(rawText);
     } catch {
-      console.error(`[Supervisor] Failed to parse ${engine} briefing JSON. Raw (first 500):`, rawText.slice(0, 500));
-      return NextResponse.json(
-        { error: `Error al parsear respuesta de ${engine}`, raw: rawText.slice(0, 500) },
-        { status: 500 }
-      );
+      // Fallback: strip markdown/thinking and extract JSON object
+      try {
+        const cleaned = rawText
+          .replace(/```(?:json)?\s*/gi, "")
+          .replace(/```/g, "")
+          .replace(/<think>[\s\S]*?<\/think>/gi, "")
+          .trim();
+        const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+        briefing = JSON.parse(jsonMatch ? jsonMatch[0] : cleaned);
+      } catch {
+        console.error(`[Supervisor] Failed to parse ${engine} JSON. Raw:`, rawText.slice(0, 300));
+        return NextResponse.json(
+          { error: `Error al parsear respuesta de ${engine}. Respuesta: ${rawText.slice(0, 200)}` },
+          { status: 500 }
+        );
+      }
     }
 
     return NextResponse.json({
