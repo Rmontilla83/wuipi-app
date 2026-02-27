@@ -49,53 +49,82 @@ export function classifyQuestion(message: string): AIEngine {
 }
 
 // ============================================
-// Gemini Flash call
+// Gemini Flash — REST API (no SDK needed)
 // ============================================
+
+const GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
+const GEMINI_MODEL = "gemini-2.0-flash";
 
 async function callGeminiFlash(
   systemPrompt: string,
   userContent: string,
   maxTokens: number = 1000,
 ): Promise<string> {
-  const { GoogleGenerativeAI } = await import("@google/generative-ai");
-  const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-  const model = genAI.getGenerativeModel({
-    model: "gemini-2.0-flash",
-    generationConfig: { maxOutputTokens: maxTokens },
+  const url = `${GEMINI_API_BASE}/${GEMINI_MODEL}:generateContent?key=${process.env.GEMINI_API_KEY}`;
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      system_instruction: { parts: [{ text: systemPrompt }] },
+      contents: [{ role: "user", parts: [{ text: userContent }] }],
+      generationConfig: { maxOutputTokens: maxTokens },
+    }),
   });
 
-  const result = await model.generateContent(`${systemPrompt}\n\n${userContent}`);
-  const text = result.response.text();
+  if (!res.ok) {
+    const errBody = await res.text();
+    throw new Error(`Gemini API ${res.status}: ${errBody.slice(0, 200)}`);
+  }
+
+  const data = await res.json();
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+
+  if (!text) {
+    const reason = data.candidates?.[0]?.finishReason || "unknown";
+    throw new Error(`Gemini returned empty response (finishReason: ${reason})`);
+  }
+
   console.log(`[AI Router] Gemini Flash — ~${Math.round(userContent.length / 4)} input tokens, ~${Math.round(text.length / 4)} output tokens`);
   return text;
 }
-
-// ============================================
-// Gemini Flash call with history (chat)
-// ============================================
 
 async function callGeminiFlashChat(
   systemPrompt: string,
   history: Array<{ role: "user" | "assistant"; content: string }>,
   maxTokens: number = 1000,
 ): Promise<string> {
-  const { GoogleGenerativeAI } = await import("@google/generative-ai");
-  const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-  const model = genAI.getGenerativeModel({
-    model: "gemini-2.0-flash",
-    generationConfig: { maxOutputTokens: maxTokens },
-    systemInstruction: systemPrompt,
-  });
+  const url = `${GEMINI_API_BASE}/${GEMINI_MODEL}:generateContent?key=${process.env.GEMINI_API_KEY}`;
 
-  const geminiHistory = history.slice(0, -1).map(m => ({
-    role: m.role === "assistant" ? "model" as const : "user" as const,
+  const contents = history.map(m => ({
+    role: m.role === "assistant" ? "model" : "user",
     parts: [{ text: m.content }],
   }));
 
-  const chat = model.startChat({ history: geminiHistory });
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      system_instruction: { parts: [{ text: systemPrompt }] },
+      contents,
+      generationConfig: { maxOutputTokens: maxTokens },
+    }),
+  });
+
+  if (!res.ok) {
+    const errBody = await res.text();
+    throw new Error(`Gemini API ${res.status}: ${errBody.slice(0, 200)}`);
+  }
+
+  const data = await res.json();
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+
+  if (!text) {
+    const reason = data.candidates?.[0]?.finishReason || "unknown";
+    throw new Error(`Gemini returned empty response (finishReason: ${reason})`);
+  }
+
   const lastMessage = history[history.length - 1]?.content || "";
-  const result = await chat.sendMessage(lastMessage);
-  const text = result.response.text();
   console.log(`[AI Router] Gemini Flash Chat — ~${Math.round(lastMessage.length / 4)} input tokens, ~${Math.round(text.length / 4)} output tokens`);
   return text;
 }
