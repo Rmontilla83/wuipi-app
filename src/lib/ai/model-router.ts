@@ -141,7 +141,7 @@ export async function generateBriefing(
   const engines = getAvailableEngines();
   const userContent = `Fecha y hora actual: ${new Date().toLocaleString("es-VE", { timeZone: "America/Caracas" })}\n\nDatos del negocio:\n${context}`;
 
-  console.log("[AI Router] generateBriefing engines:", engines);
+  const errors: string[] = [];
 
   // Prefer Gemini Flash (cheap), fallback to Claude
   if (engines.gemini) {
@@ -149,7 +149,9 @@ export async function generateBriefing(
       const content = await callGeminiFlash(systemPrompt, userContent, 1000);
       return { content, engine: "gemini" };
     } catch (err) {
-      console.error("[AI Router] Gemini Flash failed for briefing:", err);
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("[AI Router] Gemini Flash failed for briefing:", msg);
+      errors.push(`Gemini: ${msg}`);
     }
   }
 
@@ -162,11 +164,16 @@ export async function generateBriefing(
       );
       return { content, engine: "claude" };
     } catch (err) {
-      console.error("[AI Router] Claude failed for briefing:", err);
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("[AI Router] Claude failed for briefing:", msg);
+      errors.push(`Claude: ${msg}`);
     }
   }
 
-  throw new Error("No AI engine configured or all engines failed");
+  if (!engines.gemini && !engines.claude) {
+    throw new Error("No AI engine configured. Add GEMINI_API_KEY or ANTHROPIC_API_KEY.");
+  }
+  throw new Error(`All AI engines failed: ${errors.join(" | ")}`);
 }
 
 // ============================================
@@ -193,33 +200,45 @@ export async function chatWithSupervisor(
   }
   messages.push({ role: "user", content: message });
 
+  const errors: string[] = [];
+
   // Complex question + Claude available → use Claude
   if (isComplex && engines.claude) {
     try {
-      console.log(`[AI Router] Complex question detected → Claude Sonnet`);
       const content = await callClaudeSonnet(systemPrompt, messages, 1500);
       return { content, engine: "claude" };
     } catch (err) {
-      console.error("[AI Router] Claude failed, falling back to Gemini:", err);
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("[AI Router] Claude failed, falling back to Gemini:", msg);
+      errors.push(`Claude: ${msg}`);
     }
   }
 
   // Default path: Gemini Flash handles everything (simple + complex fallback)
   if (engines.gemini) {
     try {
-      console.log(`[AI Router] ${isComplex ? "Complex (no Claude)" : "Simple"} → Gemini Flash`);
       const content = await callGeminiFlashChat(systemPrompt, messages, 1000);
       return { content, engine: "gemini" };
     } catch (err) {
-      console.error("[AI Router] Gemini Flash failed for chat:", err);
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("[AI Router] Gemini Flash failed for chat:", msg);
+      errors.push(`Gemini: ${msg}`);
     }
   }
 
   // Last resort: Claude for anything if Gemini is down
-  if (engines.claude) {
-    const content = await callClaudeSonnet(systemPrompt, messages, 1500);
-    return { content, engine: "claude" };
+  if (engines.claude && !errors.some(e => e.startsWith("Claude:"))) {
+    try {
+      const content = await callClaudeSonnet(systemPrompt, messages, 1500);
+      return { content, engine: "claude" };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      errors.push(`Claude: ${msg}`);
+    }
   }
 
-  throw new Error("No AI engine configured or all engines failed");
+  if (!engines.gemini && !engines.claude) {
+    throw new Error("No AI engine configured. Add GEMINI_API_KEY or ANTHROPIC_API_KEY.");
+  }
+  throw new Error(`All AI engines failed: ${errors.join(" | ")}`);
 }
