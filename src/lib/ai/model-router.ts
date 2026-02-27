@@ -74,12 +74,17 @@ async function geminiRequest(body: object): Promise<any> {
       throw new Error(`Gemini API ${res.status} (${model}): ${errBody.slice(0, 200)}`);
     }
     const data = await res.json();
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    const parts = data.candidates?.[0]?.content?.parts || [];
+    // Gemini 2.5 returns thinking + response parts; take last non-thought text
+    const text = parts
+      .filter((p: any) => p.text && !p.thought)
+      .map((p: any) => p.text)
+      .join("") || parts.map((p: any) => p.text || "").join("");
     if (!text) {
       const reason = data.candidates?.[0]?.finishReason || "unknown";
       throw new Error(`Gemini (${model}) returned empty (finishReason: ${reason})`);
     }
-    console.log(`[AI Router] Gemini ${model} — ok`);
+    console.log(`[AI Router] Gemini ${model} — ${text.length} chars`);
     return text;
   }
   throw new Error(`No Gemini model available: ${lastError}`);
