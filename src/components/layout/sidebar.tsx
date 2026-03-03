@@ -21,6 +21,7 @@ import {
   ChevronLeft,
   ChevronRight,
   LogOut,
+  CreditCard,
 } from "lucide-react";
 
 import type { LucideIcon } from "lucide-react";
@@ -59,6 +60,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: "Administrativo",
     items: [
       { id: "erp", label: "ERP Administrativo", icon: Building2, path: "/erp" },
+      { id: "pagos", label: "Pagos Mercantil", icon: CreditCard, path: "/pagos" },
       { id: "clientes", label: "Clientes", icon: Users, path: "/clientes" },
     ],
   },

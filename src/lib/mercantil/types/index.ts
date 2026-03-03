@@ -1,0 +1,273 @@
+// ============================================================================
+// WUIPI MERCANTIL SDK — Type Definitions
+// Pasarela de Pagos Banco Mercantil Venezuela
+// ============================================================================
+
+// --- Configuration ---
+
+export interface MercantilConfig {
+  /** ClientID (X-IBM-Client-Id) - provided by Mercantil per product */
+  clientId: string;
+  /** MerchantID - código de comercio assigned by Mercantil */
+  merchantId: string;
+  /** IntegratorID - integrator code assigned by Mercantil */
+  integratorId: string;
+  /** TerminalID - terminal code assigned by Mercantil */
+  terminalId: string;
+  /** SecretKey - AES encryption key (raw, before SHA-256) */
+  secretKey: string;
+  /** Environment: 'sandbox' for certification, 'production' for live */
+  environment: 'sandbox' | 'production';
+  /** Base URL override (optional - auto-resolved from environment) */
+  baseUrl?: string;
+  /** Webhook URL where Mercantil sends payment notifications */
+  webhookUrl?: string;
+}
+
+export interface MercantilEndpoints {
+  /** Botón de Pagos Web */
+  webPaymentButton: string;
+  /** Pagos con Tarjetas - Auth */
+  cardAuthUrl: string;
+  /** Pagos con Tarjetas - Pay */
+  cardPayUrl: string;
+  /** Pagos Móviles C2P */
+  c2pUrl: string;
+  /** Búsqueda de Transferencias */
+  searchTransfersUrl: string;
+  /** Búsqueda de Pagos Móviles */
+  searchMobilePaymentsUrl: string;
+  /** Búsqueda de Pagos con Tarjetas */
+  searchCardPaymentsUrl: string;
+  /** Solicitud de Clave de Pago */
+  requestPaymentKeyUrl: string;
+  /** Agendamiento de Cuotas */
+  installmentsUrl: string;
+}
+
+// --- Encryption ---
+
+export interface EncryptedData {
+  /** The encrypted + base64 encoded string */
+  encrypted: string;
+  /** The original plaintext (for debugging in sandbox only) */
+  plaintext?: string;
+}
+
+// --- Common Request/Response ---
+
+export interface MerchantIdentify {
+  integratorId: string;
+  merchantId: string;
+  terminalId: string;
+}
+
+export interface ClientIdentify {
+  ipaddress: string;
+  browser_agent: string;
+  mobile?: {
+    manufacturer: string;
+    model: string;
+    os_version: string;
+    location?: {
+      lat: number;
+      lng: number;
+    };
+  };
+}
+
+// --- Web Payment Button (Botón de Pagos Web) ---
+
+export interface WebPaymentButtonParams {
+  /** Transaction amount */
+  amount: number;
+  /** Currency: 'VES' for bolívares */
+  currency: 'VES' | 'USD';
+  /** Unique invoice/order number */
+  invoiceNumber: string;
+  /** Description of the payment */
+  description?: string;
+  /** Customer email for notification */
+  customerEmail?: string;
+  /** Customer phone */
+  customerPhone?: string;
+  /** Custom return URL after payment */
+  returnUrl?: string;
+  /** Payment methods to enable */
+  paymentMethods?: {
+    debitoInmediato?: boolean;
+    tarjetas?: boolean;
+    c2p?: boolean;
+  };
+  /** Additional metadata (passed through to webhook) */
+  metadata?: Record<string, string>;
+}
+
+export interface WebPaymentButtonResponse {
+  /** The full redirect URL for the payment button */
+  redirectUrl: string;
+  /** The encrypted transaction data */
+  transactionData: string;
+  /** The generated payment token for tracking */
+  paymentToken: string;
+}
+
+// --- Card Payments (Botón de Pagos con Tarjetas) ---
+
+export type CardType = 'credit' | 'debit';
+export type CardBrand = 'visa' | 'mastercard' | 'diners' | 'maestro';
+
+export interface CardAuthRequest {
+  merchant_identify: MerchantIdentify;
+  client_identify: ClientIdentify;
+  card_holder: {
+    card_number: string;
+    name: string;
+    customer_id: string;
+    customer_id_type: string;
+  };
+}
+
+export interface CardAuthResponse {
+  auth_model: string;
+  auth_reference: string;
+  status: string;
+  message: string;
+}
+
+export interface CardPayRequest {
+  merchant_identify: MerchantIdentify;
+  client_identify: ClientIdentify;
+  card_payment: {
+    card_number: string;
+    expiry_date: string;
+    cvv: string;
+    name: string;
+    customer_id: string;
+    customer_id_type: string;
+    amount: number;
+    currency: string;
+    auth_code: string;
+    auth_reference: string;
+    invoice_number: string;
+    card_type: CardType;
+  };
+}
+
+export interface CardPayResponse {
+  reference_number: string;
+  authorization_code: string;
+  status: string;
+  message: string;
+  amount: number;
+  transaction_date: string;
+}
+
+// --- Mobile Payments C2P ---
+
+export interface C2PPaymentRequest {
+  merchant_identify: MerchantIdentify;
+  client_identify: ClientIdentify;
+  transaction_c2p: {
+    amount: number;
+    currency: 'ves';
+    destination_bank_id: string;
+    destination_id: string;
+    origin_mobile_number: string;
+    destination_mobile_number: string;
+    trx_type: 'compra' | 'vuelto';
+    payment_method: 'c2p';
+    invoice_number: string;
+  };
+}
+
+export interface C2PPaymentResponse {
+  reference_number: string;
+  status: string;
+  message: string;
+  amount: number;
+  bank_transaction_id?: string;
+}
+
+// --- Payment Search / Reconciliation ---
+
+export interface TransferSearchParams {
+  dateFrom: string;
+  dateTo: string;
+  paymentReference?: string;
+  amount?: number;
+}
+
+export interface TransferSearchResult {
+  reference_number: string;
+  amount: number;
+  date: string;
+  origin_bank: string;
+  origin_account: string;
+  status: string;
+  description: string;
+}
+
+export interface MobilePaymentSearchParams {
+  dateFrom: string;
+  dateTo: string;
+  paymentReference?: string;
+  transactionType?: 'c2p' | 'p2c' | 'vuelto';
+}
+
+export interface CardPaymentSearchParams {
+  dateFrom: string;
+  dateTo: string;
+  paymentReference?: string;
+  cardType?: CardType;
+}
+
+// --- Webhook / Notification ---
+
+export interface WebhookPayload {
+  transaction_type: string;
+  payment_method: string;
+  reference_number: string;
+  authorization_code?: string;
+  amount: number;
+  currency: string;
+  status: 'approved' | 'declined' | 'error' | 'pending';
+  message: string;
+  invoice_number: string;
+  transaction_date: string;
+  raw?: Record<string, unknown>;
+}
+
+export type WebhookHandler = (payload: WebhookPayload) => Promise<void>;
+
+// --- Venezuelan Bank Codes ---
+
+export const VENEZUELAN_BANKS: Record<string, string> = {
+  '0001': 'Banco Central de Venezuela',
+  '0102': 'Banco de Venezuela',
+  '0104': 'Venezolano de Crédito',
+  '0105': 'Banco Mercantil',
+  '0108': 'Banco Provincial',
+  '0114': 'Bancaribe',
+  '0115': 'Banco Exterior',
+  '0116': 'Banco Occidental de Descuento',
+  '0128': 'Banco Caroní',
+  '0134': 'Banesco',
+  '0137': 'Banco Sofitasa',
+  '0138': 'Banco Plaza',
+  '0146': 'Bangente',
+  '0151': 'BFC Banco Fondo Común',
+  '0156': '100% Banco',
+  '0157': 'DelSur',
+  '0163': 'Banco del Tesoro',
+  '0166': 'Banco Agrícola de Venezuela',
+  '0168': 'Bancrecer',
+  '0169': 'Mi Banco',
+  '0171': 'Banco Activo',
+  '0172': 'Bancamiga',
+  '0173': 'Banco Internacional de Desarrollo',
+  '0174': 'Banplus',
+  '0175': 'Banco Bicentenario',
+  '0177': 'Banfanb',
+  '0191': 'Banco Nacional de Crédito (BNC)',
+};

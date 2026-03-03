@@ -36,8 +36,12 @@ export async function middleware(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  // Redirect unauthenticated users to login
-  if (!user && !request.nextUrl.pathname.startsWith("/login")) {
+  // Public routes — no auth required
+  const publicPaths = ["/login", "/pay/", "/api/mercantil/webhook", "/api/mercantil/callback", "/api/mercantil/status/"];
+  const isPublic = publicPaths.some((path) => request.nextUrl.pathname.startsWith(path));
+
+  // Redirect unauthenticated users to login (except public pages)
+  if (!user && !isPublic) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     return NextResponse.redirect(url);
