@@ -26,7 +26,7 @@ export async function POST(request: NextRequest) {
     const sdk = new MercantilSDK();
 
     if (!sdk.isConfigured) {
-      console.warn("[Mercantil Webhook] SDK not configured, logging raw payload only");
+      console.warn("[Mercantil Webhook] SDK no configurado, registrando payload sin procesar");
       return NextResponse.json({ received: true }, { status: 200 });
     }
 

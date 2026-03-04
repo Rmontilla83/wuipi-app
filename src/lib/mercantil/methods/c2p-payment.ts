@@ -1,6 +1,7 @@
 // ============================================================================
 // WUIPI MERCANTIL SDK - Pago Movil C2P (Commerce to Person)
-// Cobros interbancarios directos via Pago Movil
+// Producto 2: Cobros interbancarios directos via Pago Movil
+// Uses 'c2p_payment' product credentials
 // ============================================================================
 
 import type {
@@ -8,7 +9,7 @@ import type {
   C2PPaymentResponse, ClientIdentify,
 } from '../types';
 import { encryptField } from '../core/crypto';
-import { getMerchantIdentify } from '../core/config';
+import { getProductCredentials, getMerchantIdentify } from '../core/config';
 import { apiRequest } from '../core/http';
 
 /**
@@ -23,30 +24,33 @@ export async function createC2PPayment(
     destinationMobile: string;
     invoiceNumber: string;
     trxType?: 'compra' | 'vuelto';
+    purchaseKey?: string;
   },
   clientInfo: ClientIdentify,
   config: MercantilConfig,
   endpoints: MercantilEndpoints
 ): Promise<C2PPaymentResponse> {
+  const creds = getProductCredentials(config, 'c2p_payment');
   const body: C2PPaymentRequest = {
-    merchant_identify: getMerchantIdentify(config),
+    merchant_identify: getMerchantIdentify(config, creds),
     client_identify: clientInfo,
     transaction_c2p: {
       amount: params.amount,
       currency: 'ves',
       destination_bank_id: params.destinationBankId,
-      destination_id: encryptField(params.destinationId, config.secretKey),
-      origin_mobile_number: encryptField(params.originMobile, config.secretKey),
-      destination_mobile_number: encryptField(params.destinationMobile, config.secretKey),
+      destination_id: encryptField(params.destinationId, creds.secretKey),
+      origin_mobile_number: encryptField(params.originMobile, creds.secretKey),
+      destination_mobile_number: encryptField(params.destinationMobile, creds.secretKey),
       trx_type: params.trxType || 'compra',
       payment_method: 'c2p',
       invoice_number: params.invoiceNumber,
+      ...(params.purchaseKey && { purchase_key: params.purchaseKey }),
     },
   };
 
   const response = await apiRequest<C2PPaymentResponse>({
     method: 'POST', url: endpoints.c2pUrl,
-    clientId: config.clientId, body: body as unknown as Record<string, unknown>,
+    clientId: creds.clientId, body: body as unknown as Record<string, unknown>,
   });
   return response.data;
 }

@@ -1,23 +1,27 @@
 // ============================================================================
-// WUIPI MERCANTIL SDK — Botón de Pagos Web (Unified Payment Button)
-// Handles: Débito Inmediato + Tarjetas + Pago Móvil C2P
+// WUIPI MERCANTIL SDK — Boton de Pagos Web (Unified Payment Button)
+// Producto 9: Handles Debito Inmediato + Tarjetas + Pago Movil C2P
+// Uses 'web_button' product credentials (PENDIENTE — credenciales por llegar)
 // ============================================================================
 
 import type {
   MercantilConfig,
   MercantilEndpoints,
+  ProductCredentials,
   WebPaymentButtonParams,
   WebPaymentButtonResponse,
 } from '../types';
 import { encryptTransactionData } from '../core/crypto';
+import { getProductCredentials } from '../core/config';
 import { generatePaymentToken } from '../utils/helpers';
 
 function buildTransactionData(
   params: WebPaymentButtonParams,
-  config: MercantilConfig
+  config: MercantilConfig,
+  creds: ProductCredentials
 ): Record<string, unknown> {
   const data: Record<string, unknown> = {
-    merchant_id: config.merchantId,
+    merchant_id: creds.merchantId,
     integrator_id: config.integratorId,
     terminal_id: config.terminalId,
     amount: params.amount.toFixed(2),
@@ -26,7 +30,7 @@ function buildTransactionData(
     description: params.description || `Pago WUIPI - ${params.invoiceNumber}`,
     ...(params.customerEmail && { customer_email: params.customerEmail }),
     ...(params.customerPhone && { customer_phone: params.customerPhone }),
-    return_url: params.returnUrl || config.webhookUrl || '',
+    return_url: params.returnUrl || config.returnUrl || config.webhookUrl || '',
     payment_methods: {
       debito_inmediato: params.paymentMethods?.debitoInmediato ?? true,
       tarjetas: params.paymentMethods?.tarjetas ?? true,
@@ -51,13 +55,14 @@ export function createWebPayment(
   config: MercantilConfig,
   endpoints: MercantilEndpoints
 ): WebPaymentButtonResponse {
-  const rawData = buildTransactionData(params, config);
-  const encryptedData = encryptTransactionData(rawData, config.secretKey);
+  const creds = getProductCredentials(config, 'web_button');
+  const rawData = buildTransactionData(params, config, creds);
+  const encryptedData = encryptTransactionData(rawData, creds.secretKey);
   const encodedData = encodeURIComponent(encryptedData);
 
   const redirectUrl =
     `${endpoints.webPaymentButton}` +
-    `?merchantid=${config.merchantId}` +
+    `?merchantid=${creds.merchantId}` +
     `&integratorid=${config.integratorId}` +
     `&transactiondata=${encodedData}`;
 

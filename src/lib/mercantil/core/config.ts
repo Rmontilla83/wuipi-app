@@ -1,81 +1,218 @@
 // ============================================================================
 // WUIPI MERCANTIL SDK — Configuration & Environment Management
+// Multi-Product Credentials Architecture
 // ============================================================================
 
-import type { MercantilConfig, MercantilEndpoints } from '../types';
+import type {
+  MercantilConfig,
+  MercantilEndpoints,
+  MercantilProduct,
+  ProductCredentials,
+} from '../types';
 import { validateSecretKey } from './crypto';
 
-const SANDBOX_BASE = 'https://apicert.mercantilbanco.com';
-const PRODUCTION_BASE = 'https://api.mercantilbanco.com';
+// Correct base URLs from Mercantil documentation
+const SANDBOX_BASE = 'https://apimbu.mercantilbanco.com/mercantil-banco/sandbox';
+const PRODUCTION_BASE = 'https://apimbu.mercantilbanco.com/mercantil-banco/prod';
 
 function resolveEndpoints(baseUrl: string): MercantilEndpoints {
   return {
-    webPaymentButton: `${baseUrl}/mercantil/boton-pagos-web/v1/pagos`,
-    cardAuthUrl: `${baseUrl}/mercantil/boton-pagos-tarjetas/v1/autenticar`,
-    cardPayUrl: `${baseUrl}/mercantil/boton-pagos-tarjetas/v1/pagar`,
-    c2pUrl: `${baseUrl}/mercantil/pagos-moviles-c2p/v1/pagar`,
-    searchTransfersUrl: `${baseUrl}/mercantil/busqueda-transferencias/v1/buscar`,
-    searchMobilePaymentsUrl: `${baseUrl}/mercantil/busqueda-pagos-moviles/v1/buscar`,
-    searchCardPaymentsUrl: `${baseUrl}/mercantil/busqueda-pagos-tarjetas/v1/buscar`,
-    requestPaymentKeyUrl: `${baseUrl}/mercantil/solicitud-clave-pago/v1/solicitar`,
-    installmentsUrl: `${baseUrl}/mercantil/agendamiento-cuotas/v1/agendar`,
+    // Card Payments (Producto 1)
+    cardAuthUrl: `${baseUrl}/v1/payment/getauth`,
+    cardPayUrl: `${baseUrl}/v1/payment/pay`,
+    // C2P Payment (Producto 2)
+    c2pUrl: `${baseUrl}/v1/payment/c2p`,
+    // C2P Key Request (Producto 3)
+    c2pKeyRequestUrl: `${baseUrl}/v1/mobile-payment/scp`,
+    // Card Search (Producto 4)
+    searchCardPaymentsUrl: `${baseUrl}/v1/payment/search`,
+    // Mobile Search (Producto 5)
+    searchMobilePaymentsUrl: `${baseUrl}/v1/mobile-payment/search`,
+    // Transfer Search (Producto 6)
+    searchTransfersUrl: `${baseUrl}/v1/payment/transfer-search`,
+    // Scheduling (Producto 7)
+    createContractUrl: `${baseUrl}/v1/payment/create-contract`,
+    consultContractUrl: `${baseUrl}/v1/payment/consult-contract`,
+    cancelContractUrl: `${baseUrl}/v1/payment/cancel-contract`,
+    // TED (Producto 8)
+    tedUploadUrl: `${baseUrl}/v2/ted/cargar-archivo`,
+    tedDownloadUrl: `${baseUrl}/v2/ted/descargar-archivo`,
+    tedListMailboxUrl: `${baseUrl}/v2/ted/listar-buzon`,
+    tedListBatchUrl: `${baseUrl}/v2/ted/listar-lote`,
+    // Web Button (Producto 9 — PENDIENTE)
+    webPaymentButton: `${baseUrl}/v1/payment/web-button`,
   };
 }
 
 export interface ResolvedConfig {
   config: MercantilConfig;
   endpoints: MercantilEndpoints;
-  /** true if all credentials are present and valid */
-  isConfigured: boolean;
+  /** Set of products that have valid credentials configured */
+  configuredProducts: Set<MercantilProduct>;
+}
+
+/**
+ * Checks if a product has valid credentials without throwing.
+ */
+export function isProductConfigured(
+  config: MercantilConfig,
+  product: MercantilProduct
+): boolean {
+  const creds = config.products[product];
+  if (!creds || !creds.merchantId || !creds.secretKey || !creds.clientId) return false;
+  return validateSecretKey(creds.secretKey);
 }
 
 /**
  * Validates and resolves the Mercantil configuration.
- * Does NOT throw on missing credentials — returns isConfigured: false instead.
+ * Checks each product's credentials individually.
  */
 export function resolveConfig(config: MercantilConfig): ResolvedConfig {
-  const required: (keyof MercantilConfig)[] = [
-    'clientId', 'merchantId', 'integratorId',
-    'terminalId', 'secretKey', 'environment',
-  ];
-
-  const missingFields = required.filter((field) => !config[field]);
-  const hasAllFields = missingFields.length === 0;
-  const keyValid = hasAllFields && validateSecretKey(config.secretKey);
-
-  if (!hasAllFields) {
-    console.warn(
-      `[MercantilSDK] Missing config fields: ${missingFields.join(', ')}. ` +
-      'SDK will not process real payments until credentials are provided.'
-    );
-  } else if (!keyValid) {
-    console.warn('[MercantilSDK] SecretKey validation failed. Check your credentials.');
-  }
-
   const baseUrl = config.baseUrl ||
     (config.environment === 'production' ? PRODUCTION_BASE : SANDBOX_BASE);
 
+  const configuredProducts = new Set<MercantilProduct>();
+  const allProducts: MercantilProduct[] = [
+    'card_payment', 'c2p_payment', 'c2p_key_request', 'card_search',
+    'mobile_search', 'transfer_search', 'scheduling', 'scheduling_cards',
+    'ted', 'web_button',
+  ];
+
+  const resolvedConfig = { ...config, baseUrl };
+
+  for (const product of allProducts) {
+    if (isProductConfigured(resolvedConfig, product)) {
+      configuredProducts.add(product);
+    }
+  }
+
+  if (configuredProducts.size === 0) {
+    console.warn(
+      '[MercantilSDK] No hay productos configurados. ' +
+      'El SDK no procesara pagos reales hasta proveer credenciales.'
+    );
+  } else {
+    console.log(
+      `[MercantilSDK] Productos configurados (${configuredProducts.size}): ${[...configuredProducts].join(', ')}`
+    );
+  }
+
   return {
-    config: { ...config, baseUrl },
+    config: resolvedConfig,
     endpoints: resolveEndpoints(baseUrl),
-    isConfigured: hasAllFields && keyValid,
+    configuredProducts,
   };
 }
 
 /**
  * Loads configuration from environment variables.
+ * Uses the user's exact env var naming convention per product.
  */
 export function configFromEnv(): MercantilConfig {
+  const env = process.env;
+
+  function loadProduct(
+    merchantIdVar: string,
+    secretKeyVar: string,
+    clientIdVar: string
+  ): ProductCredentials | undefined {
+    const merchantId = env[merchantIdVar] || '';
+    const secretKey = env[secretKeyVar] || '';
+    const clientId = env[clientIdVar] || '';
+    if (!merchantId && !secretKey && !clientId) return undefined;
+    return { merchantId, secretKey, clientId };
+  }
+
   return {
-    clientId: process.env.MERCANTIL_CLIENT_ID || '',
-    merchantId: process.env.MERCANTIL_MERCHANT_ID || '',
-    integratorId: process.env.MERCANTIL_INTEGRATOR_ID || '',
-    terminalId: process.env.MERCANTIL_TERMINAL_ID || '',
-    secretKey: process.env.MERCANTIL_SECRET_KEY || '',
-    environment: (process.env.MERCANTIL_ENVIRONMENT as 'sandbox' | 'production') || 'sandbox',
-    baseUrl: process.env.MERCANTIL_BASE_URL || undefined,
-    webhookUrl: process.env.MERCANTIL_WEBHOOK_URL || undefined,
+    integratorId: env.MERCANTIL_INTEGRATOR_ID || '',
+    terminalId: env.MERCANTIL_TERMINAL_ID || '',
+    environment: (env.MERCANTIL_ENVIRONMENT as 'sandbox' | 'production') || 'sandbox',
+    baseUrl: env.MERCANTIL_BASE_URL || undefined,
+    webhookUrl: env.MERCANTIL_WEBHOOK_URL || undefined,
+    returnUrl: env.MERCANTIL_RETURN_URL || undefined,
+    products: {
+      // Producto 1: Pagos con Tarjetas TDD/TDC
+      card_payment: loadProduct(
+        'MERCANTIL_CARDS_MERCHANT_ID',
+        'MERCANTIL_CARDS_SECRET_KEY',
+        'MERCANTIL_CARDS_CLIENT_ID'
+      ),
+      // Producto 2: Pago Movil C2P
+      c2p_payment: loadProduct(
+        'MERCANTIL_C2P_MERCHANT_ID',
+        'MERCANTIL_C2P_SECRET_KEY',
+        'MERCANTIL_C2P_CLIENT_ID'
+      ),
+      // Producto 3: Solicitud de Clave C2P
+      c2p_key_request: loadProduct(
+        'MERCANTIL_C2P_KEY_MERCHANT_ID',
+        'MERCANTIL_C2P_KEY_SECRET_KEY',
+        'MERCANTIL_C2P_KEY_CLIENT_ID'
+      ),
+      // Producto 4: Busqueda de Pagos con Tarjetas
+      card_search: loadProduct(
+        'MERCANTIL_SEARCH_CARDS_MERCHANT_ID',
+        'MERCANTIL_SEARCH_CARDS_SECRET_KEY',
+        'MERCANTIL_SEARCH_CARDS_CLIENT_ID'
+      ),
+      // Producto 5: Busqueda Movil
+      mobile_search: loadProduct(
+        'MERCANTIL_SEARCH_MOBILE_MERCHANT_ID',
+        'MERCANTIL_SEARCH_MOBILE_SECRET_KEY',
+        'MERCANTIL_SEARCH_MOBILE_CLIENT_ID'
+      ),
+      // Producto 6: Busqueda de Transferencias (DIFFERENT clientId!)
+      transfer_search: loadProduct(
+        'MERCANTIL_SEARCH_TRANSFER_MERCHANT_ID',
+        'MERCANTIL_SEARCH_TRANSFER_SECRET_KEY',
+        'MERCANTIL_SEARCH_TRANSFER_CLIENT_ID'
+      ),
+      // Producto 7: Agendamiento de Cuotas
+      scheduling: loadProduct(
+        'MERCANTIL_SCHEDULING_MERCHANT_ID',
+        'MERCANTIL_SCHEDULING_SECRET_KEY',
+        'MERCANTIL_SCHEDULING_CLIENT_ID'
+      ),
+      // Producto 7 (tarjetas): Pago inicial con Client-Id diferente
+      scheduling_cards: (() => {
+        const merchantId = env.MERCANTIL_SCHEDULING_MERCHANT_ID || '';
+        const secretKey = env.MERCANTIL_SCHEDULING_SECRET_KEY || '';
+        const clientId = env.MERCANTIL_SCHEDULING_CARDS_CLIENT_ID || '';
+        if (!merchantId && !secretKey && !clientId) return undefined;
+        return { merchantId, secretKey, clientId };
+      })(),
+      // Producto 8: TED
+      ted: loadProduct(
+        'MERCANTIL_TED_MERCHANT_ID',
+        'MERCANTIL_TED_SECRET_KEY',
+        'MERCANTIL_TED_CLIENT_ID'
+      ),
+      // Producto 9: Boton de Pagos Web (PENDIENTE)
+      web_button: loadProduct(
+        'MERCANTIL_WEB_BUTTON_MERCHANT_ID',
+        'MERCANTIL_WEB_BUTTON_SECRET_KEY',
+        'MERCANTIL_WEB_BUTTON_CLIENT_ID'
+      ),
+    },
   };
+}
+
+/**
+ * Returns credentials for a specific product.
+ * Throws if the product is not configured.
+ */
+export function getProductCredentials(
+  config: MercantilConfig,
+  product: MercantilProduct
+): ProductCredentials {
+  const creds = config.products[product];
+  if (!creds || !creds.merchantId || !creds.secretKey || !creds.clientId) {
+    throw new Error(
+      `[MercantilSDK] Credenciales no configuradas para producto: ${product}. ` +
+      'Verifique las variables de entorno correspondientes.'
+    );
+  }
+  return creds;
 }
 
 /**
@@ -91,11 +228,27 @@ export function getApiHeaders(clientId: string): Record<string, string> {
 
 /**
  * Returns the merchant identification block used in most API requests.
+ * Uses shared integratorId/terminalId with product-specific merchantId.
  */
-export function getMerchantIdentify(config: MercantilConfig) {
+export function getMerchantIdentify(
+  config: MercantilConfig,
+  productCreds: ProductCredentials
+) {
   return {
     integratorId: config.integratorId,
-    merchantId: config.merchantId,
+    merchantId: productCreds.merchantId,
     terminalId: config.terminalId,
   };
+}
+
+/**
+ * Collects all unique secret keys from the product credentials.
+ * Used by the webhook handler to try decryption with multiple keys.
+ */
+export function getAllSecretKeys(config: MercantilConfig): string[] {
+  const keys = new Set<string>();
+  for (const creds of Object.values(config.products)) {
+    if (creds?.secretKey) keys.add(creds.secretKey);
+  }
+  return [...keys];
 }

@@ -1,48 +1,78 @@
 // ============================================================================
 // WUIPI MERCANTIL SDK — Type Definitions
 // Pasarela de Pagos Banco Mercantil Venezuela
+// Multi-Product Credentials Architecture
 // ============================================================================
+
+// --- Product Types ---
+
+/** Each Mercantil API product has its own set of credentials */
+export type MercantilProduct =
+  | 'card_payment'       // Pagos con Tarjetas TDD/TDC (auth + pay)
+  | 'c2p_payment'        // Pago Movil C2P
+  | 'c2p_key_request'    // Solicitud de Clave C2P
+  | 'card_search'        // Busqueda de Pagos con Tarjetas
+  | 'mobile_search'      // Busqueda Movil
+  | 'transfer_search'    // Busqueda de Transferencias (DIFFERENT clientId!)
+  | 'scheduling'         // Agendamiento de Cuotas
+  | 'scheduling_cards'   // Agendamiento — pago inicial con tarjeta
+  | 'ted'                // Transmision Electronica de Datos
+  | 'web_button';        // Boton de Pagos Web (PENDIENTE)
+
+/** Credentials specific to each Mercantil product */
+export interface ProductCredentials {
+  /** MerchantID / Codigo de comercio */
+  merchantId: string;
+  /** SecretKey / Clave de Cifrado (raw, before SHA-256) */
+  secretKey: string;
+  /** X-IBM-Client-Id header value */
+  clientId: string;
+}
 
 // --- Configuration ---
 
 export interface MercantilConfig {
-  /** ClientID (X-IBM-Client-Id) - provided by Mercantil per product */
-  clientId: string;
-  /** MerchantID - código de comercio assigned by Mercantil */
-  merchantId: string;
-  /** IntegratorID - integrator code assigned by Mercantil */
+  /** Shared IntegratorID across all products */
   integratorId: string;
-  /** TerminalID - terminal code assigned by Mercantil */
+  /** Shared TerminalID across all products */
   terminalId: string;
-  /** SecretKey - AES encryption key (raw, before SHA-256) */
-  secretKey: string;
   /** Environment: 'sandbox' for certification, 'production' for live */
   environment: 'sandbox' | 'production';
   /** Base URL override (optional - auto-resolved from environment) */
   baseUrl?: string;
   /** Webhook URL where Mercantil sends payment notifications */
   webhookUrl?: string;
+  /** Return URL after payment */
+  returnUrl?: string;
+  /** Per-product credentials registry */
+  products: Partial<Record<MercantilProduct, ProductCredentials>>;
 }
 
 export interface MercantilEndpoints {
-  /** Botón de Pagos Web */
+  // Card Payments (Producto 1)
+  cardAuthUrl: string;           // /v1/payment/getauth
+  cardPayUrl: string;            // /v1/payment/pay
+  // C2P Payment (Producto 2)
+  c2pUrl: string;                // /v1/payment/c2p
+  // C2P Key Request (Producto 3)
+  c2pKeyRequestUrl: string;      // /v1/mobile-payment/scp
+  // Card Search (Producto 4)
+  searchCardPaymentsUrl: string; // /v1/payment/search
+  // Mobile Search (Producto 5)
+  searchMobilePaymentsUrl: string; // /v1/mobile-payment/search
+  // Transfer Search (Producto 6)
+  searchTransfersUrl: string;    // /v1/payment/transfer-search
+  // Scheduling (Producto 7)
+  createContractUrl: string;     // /v1/payment/create-contract
+  consultContractUrl: string;    // /v1/payment/consult-contract
+  cancelContractUrl: string;     // /v1/payment/cancel-contract
+  // TED (Producto 8)
+  tedUploadUrl: string;          // /v2/ted/cargar-archivo
+  tedDownloadUrl: string;        // /v2/ted/descargar-archivo
+  tedListMailboxUrl: string;     // /v2/ted/listar-buzon
+  tedListBatchUrl: string;       // /v2/ted/listar-lote
+  // Web Button (Producto 9 — PENDIENTE)
   webPaymentButton: string;
-  /** Pagos con Tarjetas - Auth */
-  cardAuthUrl: string;
-  /** Pagos con Tarjetas - Pay */
-  cardPayUrl: string;
-  /** Pagos Móviles C2P */
-  c2pUrl: string;
-  /** Búsqueda de Transferencias */
-  searchTransfersUrl: string;
-  /** Búsqueda de Pagos Móviles */
-  searchMobilePaymentsUrl: string;
-  /** Búsqueda de Pagos con Tarjetas */
-  searchCardPaymentsUrl: string;
-  /** Solicitud de Clave de Pago */
-  requestPaymentKeyUrl: string;
-  /** Agendamiento de Cuotas */
-  installmentsUrl: string;
 }
 
 // --- Encryption ---
@@ -76,12 +106,12 @@ export interface ClientIdentify {
   };
 }
 
-// --- Web Payment Button (Botón de Pagos Web) ---
+// --- Web Payment Button (Boton de Pagos Web) ---
 
 export interface WebPaymentButtonParams {
   /** Transaction amount */
   amount: number;
-  /** Currency: 'VES' for bolívares */
+  /** Currency: 'VES' for bolivares */
   currency: 'VES' | 'USD';
   /** Unique invoice/order number */
   invoiceNumber: string;
@@ -112,7 +142,7 @@ export interface WebPaymentButtonResponse {
   paymentToken: string;
 }
 
-// --- Card Payments (Botón de Pagos con Tarjetas) ---
+// --- Card Payments (Boton de Pagos con Tarjetas) ---
 
 export type CardType = 'credit' | 'debit';
 export type CardBrand = 'visa' | 'mastercard' | 'diners' | 'maestro';
@@ -126,6 +156,7 @@ export interface CardAuthRequest {
     customer_id: string;
     customer_id_type: string;
   };
+  twofactor_auth?: string;
 }
 
 export interface CardAuthResponse {
@@ -178,6 +209,7 @@ export interface C2PPaymentRequest {
     trx_type: 'compra' | 'vuelto';
     payment_method: 'c2p';
     invoice_number: string;
+    purchase_key?: string;
   };
 }
 
@@ -187,6 +219,25 @@ export interface C2PPaymentResponse {
   message: string;
   amount: number;
   bank_transaction_id?: string;
+}
+
+// --- C2P Key Request (Solicitud de Clave de Pago) ---
+
+export interface C2PKeyRequestPayload {
+  merchant_identify: MerchantIdentify;
+  client_identify: ClientIdentify;
+  key_request: {
+    origin_mobile_number: string;
+    destination_mobile_number: string;
+    customer_id: string;
+    customer_id_type: string;
+  };
+}
+
+export interface C2PKeyResponse {
+  status: string;
+  message: string;
+  key_reference?: string;
 }
 
 // --- Payment Search / Reconciliation ---
@@ -222,6 +273,120 @@ export interface CardPaymentSearchParams {
   cardType?: CardType;
 }
 
+// --- Scheduling (Agendamiento de Cuotas) ---
+
+export interface CreateContractParams {
+  cardNumber: string;
+  expiryDate: string;
+  cvv: string;
+  cardholderName: string;
+  customerId: string;
+  customerIdType: string;
+  amount: number;
+  currency?: string;
+  frequency: 'monthly' | 'biweekly' | 'weekly';
+  startDate: string;
+  endDate?: string;
+  description?: string;
+  invoiceNumber: string;
+}
+
+export interface CreateContractRequest {
+  merchant_identify: MerchantIdentify;
+  client_identify: ClientIdentify;
+  contract: {
+    card_number: string;
+    expiry_date: string;
+    cvv: string;
+    name: string;
+    customer_id: string;
+    customer_id_type: string;
+    amount: number;
+    currency: string;
+    frequency: string;
+    start_date: string;
+    end_date?: string;
+    description?: string;
+    invoice_number: string;
+  };
+}
+
+export interface CreateContractResponse {
+  contract_id: string;
+  status: string;
+  message: string;
+}
+
+export interface ConsultContractResponse {
+  contract_id: string;
+  status: string;
+  next_payment_date?: string;
+  total_paid?: number;
+  remaining?: number;
+  details?: Record<string, unknown>;
+}
+
+export interface CancelContractResponse {
+  contract_id: string;
+  status: string;
+  message: string;
+}
+
+// --- TED (Transmision Electronica de Datos) ---
+
+export interface TedUploadParams {
+  fileContent: string; // base64
+  fileName: string;
+  fileType: string;
+  description?: string;
+}
+
+export interface TedUploadResponse {
+  batch_id: string;
+  status: string;
+  message: string;
+}
+
+export interface TedDownloadParams {
+  batchId: string;
+  fileId?: string;
+}
+
+export interface TedDownloadResponse {
+  file_content: string; // base64
+  file_name: string;
+  file_type: string;
+}
+
+export interface TedListMailboxParams {
+  dateFrom?: string;
+  dateTo?: string;
+}
+
+export interface TedListMailboxResponse {
+  messages: Array<{
+    id: string;
+    subject: string;
+    date: string;
+    status: string;
+  }>;
+}
+
+export interface TedListBatchParams {
+  dateFrom?: string;
+  dateTo?: string;
+  status?: string;
+}
+
+export interface TedListBatchResponse {
+  batches: Array<{
+    batch_id: string;
+    file_count: number;
+    date: string;
+    status: string;
+  }>;
+}
+
 // --- Webhook / Notification ---
 
 export interface WebhookPayload {
@@ -245,22 +410,22 @@ export type WebhookHandler = (payload: WebhookPayload) => Promise<void>;
 export const VENEZUELAN_BANKS: Record<string, string> = {
   '0001': 'Banco Central de Venezuela',
   '0102': 'Banco de Venezuela',
-  '0104': 'Venezolano de Crédito',
+  '0104': 'Venezolano de Credito',
   '0105': 'Banco Mercantil',
   '0108': 'Banco Provincial',
   '0114': 'Bancaribe',
   '0115': 'Banco Exterior',
   '0116': 'Banco Occidental de Descuento',
-  '0128': 'Banco Caroní',
+  '0128': 'Banco Caroni',
   '0134': 'Banesco',
   '0137': 'Banco Sofitasa',
   '0138': 'Banco Plaza',
   '0146': 'Bangente',
-  '0151': 'BFC Banco Fondo Común',
+  '0151': 'BFC Banco Fondo Comun',
   '0156': '100% Banco',
   '0157': 'DelSur',
   '0163': 'Banco del Tesoro',
-  '0166': 'Banco Agrícola de Venezuela',
+  '0166': 'Banco Agricola de Venezuela',
   '0168': 'Bancrecer',
   '0169': 'Mi Banco',
   '0171': 'Banco Activo',
@@ -269,5 +434,5 @@ export const VENEZUELAN_BANKS: Record<string, string> = {
   '0174': 'Banplus',
   '0175': 'Banco Bicentenario',
   '0177': 'Banfanb',
-  '0191': 'Banco Nacional de Crédito (BNC)',
+  '0191': 'Banco Nacional de Credito (BNC)',
 };

@@ -41,18 +41,29 @@ export async function POST(request: NextRequest) {
 
     const sdk = new MercantilSDK();
 
-    if (!sdk.isConfigured) {
+    // Each search product has different credentials — check individually
+    const hasTransferSearch = sdk.isProductConfigured('transfer_search');
+    const hasMobileSearch = sdk.isProductConfigured('mobile_search');
+    const hasCardSearch = sdk.isProductConfigured('card_search');
+
+    if (!hasTransferSearch && !hasMobileSearch && !hasCardSearch) {
       return apiError(
-        "SDK Mercantil no configurado. Las credenciales están pendientes del banco.",
+        "Ninguna API de busqueda Mercantil esta configurada. Credenciales pendientes del banco.",
         503
       );
     }
 
-    // Fetch all three payment types in parallel
+    // Fetch available payment types in parallel
     const [transfers, mobilePayments, cardPayments] = await Promise.all([
-      sdk.searchTransfers({ dateFrom: date_from, dateTo: date_to }).catch(() => []),
-      sdk.searchMobilePayments({ dateFrom: date_from, dateTo: date_to }).catch(() => []),
-      sdk.searchCardPayments({ dateFrom: date_from, dateTo: date_to }).catch(() => []),
+      hasTransferSearch
+        ? sdk.searchTransfers({ dateFrom: date_from, dateTo: date_to }).catch(() => [])
+        : Promise.resolve([]),
+      hasMobileSearch
+        ? sdk.searchMobilePayments({ dateFrom: date_from, dateTo: date_to }).catch(() => [])
+        : Promise.resolve([]),
+      hasCardSearch
+        ? sdk.searchCardPayments({ dateFrom: date_from, dateTo: date_to }).catch(() => [])
+        : Promise.resolve([]),
     ]);
 
     // Get pending payments from DB for the date range

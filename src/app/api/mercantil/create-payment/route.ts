@@ -70,7 +70,7 @@ export async function POST(request: NextRequest) {
     let redirectUrl: string;
     let transactionData: string | undefined;
 
-    if (sdk.isConfigured) {
+    if (sdk.isProductConfigured('web_button')) {
       const payment = sdk.createPayment({
         amount,
         currency: "VES",
@@ -88,7 +88,8 @@ export async function POST(request: NextRequest) {
       redirectUrl = payment.redirectUrl;
       transactionData = payment.transactionData;
     } else {
-      // SDK not configured — return sandbox placeholder
+      // Web button product not configured — return sandbox placeholder
+      // Credenciales del Boton de Pagos Web estan pendientes del banco
       redirectUrl = `${appUrl}/pay/${paymentToken}?sandbox=true`;
     }
 
