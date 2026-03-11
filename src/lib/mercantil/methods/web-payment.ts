@@ -1,7 +1,7 @@
 // ============================================================================
 // WUIPI MERCANTIL SDK — Boton de Pagos Web (Unified Payment Button)
 // Producto 9: Handles Debito Inmediato + Tarjetas + Pago Movil C2P
-// Uses 'web_button' product credentials (PENDIENTE — credenciales por llegar)
+// Uses 'web_button' product credentials
 // ============================================================================
 
 import type {

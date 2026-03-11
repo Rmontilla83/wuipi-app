@@ -15,7 +15,7 @@ import { validateSecretKey } from './crypto';
 const SANDBOX_BASE = 'https://apimbu.mercantilbanco.com/mercantil-banco/sandbox';
 const PRODUCTION_BASE = 'https://apimbu.mercantilbanco.com/mercantil-banco/prod';
 
-function resolveEndpoints(baseUrl: string): MercantilEndpoints {
+function resolveEndpoints(baseUrl: string, webButtonBaseUrl?: string): MercantilEndpoints {
   return {
     // Card Payments (Producto 1)
     cardAuthUrl: `${baseUrl}/v1/payment/getauth`,
@@ -39,8 +39,10 @@ function resolveEndpoints(baseUrl: string): MercantilEndpoints {
     tedDownloadUrl: `${baseUrl}/v2/ted/descargar-archivo`,
     tedListMailboxUrl: `${baseUrl}/v2/ted/listar-buzon`,
     tedListBatchUrl: `${baseUrl}/v2/ted/listar-lote`,
-    // Web Button (Producto 9 — PENDIENTE)
-    webPaymentButton: `${baseUrl}/v1/payment/web-button`,
+    // Web Button (Producto 9) — uses its own frontend URL, different from API base
+    webPaymentButton: webButtonBaseUrl
+      ? webButtonBaseUrl.replace(/\/$/, '')
+      : `${baseUrl}/v1/payment/web-button`,
   };
 }
 
@@ -79,6 +81,7 @@ export function resolveConfig(config: MercantilConfig): ResolvedConfig {
   ];
 
   const resolvedConfig = { ...config, baseUrl };
+  const webButtonBaseUrl = config.webButtonBaseUrl;
 
   for (const product of allProducts) {
     if (isProductConfigured(resolvedConfig, product)) {
@@ -99,7 +102,7 @@ export function resolveConfig(config: MercantilConfig): ResolvedConfig {
 
   return {
     config: resolvedConfig,
-    endpoints: resolveEndpoints(baseUrl),
+    endpoints: resolveEndpoints(baseUrl, webButtonBaseUrl),
     configuredProducts,
   };
 }
@@ -128,6 +131,7 @@ export function configFromEnv(): MercantilConfig {
     terminalId: env.MERCANTIL_TERMINAL_ID || '',
     environment: (env.MERCANTIL_ENVIRONMENT as 'sandbox' | 'production') || 'sandbox',
     baseUrl: env.MERCANTIL_BASE_URL || undefined,
+    webButtonBaseUrl: env.MERCANTIL_WEB_BUTTON_BASE_URL || undefined,
     webhookUrl: env.MERCANTIL_WEBHOOK_URL || undefined,
     returnUrl: env.MERCANTIL_RETURN_URL || undefined,
     products: {
@@ -187,7 +191,7 @@ export function configFromEnv(): MercantilConfig {
         'MERCANTIL_TED_SECRET_KEY',
         'MERCANTIL_TED_CLIENT_ID'
       ),
-      // Producto 9: Boton de Pagos Web (PENDIENTE)
+      // Producto 9: Boton de Pagos Web
       web_button: loadProduct(
         'MERCANTIL_WEB_BUTTON_MERCHANT_ID',
         'MERCANTIL_WEB_BUTTON_SECRET_KEY',

@@ -17,7 +17,7 @@ export type MercantilProduct =
   | 'scheduling'         // Agendamiento de Cuotas
   | 'scheduling_cards'   // Agendamiento — pago inicial con tarjeta
   | 'ted'                // Transmision Electronica de Datos
-  | 'web_button';        // Boton de Pagos Web (PENDIENTE)
+  | 'web_button';        // Boton de Pagos Web
 
 /** Credentials specific to each Mercantil product */
 export interface ProductCredentials {
@@ -40,6 +40,8 @@ export interface MercantilConfig {
   environment: 'sandbox' | 'production';
   /** Base URL override (optional - auto-resolved from environment) */
   baseUrl?: string;
+  /** Web Button has its own frontend URL (IBM Cloud sandbox, different from API base) */
+  webButtonBaseUrl?: string;
   /** Webhook URL where Mercantil sends payment notifications */
   webhookUrl?: string;
   /** Return URL after payment */
@@ -71,7 +73,7 @@ export interface MercantilEndpoints {
   tedDownloadUrl: string;        // /v2/ted/descargar-archivo
   tedListMailboxUrl: string;     // /v2/ted/listar-buzon
   tedListBatchUrl: string;       // /v2/ted/listar-lote
-  // Web Button (Producto 9 — PENDIENTE)
+  // Web Button (Producto 9)
   webPaymentButton: string;
 }
 
