@@ -109,30 +109,38 @@ export interface ClientIdentify {
 }
 
 // --- Web Payment Button (Boton de Pagos Web) ---
+// Estructura según Documentación Botón de Pagos Web Mercantil v3.1
+
+/** Payment concepts (métodos de pago) supported by the Web Button */
+export type WebPaymentConcept = 'b2b' | 'c2p' | 'tdd';
 
 export interface WebPaymentButtonParams {
-  /** Transaction amount */
+  /** Transaction amount (number, not string) */
   amount: number;
-  /** Currency: 'VES' for bolivares */
-  currency: 'VES' | 'USD';
-  /** Unique invoice/order number */
-  invoiceNumber: string;
-  /** Description of the payment */
-  description?: string;
-  /** Customer email for notification */
-  customerEmail?: string;
-  /** Customer phone */
-  customerPhone?: string;
-  /** Custom return URL after payment */
-  returnUrl?: string;
-  /** Payment methods to enable */
-  paymentMethods?: {
-    debitoInmediato?: boolean;
-    tarjetas?: boolean;
-    c2p?: boolean;
+  /** Customer name (required by Mercantil) */
+  customerName: string;
+  /** URL to redirect after payment (required) */
+  returnUrl: string;
+  /** Invoice information (required) */
+  invoiceNumber: {
+    /** Invoice number */
+    number: string;
+    /** Invoice creation date (YYYY-MM-DD) */
+    invoiceCreationDate: string;
+    /** Invoice cancellation/due date (YYYY-MM-DD) */
+    invoiceCancelledDate: string;
   };
-  /** Additional metadata (passed through to webhook) */
-  metadata?: Record<string, string>;
+  /** Transaction type (default: 'compra') */
+  trxType?: 'compra';
+  /** Currency (default: 'ves') */
+  currency?: 'ves' | 'usd';
+  /** Payment methods to show: 'b2b' (debito inmediato), 'c2p' (pago movil), 'tdd' (tarjeta debito) */
+  paymentConcepts?: WebPaymentConcept[];
+  /** Contract info (optional) */
+  contract?: {
+    contractNumber: string;
+    contractDate: string; // YYYY-MM-DD
+  };
 }
 
 export interface WebPaymentButtonResponse {

@@ -61,16 +61,18 @@ export class MercantilSDK {
     }
   }
 
-  // --- Web Payment Button (Producto 9 — PENDIENTE) ---
+  // --- Web Payment Button (Producto 9) ---
 
   createPayment(params: WebPaymentButtonParams): WebPaymentButtonResponse {
     this.ensureProduct('web_button');
     return createWebPayment(params, this.config, this.endpoints);
   }
 
-  createInvoicePayment(invoiceNumber: string, amount: number, email: string): WebPaymentButtonResponse {
+  createInvoicePayment(
+    invoiceNumber: string, amount: number, customerName: string, returnUrl: string
+  ): WebPaymentButtonResponse {
     this.ensureProduct('web_button');
-    return createInvoicePayment(invoiceNumber, amount, email, this.config, this.endpoints);
+    return createInvoicePayment(invoiceNumber, amount, customerName, returnUrl, this.config, this.endpoints);
   }
 
   // --- Card Payments (Producto 1) ---

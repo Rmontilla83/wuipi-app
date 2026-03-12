@@ -70,26 +70,28 @@ export async function POST(request: NextRequest) {
     let redirectUrl: string;
     let transactionData: string | undefined;
 
+    const today = new Date().toISOString().split("T")[0];
+    const dueDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+      .toISOString().split("T")[0];
+
     if (sdk.isProductConfigured('web_button')) {
       const payment = sdk.createPayment({
         amount,
-        currency: "VES",
-        invoiceNumber,
-        description: body.description || `Pago WUIPI - ${invoiceNumber}`,
-        customerEmail,
-        customerPhone: body.customer_phone,
+        customerName: body.customer_name || "Cliente WUIPI",
         returnUrl,
-        metadata: {
-          source: "wuipi-app",
-          invoice_id: invoiceId || "",
-          payment_token: paymentToken,
+        currency: "ves",
+        invoiceNumber: {
+          number: invoiceNumber,
+          invoiceCreationDate: today,
+          invoiceCancelledDate: dueDate,
         },
+        trxType: "compra",
+        paymentConcepts: ["b2b", "c2p", "tdd"],
       });
       redirectUrl = payment.redirectUrl;
       transactionData = payment.transactionData;
     } else {
-      // Web button product not configured — return sandbox placeholder
-      // Credenciales del Boton de Pagos Web estan pendientes del banco
+      // Web button product not configured
       redirectUrl = `${appUrl}/pay/${paymentToken}?sandbox=true`;
     }
 
