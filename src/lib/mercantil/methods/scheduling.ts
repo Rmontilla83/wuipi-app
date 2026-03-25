@@ -3,46 +3,62 @@
 // Producto 7: Programacion de pagos recurrentes con tarjeta
 // Uses 'scheduling' credentials for consult/cancel,
 //       'scheduling_cards' for create (pago inicial con tarjeta)
-// NOTA: Requiere pago inicial desde Boton de Pagos con Tarjetas
+// API uses camelCase: merchantIdentify, clientIdentify, ipAddress, browserAgent
+// Docs: https://apiportal.mercantilbanco.com/mercantil-banco/produccion/product/26229
 // ============================================================================
 
 import type {
-  MercantilConfig, MercantilEndpoints, ClientIdentify,
-  CreateContractParams, CreateContractRequest, CreateContractResponse,
+  MercantilConfig, MercantilEndpoints,
+  CreateContractParams, CreateContractResponse,
   ConsultContractResponse, CancelContractResponse,
 } from '../types';
-import { encryptField } from '../core/crypto';
+import { encryptTransactionData, encryptField } from '../core/crypto';
 import { getProductCredentials, getMerchantIdentify } from '../core/config';
 import { apiRequest } from '../core/http';
 
 /**
  * Creates a recurring payment contract (agendamiento de cuotas).
- * Uses 'scheduling_cards' product credentials (pago inicial con tarjeta).
+ * Uses 'scheduling_cards' product credentials.
+ * The installment data is JSON.stringified then AES-encrypted into installmentValue.
  */
 export async function createContract(
   params: CreateContractParams,
-  clientInfo: ClientIdentify,
   config: MercantilConfig,
   endpoints: MercantilEndpoints
 ): Promise<CreateContractResponse> {
   const creds = getProductCredentials(config, 'scheduling_cards');
-  const body: CreateContractRequest = {
-    merchant_identify: getMerchantIdentify(config, creds),
-    client_identify: clientInfo,
-    contract: {
-      card_number: encryptField(params.cardNumber, creds.secretKey),
-      expiry_date: encryptField(params.expiryDate, creds.secretKey),
-      cvv: encryptField(params.cvv, creds.secretKey),
-      name: params.cardholderName,
-      customer_id: encryptField(params.customerId, creds.secretKey),
-      customer_id_type: params.customerIdType,
-      amount: params.amount,
-      currency: params.currency || 'VES',
-      frequency: params.frequency,
-      start_date: params.startDate,
-      ...(params.endDate && { end_date: params.endDate }),
-      ...(params.description && { description: params.description }),
-      invoice_number: params.invoiceNumber,
+
+  // Build the installment data object (will be encrypted as a whole)
+  const installmentData = {
+    contractNumber: params.contractNumber || 'TDC',
+    customerId: params.customerId,
+    customerName: params.cardholderName,
+    customerEmail: params.customerEmail || '',
+    cardNumber: params.cardNumber,
+    accountNumber: params.accountNumber || '',
+    expirationDate: params.expiryDate,
+    paymentMethod: params.paymentMethod || 'TDD',
+    paymentReference: params.paymentReference,
+    contractStatus: 2,
+    numberCollectionAttempts: params.collectionAttempts || 3,
+    collectionInForeignCurrency: 'N',
+    amountToFinance: params.amount,
+    numberInstallments: params.installments.length,
+    paymentFrecuency: params.frequency,
+    firstPaymentDate: params.startDate,
+    currency: params.currency || 'VES',
+    installmentsInfo: params.installments,
+  };
+
+  const body = {
+    merchantIdentify: getMerchantIdentify(config, creds),
+    clientIdentify: {
+      ipAddress: '127.0.0.1',
+      browserAgent: 'Mozilla/5.0',
+      mobile: { manufacturer: 'Server' },
+    },
+    installmentCreationEncrypted: {
+      installmentValue: encryptTransactionData(installmentData, creds.secretKey),
     },
   };
 
@@ -58,23 +74,31 @@ export async function createContract(
 /**
  * Consults an existing recurring payment contract.
  * Uses 'scheduling' product credentials.
+ * Node: "consultContract" with encrypted contractNumber.
  */
 export async function consultContract(
-  contractId: string,
+  contractNumber: string,
   config: MercantilConfig,
   endpoints: MercantilEndpoints
 ): Promise<ConsultContractResponse> {
   const creds = getProductCredentials(config, 'scheduling');
-  const body: Record<string, unknown> = {
-    merchant_identify: getMerchantIdentify(config, creds),
-    contract_id: contractId,
+  const body = {
+    merchantIdentify: getMerchantIdentify(config, creds),
+    clientIdentify: {
+      ipAddress: '127.0.0.1',
+      browserAgent: 'Mozilla/5.0',
+      mobile: { manufacturer: 'Server' },
+    },
+    consultContract: {
+      contractNumber: encryptField(contractNumber, creds.secretKey),
+    },
   };
 
   const response = await apiRequest<ConsultContractResponse>({
     method: 'POST',
     url: endpoints.consultContractUrl,
     clientId: creds.clientId,
-    body,
+    body: body as unknown as Record<string, unknown>,
   });
   return response.data;
 }
@@ -82,25 +106,33 @@ export async function consultContract(
 /**
  * Cancels (anula) a recurring payment contract.
  * Uses 'scheduling' product credentials.
+ * Node: "cancelContract" with encrypted contractNumber + cancellationReason.
  */
 export async function cancelContract(
-  contractId: string,
-  reason: string | undefined,
+  contractNumber: string,
+  cancellationReason: number,
   config: MercantilConfig,
   endpoints: MercantilEndpoints
 ): Promise<CancelContractResponse> {
   const creds = getProductCredentials(config, 'scheduling');
-  const body: Record<string, unknown> = {
-    merchant_identify: getMerchantIdentify(config, creds),
-    contract_id: contractId,
-    ...(reason && { reason }),
+  const body = {
+    merchantIdentify: getMerchantIdentify(config, creds),
+    clientIdentify: {
+      ipAddress: '127.0.0.1',
+      browserAgent: 'Mozilla/5.0',
+      mobile: { manufacturer: 'Server' },
+    },
+    cancelContract: {
+      contractNumber: encryptField(contractNumber, creds.secretKey),
+      cancellationReason,
+    },
   };
 
   const response = await apiRequest<CancelContractResponse>({
     method: 'POST',
     url: endpoints.cancelContractUrl,
     clientId: creds.clientId,
-    body,
+    body: body as unknown as Record<string, unknown>,
   });
   return response.data;
 }

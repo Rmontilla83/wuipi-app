@@ -266,8 +266,8 @@ export interface TransferSearchParams {
   trxDate: string;
   /** Issuer bank code (e.g. 105 for Mercantil) */
   issuerBankId: number;
-  /** Transaction type as string (e.g. "1") */
-  transactionType: string;
+  /** Transaction type (e.g. 1) */
+  transactionType: number;
   /** Payment reference number */
   paymentReference: string;
   /** Amount */
@@ -305,61 +305,66 @@ export interface CardPaymentSearchParams {
 
 // --- Scheduling (Agendamiento de Cuotas) ---
 
-export interface CreateContractParams {
-  cardNumber: string;
-  expiryDate: string;
-  cvv: string;
-  cardholderName: string;
-  customerId: string;
-  customerIdType: string;
+/** Installment detail for scheduling */
+export interface InstallmentInfo {
+  installmentNumber: number;
   amount: number;
-  currency?: string;
-  frequency: 'monthly' | 'biweekly' | 'weekly';
-  startDate: string;
-  endDate?: string;
-  description?: string;
-  invoiceNumber: string;
+  paymentDate: string;
+  status: string;
 }
 
-export interface CreateContractRequest {
-  merchant_identify: MerchantIdentify;
-  client_identify: ClientIdentify;
-  contract: {
-    card_number: string;
-    expiry_date: string;
-    cvv: string;
-    name: string;
-    customer_id: string;
-    customer_id_type: string;
-    amount: number;
-    currency: string;
-    frequency: string;
-    start_date: string;
-    end_date?: string;
-    description?: string;
-    invoice_number: string;
-  };
+export interface CreateContractParams {
+  cardNumber: string;
+  expiryDate: string; // YYYY/MM
+  cardholderName: string;
+  customerId: string; // e.g. "V99999999"
+  customerEmail?: string;
+  accountNumber?: string;
+  amount: number;
+  currency?: string;
+  /** M=monthly, Q=biweekly, S=weekly */
+  frequency: string;
+  startDate: string;
+  paymentReference: string;
+  paymentMethod?: 'TDD' | 'TDC';
+  contractNumber?: string;
+  collectionAttempts?: number;
+  installments: InstallmentInfo[];
 }
 
 export interface CreateContractResponse {
-  contract_id: string;
-  status: string;
-  message: string;
+  installmentCreationResponse: {
+    contractNumber: string;
+    contractStatus: number;
+    installmentsScheduleInfo: InstallmentInfo[];
+  };
 }
 
 export interface ConsultContractResponse {
-  contract_id: string;
-  status: string;
-  next_payment_date?: string;
-  total_paid?: number;
-  remaining?: number;
-  details?: Record<string, unknown>;
+  consultContractsResponse: {
+    paymentMethod: string;
+    customerName: string;
+    customerEmail: string;
+    customerId: string;
+    contractNumber: string;
+    cardNumber: string;
+    currency: string;
+    amountToFinance: number;
+    contractStatus: number;
+    numberInstallments: number;
+    paymentFrecuency: string;
+    firstPaymentDate: string;
+    installmentsInfoConsult: Array<InstallmentInfo & { attemptsForCollection: number }>;
+  };
 }
 
 export interface CancelContractResponse {
-  contract_id: string;
-  status: string;
-  message: string;
+  cancelContractResponse: {
+    contractStatus: number;
+    description: string;
+    cancellationReason: number;
+    contractNumber: string;
+  };
 }
 
 // --- TED (Transmision Electronica de Datos) ---

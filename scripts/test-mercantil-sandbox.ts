@@ -267,31 +267,35 @@ function test_p5_searchMobile() {
 // ══════════════════════════════════════════════════════════════════
 function test_p6_searchTransfer() {
   const c = P.searchTransfer;
+  // Datos proporcionados por Mercantil (valores ya cifrados por ellos)
   return post(`${BASE}/v1/payment/transfer-search`, c.clientId, {
     merchantIdentify: merchantIdentify(c),
     clientIdentify,
     transferSearchBy: {
-      account: enc('01050054151054540721', c.secretKey),
-      issuerCustomerId: enc('J405660872', c.secretKey),
-      trxDate: '2026-03-03',
+      account: 'N1IH8GqG9krQTx24fwpq27oSCleBHZ2uJbMFId4jc/s=',
+      issuerCustomerId: '8jhYIu6i+d3eIwcz5mKbaw==',
+      trxDate: '2026-03-13',
       issuerBankId: 105,
-      transactionType: '1',
-      paymentReference: '25508782358',
-      amount: 1230,
+      transactionType: 1,
+      paymentReference: '16556116',
+      amount: 1250,
     },
   });
 }
 
 // ══════════════════════════════════════════════════════════════════
 // P7: Agendamiento — consult-contract
-// No hay doc pública. Intentamos snake_case como P1-P5
+// Docs: apiportal.mercantilbanco.com — camelCase
+// Nodo: "consultContract" con contractNumber cifrado
 // ══════════════════════════════════════════════════════════════════
 function test_p7_scheduling() {
   const c = P.scheduling;
   return post(`${BASE}/v1/payment/consult-contract`, c.clientId, {
-    merchant_identify: merchant_identify(c),
-    client_identify,
-    contract_id: 'TEST-CONTRACT-001',
+    merchantIdentify: merchantIdentify(c),
+    clientIdentify,
+    consultContract: {
+      contractNumber: enc('12345', c.secretKey),
+    },
   });
 }
 

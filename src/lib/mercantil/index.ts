@@ -13,7 +13,7 @@ import type {
   CancelContractResponse, TedUploadParams, TedUploadResponse,
   TedDownloadParams, TedDownloadResponse, TedListMailboxParams,
   TedListMailboxResponse, TedListBatchParams, TedListBatchResponse,
-  ClientIdentify, WebhookPayload,
+  ClientIdentify, WebhookPayload, // eslint-disable-line @typescript-eslint/no-unused-vars
 } from './types';
 import {
   resolveConfig, configFromEnv, getProductCredentials,
@@ -132,22 +132,19 @@ export class MercantilSDK {
 
   // --- Scheduling (Producto 7) ---
 
-  async createContract(
-    params: CreateContractParams,
-    clientInfo: ClientIdentify
-  ): Promise<CreateContractResponse> {
+  async createContract(params: CreateContractParams): Promise<CreateContractResponse> {
     this.ensureProduct('scheduling_cards');
-    return createContract(params, clientInfo, this.config, this.endpoints);
+    return createContract(params, this.config, this.endpoints);
   }
 
-  async consultContract(contractId: string): Promise<ConsultContractResponse> {
+  async consultContract(contractNumber: string): Promise<ConsultContractResponse> {
     this.ensureProduct('scheduling');
-    return consultContract(contractId, this.config, this.endpoints);
+    return consultContract(contractNumber, this.config, this.endpoints);
   }
 
-  async cancelContract(contractId: string, reason?: string): Promise<CancelContractResponse> {
+  async cancelContract(contractNumber: string, cancellationReason: number): Promise<CancelContractResponse> {
     this.ensureProduct('scheduling');
-    return cancelContract(contractId, reason, this.config, this.endpoints);
+    return cancelContract(contractNumber, cancellationReason, this.config, this.endpoints);
   }
 
   // --- TED (Producto 8) ---
