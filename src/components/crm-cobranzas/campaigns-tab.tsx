@@ -47,6 +47,11 @@ interface UploadRow {
   monto_usd: number;
   concepto: string;
   numero_factura: string;
+  // Odoo info fields
+  fecha: string;
+  subtotal: number;
+  impuesto: number;
+  total: number;
 }
 
 const APP_URL = typeof window !== "undefined" ? window.location.origin : "";
@@ -276,6 +281,45 @@ function CreateCampaignView({
   const [saving, setSaving] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // --- Odoo phone normalizer: "58 412-9441604" → "04129441604" ---
+  const normalizePhone = (raw: unknown): string => {
+    if (!raw || raw === "NaN" || raw === "nan") return "";
+    let s = String(raw).replace(/[\t\n\r]/g, "").trim();
+    // Remove +, spaces, dashes
+    s = s.replace(/[+\s\-()]/g, "");
+    // "58412..." → "0412..."
+    if (s.startsWith("58") && s.length >= 12) {
+      s = "0" + s.slice(2);
+    }
+    return s;
+  };
+
+  // --- Odoo cédula normalizer: detect V/J prefix by length ---
+  const normalizeCedula = (raw: unknown): string => {
+    if (!raw || raw === "NaN" || raw === "nan") return "";
+    let s = String(raw).replace(/[\t\n\r\s]/g, "").trim();
+    // Already has prefix
+    if (/^[VJEGP]-?/i.test(s)) return s.toUpperCase();
+    // Strip non-alphanumeric
+    const digits = s.replace(/\D/g, "");
+    if (!digits) return s;
+    // >8 digits → RIF jurídico (J), <=8 → cédula natural (V)
+    const prefix = digits.length > 8 ? "J" : "V";
+    return `${prefix}${digits}`;
+  };
+
+  // --- Clean email: remove tabs/newlines ---
+  const cleanEmail = (raw: unknown): string => {
+    if (!raw || raw === "NaN" || raw === "nan" || raw === "False" || raw === false) return "";
+    return String(raw).replace(/[\t\n\r\s]+/g, "").trim();
+  };
+
+  // --- Safe string: handle NaN/null/undefined ---
+  const safeStr = (raw: unknown): string => {
+    if (raw === null || raw === undefined || raw === "NaN" || raw === "nan" || raw === "NaT" || Number.isNaN(raw)) return "";
+    return String(raw).trim();
+  };
+
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -290,36 +334,85 @@ function CreateCampaignView({
 
         const parsed: UploadRow[] = [];
         const errs: string[] = [];
+        let skippedZero = 0;
+
+        // Detect format: Odoo columns vs legacy columns
+        const firstRow = jsonRows[0] || {};
+        const isOdoo = "Adeudado en Divisa" in firstRow || "Nombre del contacto a mostrar en la factura" in firstRow;
 
         jsonRows.forEach((row, idx) => {
-          const nombre =
-            (row.nombre_cliente as string) ||
-            (row.cliente as string) ||
-            (row.nombre as string) ||
-            "";
-          const cedula =
-            (row.cedula_rif as string) ||
-            (row.cedula as string) ||
-            (row.rif as string) ||
-            "";
-          const monto = parseFloat(
-            String(row.monto_usd || row.monto || row.amount || "0")
-          );
+          let nombre = "";
+          let cedula = "";
+          let email = "";
+          let telefono = "";
+          let monto = 0;
+          let concepto = "";
+          let factura = "";
+          let fecha = "";
+          let subtotal = 0;
+          let impuesto = 0;
+          let total = 0;
 
-          if (!nombre) errs.push(`Fila ${idx + 2}: nombre_cliente vacío`);
-          if (!cedula) errs.push(`Fila ${idx + 2}: cedula_rif vacío`);
-          if (!monto || monto <= 0) errs.push(`Fila ${idx + 2}: monto_usd inválido`);
+          if (isOdoo) {
+            // --- Odoo format ---
+            nombre = safeStr(row["Nombre del contacto a mostrar en la factura"]);
+            cedula = normalizeCedula(row["Contacto/Número de Identificación"]);
+            email = cleanEmail(row["Contacto/Correo electrónico"]);
+            telefono = normalizePhone(row["Contacto/Celular"]);
+            monto = parseFloat(String(row["Adeudado en Divisa"] || "0")) || 0;
+            factura = safeStr(row["Número"]);
+            fecha = safeStr(row["Fecha"]);
+            subtotal = parseFloat(String(row["Subtotal"] || "0")) || 0;
+            impuesto = parseFloat(String(row["Impuesto"] || "0")) || 0;
+            total = parseFloat(String(row["Total"] || "0")) || 0;
+
+            // Filter out fully paid invoices (adeudado = 0)
+            if (monto <= 0) {
+              skippedZero++;
+              return;
+            }
+
+            // Auto-generate invoice number if NaN/missing
+            if (!factura) {
+              factura = `AUTO-${idx + 1}`;
+            }
+
+            // Build concepto from factura + fecha
+            concepto = factura ? `Factura ${factura}` : "Servicio WUIPI";
+            if (fecha) concepto += ` — ${fecha}`;
+          } else {
+            // --- Legacy format ---
+            nombre = safeStr(row.nombre_cliente || row.cliente || row.nombre);
+            cedula = safeStr(row.cedula_rif || row.cedula || row.rif);
+            email = cleanEmail(row.email || row.correo);
+            telefono = safeStr(row.telefono || row.phone || row.celular);
+            monto = parseFloat(String(row.monto_usd || row.monto || row.amount || "0"));
+            concepto = safeStr(row.concepto || row.concept);
+            factura = safeStr(row.numero_factura || row.factura || row.invoice);
+          }
+
+          if (!nombre) errs.push(`Fila ${idx + 2}: nombre vacío`);
+          if (!cedula) errs.push(`Fila ${idx + 2}: cédula/RIF vacío`);
+          if (!monto || monto <= 0) errs.push(`Fila ${idx + 2}: monto inválido`);
 
           parsed.push({
             nombre_cliente: nombre,
-            cedula_rif: String(cedula),
-            email: String(row.email || row.correo || ""),
-            telefono: String(row.telefono || row.phone || row.celular || ""),
+            cedula_rif: cedula,
+            email,
+            telefono,
             monto_usd: monto,
-            concepto: String(row.concepto || row.concept || ""),
-            numero_factura: String(row.numero_factura || row.factura || row.invoice || ""),
+            concepto,
+            numero_factura: factura,
+            fecha,
+            subtotal,
+            impuesto,
+            total,
           });
         });
+
+        if (skippedZero > 0) {
+          errs.unshift(`${skippedZero} fila(s) omitida(s) por tener adeudado $0.00 (ya pagadas)`);
+        }
 
         setRows(parsed);
         setErrors(errs);
@@ -432,8 +525,9 @@ function CreateCampaignView({
           <Upload size={40} className="mx-auto mb-3 text-gray-500" />
           <p className="text-white font-medium mb-1">Arrastra tu archivo Excel aquí</p>
           <p className="text-gray-500 text-xs mb-4">
-            Columnas: nombre_cliente, cedula_rif, email, telefono, monto_usd, concepto,
-            numero_factura
+            Compatible con exportación de Odoo 18 (Adeudado en Divisa, Contacto/Celular, etc.)
+            <br />
+            También acepta formato libre: nombre_cliente, cedula_rif, email, telefono, monto_usd
           </p>
           <button
             onClick={() => fileInputRef.current?.click()}
@@ -474,11 +568,11 @@ function CreateCampaignView({
                     <th className="text-left p-2 pl-3 font-medium w-8">#</th>
                     <th className="text-left p-2 font-medium">Cliente</th>
                     <th className="text-left p-2 font-medium">Cédula/RIF</th>
-                    <th className="text-left p-2 font-medium">Email</th>
                     <th className="text-left p-2 font-medium">Teléfono</th>
-                    <th className="text-right p-2 font-medium">Monto USD</th>
-                    <th className="text-left p-2 font-medium">Concepto</th>
+                    <th className="text-left p-2 font-medium">Email</th>
                     <th className="text-left p-2 font-medium">Factura</th>
+                    <th className="text-right p-2 font-medium text-gray-600">Total</th>
+                    <th className="text-right p-2 font-medium">Adeudado</th>
                     <th className="p-2 w-8"></th>
                   </tr>
                 </thead>
@@ -500,7 +594,14 @@ function CreateCampaignView({
                         <input
                           value={row.cedula_rif}
                           onChange={(e) => updateRow(idx, "cedula_rif", e.target.value)}
-                          className="w-full bg-transparent text-gray-300 text-xs border-b border-transparent hover:border-wuipi-border focus:border-[#F46800] focus:outline-none px-1 py-0.5"
+                          className="w-28 bg-transparent text-gray-300 text-xs font-mono border-b border-transparent hover:border-wuipi-border focus:border-[#F46800] focus:outline-none px-1 py-0.5"
+                        />
+                      </td>
+                      <td className="p-2">
+                        <input
+                          value={row.telefono}
+                          onChange={(e) => updateRow(idx, "telefono", e.target.value)}
+                          className="w-28 bg-transparent text-gray-300 text-xs font-mono border-b border-transparent hover:border-wuipi-border focus:border-[#F46800] focus:outline-none px-1 py-0.5"
                         />
                       </td>
                       <td className="p-2">
@@ -512,10 +613,13 @@ function CreateCampaignView({
                       </td>
                       <td className="p-2">
                         <input
-                          value={row.telefono}
-                          onChange={(e) => updateRow(idx, "telefono", e.target.value)}
-                          className="w-full bg-transparent text-gray-300 text-xs border-b border-transparent hover:border-wuipi-border focus:border-[#F46800] focus:outline-none px-1 py-0.5"
+                          value={row.numero_factura}
+                          onChange={(e) => updateRow(idx, "numero_factura", e.target.value)}
+                          className="w-24 bg-transparent text-gray-300 text-xs font-mono border-b border-transparent hover:border-wuipi-border focus:border-[#F46800] focus:outline-none px-1 py-0.5"
                         />
+                      </td>
+                      <td className="p-2 text-right text-gray-600 text-xs">
+                        {row.total > 0 ? `$${row.total.toFixed(2)}` : "—"}
                       </td>
                       <td className="p-2 text-right">
                         <input
@@ -525,20 +629,6 @@ function CreateCampaignView({
                             updateRow(idx, "monto_usd", parseFloat(e.target.value) || 0)
                           }
                           className="w-20 bg-transparent text-emerald-400 text-xs text-right font-bold border-b border-transparent hover:border-wuipi-border focus:border-[#F46800] focus:outline-none px-1 py-0.5"
-                        />
-                      </td>
-                      <td className="p-2">
-                        <input
-                          value={row.concepto}
-                          onChange={(e) => updateRow(idx, "concepto", e.target.value)}
-                          className="w-full bg-transparent text-gray-300 text-xs border-b border-transparent hover:border-wuipi-border focus:border-[#F46800] focus:outline-none px-1 py-0.5"
-                        />
-                      </td>
-                      <td className="p-2">
-                        <input
-                          value={row.numero_factura}
-                          onChange={(e) => updateRow(idx, "numero_factura", e.target.value)}
-                          className="w-full bg-transparent text-gray-300 text-xs border-b border-transparent hover:border-wuipi-border focus:border-[#F46800] focus:outline-none px-1 py-0.5"
                         />
                       </td>
                       <td className="p-2">

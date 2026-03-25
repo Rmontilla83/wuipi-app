@@ -245,6 +245,11 @@ export const collectionUploadRowSchema = z.object({
   monto_usd: z.number().positive("El monto debe ser mayor a 0"),
   concepto: z.string().optional().nullable().or(z.literal("")),
   numero_factura: z.string().optional().nullable().or(z.literal("")),
+  // Campos informativos del Excel Odoo (opcionales, solo para vista previa)
+  fecha: z.string().optional().nullable().or(z.literal("")),
+  subtotal: z.number().optional().nullable(),
+  impuesto: z.number().optional().nullable(),
+  total: z.number().optional().nullable(),
 });
 
 export const collectionUploadSchema = z.object({

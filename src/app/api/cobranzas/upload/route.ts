@@ -22,16 +22,17 @@ export async function POST(request: NextRequest) {
       description: description || undefined,
     });
 
-    // Create items from rows
+    // Create items from rows (filter any remaining zero-amount rows)
+    const validRows = rows.filter((r) => r.monto_usd > 0);
     const items = await createItems(
       campaign.id,
-      rows.map((r) => ({
+      validRows.map((r) => ({
         customer_name: r.nombre_cliente,
         customer_cedula_rif: r.cedula_rif,
         customer_email: r.email || undefined,
         customer_phone: r.telefono || undefined,
         invoice_number: r.numero_factura || undefined,
-        concept: r.concepto || undefined,
+        concept: r.concepto || `Cobro — ${campaign_name}`,
         amount_usd: r.monto_usd,
       }))
     );
