@@ -17,26 +17,26 @@ import { apiRequest } from '../core/http';
  * Requests a C2P payment key (clave de compra) for mobile payment.
  * The key is sent to the customer's mobile number via SMS.
  */
+/**
+ * Requests a C2P payment key (clave de compra) for mobile payment.
+ * Postman node: "transaction_scpInfo" with destination_id and destination_mobile_number.
+ */
 export async function requestC2PKey(
   params: {
-    originMobile: string;
+    destinationId: string;
     destinationMobile: string;
-    customerId: string;
-    customerIdType: string;
   },
   clientInfo: ClientIdentify,
   config: MercantilConfig,
   endpoints: MercantilEndpoints
 ): Promise<C2PKeyResponse> {
   const creds = getProductCredentials(config, 'c2p_key_request');
-  const body: C2PKeyRequestPayload = {
+  const body = {
     merchant_identify: getMerchantIdentify(config, creds),
     client_identify: clientInfo,
-    key_request: {
-      origin_mobile_number: encryptField(params.originMobile, creds.secretKey),
+    transaction_scpInfo: {
+      destination_id: encryptField(params.destinationId, creds.secretKey),
       destination_mobile_number: encryptField(params.destinationMobile, creds.secretKey),
-      customer_id: encryptField(params.customerId, creds.secretKey),
-      customer_id_type: params.customerIdType,
     },
   };
 

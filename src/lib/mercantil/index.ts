@@ -106,7 +106,7 @@ export class MercantilSDK {
   // --- C2P Key Request (Producto 3) ---
 
   async requestC2PKey(
-    params: Parameters<typeof requestC2PKey>[0],
+    params: { destinationId: string; destinationMobile: string },
     clientInfo: ClientIdentify
   ): Promise<C2PKeyResponse> {
     this.ensureProduct('c2p_key_request');

@@ -94,13 +94,19 @@ export interface MerchantIdentify {
   terminalId: string;
 }
 
+/**
+ * Client identification block.
+ * P1-P5 use snake_case: { ipaddress, browser_agent }
+ * P6-P8 use camelCase: { ipAddress, browserAgent }
+ * The SDK methods handle this internally.
+ */
 export interface ClientIdentify {
   ipaddress: string;
   browser_agent: string;
   mobile?: {
     manufacturer: string;
-    model: string;
-    os_version: string;
+    model?: string;
+    os_version?: string;
     location?: {
       lat: number;
       lng: number;
@@ -157,16 +163,16 @@ export interface WebPaymentButtonResponse {
 export type CardType = 'credit' | 'debit';
 export type CardBrand = 'visa' | 'mastercard' | 'diners' | 'maestro';
 
+/** Postman: node "transaction_authInfo" with trx_type="solaut" */
 export interface CardAuthRequest {
   merchant_identify: MerchantIdentify;
   client_identify: ClientIdentify;
-  card_holder: {
-    card_number: string;
-    name: string;
+  transaction_authInfo: {
+    trx_type: 'solaut';
+    payment_method: 'tdd' | 'tdc';
     customer_id: string;
-    customer_id_type: string;
+    card_number: string;
   };
-  twofactor_auth?: string;
 }
 
 export interface CardAuthResponse {
@@ -233,14 +239,13 @@ export interface C2PPaymentResponse {
 
 // --- C2P Key Request (Solicitud de Clave de Pago) ---
 
+/** Postman: node "transaction_scpInfo" */
 export interface C2PKeyRequestPayload {
   merchant_identify: MerchantIdentify;
   client_identify: ClientIdentify;
-  key_request: {
-    origin_mobile_number: string;
+  transaction_scpInfo: {
+    destination_id: string;
     destination_mobile_number: string;
-    customer_id: string;
-    customer_id_type: string;
   };
 }
 
@@ -253,10 +258,20 @@ export interface C2PKeyResponse {
 // --- Payment Search / Reconciliation ---
 
 export interface TransferSearchParams {
-  dateFrom: string;
-  dateTo: string;
-  paymentReference?: string;
-  amount?: number;
+  /** Account number (will be encrypted) */
+  account: string;
+  /** Customer/RIF ID (will be encrypted) */
+  issuerCustomerId: string;
+  /** Transaction date YYYY-MM-DD */
+  trxDate: string;
+  /** Issuer bank code (e.g. 105 for Mercantil) */
+  issuerBankId: number;
+  /** Transaction type as string (e.g. "1") */
+  transactionType: string;
+  /** Payment reference number */
+  paymentReference: string;
+  /** Amount */
+  amount: number;
 }
 
 export interface TransferSearchResult {
@@ -269,18 +284,23 @@ export interface TransferSearchResult {
   description: string;
 }
 
+/** Postman: node "search_by" with trx_date, payment_reference. Phones encrypted. */
 export interface MobilePaymentSearchParams {
-  dateFrom: string;
-  dateTo: string;
+  trxDate: string;
   paymentReference?: string;
-  transactionType?: 'c2p' | 'p2c' | 'vuelto';
+  amount?: number;
+  /** Destination phone (will be encrypted). Optional filter. */
+  destinationMobile?: string;
+  /** Origin phone (will be encrypted). Optional filter. */
+  originMobile?: string;
 }
 
+/** Postman: node "search_by" with procesing_date (1 's'), search_criteria */
 export interface CardPaymentSearchParams {
-  dateFrom: string;
-  dateTo: string;
+  processingDate: string;
+  searchCriteria?: 'unique';
+  invoiceNumber?: string;
   paymentReference?: string;
-  cardType?: CardType;
 }
 
 // --- Scheduling (Agendamiento de Cuotas) ---
@@ -369,8 +389,8 @@ export interface TedDownloadResponse {
 }
 
 export interface TedListMailboxParams {
-  dateFrom?: string;
-  dateTo?: string;
+  /** Inbox type: "entrada" (incoming) or "salida" (outgoing). Encrypted. */
+  inboxType?: string;
 }
 
 export interface TedListMailboxResponse {

@@ -54,16 +54,19 @@ export async function POST(request: NextRequest) {
     }
 
     // Fetch available payment types in parallel
+    // TODO: Transfer search now requires account, issuerCustomerId, etc.
+    // For reconciliation, we need to iterate per-client or use a different approach.
+    // TODO: Each search product now requires specific params (date, reference, etc.)
+    // For bulk reconciliation, we search by date. Transfer search requires per-client params.
     const [transfers, mobilePayments, cardPayments] = await Promise.all([
-      hasTransferSearch
-        ? sdk.searchTransfers({ dateFrom: date_from, dateTo: date_to }).catch(() => [])
-        : Promise.resolve([]),
+      // Transfer search requires specific account/customer params — skip in bulk reconciliation for now
+      Promise.resolve([] as Array<{ reference_number: string; amount: number; status: string }>),
       hasMobileSearch
-        ? sdk.searchMobilePayments({ dateFrom: date_from, dateTo: date_to }).catch(() => [])
-        : Promise.resolve([]),
+        ? sdk.searchMobilePayments({ trxDate: date_from }).catch(() => [] as unknown[])
+        : Promise.resolve([] as unknown[]),
       hasCardSearch
-        ? sdk.searchCardPayments({ dateFrom: date_from, dateTo: date_to }).catch(() => [])
-        : Promise.resolve([]),
+        ? sdk.searchCardPayments({ processingDate: date_from }).catch(() => [] as unknown[])
+        : Promise.resolve([] as unknown[]),
     ]);
 
     // Get pending payments from DB for the date range
@@ -79,12 +82,12 @@ export async function POST(request: NextRequest) {
 
     // Match transfers with pending payments
     const allTransactions = [
-      ...transfers.map((t) => ({ ...t, type: "transfer" })),
+      ...transfers.map((t) => ({ ...t, type: "transfer" as const })),
       ...(mobilePayments as Array<{ reference_number: string; amount: number; status: string }>).map(
-        (t) => ({ ...t, type: "mobile" })
+        (t) => ({ ...t, type: "mobile" as const })
       ),
       ...(cardPayments as Array<{ reference_number: string; amount: number; status: string }>).map(
-        (t) => ({ ...t, type: "card" })
+        (t) => ({ ...t, type: "card" as const })
       ),
     ];
 
