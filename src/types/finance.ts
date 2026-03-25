@@ -10,7 +10,7 @@ export interface BCVRate {
   date: string;
   usd_to_bs: number;
   eur_to_bs: number;
-  source: "bcv" | "manual";
+  source: "bcv" | "manual" | "pydolarve_v2" | "pydolarve_v1" | "dolarapi";
   updated_at: string;
 }
 

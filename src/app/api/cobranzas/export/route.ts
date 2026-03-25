@@ -15,10 +15,15 @@ export async function POST(request: NextRequest) {
     if (!campaign) return apiError("Campaña no encontrada", 404);
 
     const items = await getItemsByCampaign(campaign_id);
-    const paidItems = items.filter((i) => i.status === "paid");
+    // Export all items (paid + conciliating) for Odoo reconciliation
+    const exportItems = items.filter((i) => i.status === "paid" || i.status === "conciliating");
+
+    if (exportItems.length === 0) {
+      return apiError("No hay pagos registrados para exportar", 400);
+    }
 
     // Build rows for Odoo 18 accounting import
-    const rows = paidItems.map((item) => ({
+    const rows = exportItems.map((item) => ({
       Fecha: item.paid_at
         ? new Date(item.paid_at).toISOString().split("T")[0]
         : "",

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminSupabase } from "@/lib/supabase/server";
 import { MercantilSDK } from "@/lib/mercantil";
+import { markItemPaid } from "@/lib/dal/collection-campaigns";
 
 export const dynamic = "force-dynamic";
 
@@ -116,6 +117,33 @@ export async function POST(request: NextRequest) {
       console.log(
         `[Mercantil Webhook] Payment approved for invoice ${payload.invoice_number} — updating invoice`
       );
+    }
+
+    // --- Cross-reference with collection_items (cobros masivos) ---
+    if (payload.status === "approved" && payload.invoice_number) {
+      try {
+        const { data: collectionItem } = await supabase
+          .from("collection_items")
+          .select("id, payment_token, campaign_id, amount_usd")
+          .or(`invoice_number.eq.${payload.invoice_number},payment_token.eq.${payload.invoice_number}`)
+          .in("status", ["pending", "sent", "viewed"])
+          .limit(1)
+          .single();
+
+        if (collectionItem) {
+          await markItemPaid(collectionItem.payment_token, {
+            payment_method: "debito_inmediato",
+            payment_reference: payload.reference_number || "",
+            amount_bss: payload.amount ? parseFloat(String(payload.amount)) : undefined,
+          });
+          console.log(
+            `[Mercantil Webhook] Collection item ${collectionItem.payment_token} marked as paid`
+          );
+        }
+      } catch (collErr) {
+        // Not finding a collection item is normal — not all Mercantil payments are from cobranzas
+        console.log("[Mercantil Webhook] No matching collection item (normal if not a cobro)");
+      }
     }
 
     return NextResponse.json(

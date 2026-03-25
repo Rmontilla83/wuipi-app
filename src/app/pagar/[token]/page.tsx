@@ -102,6 +102,7 @@ export default function PagarPage() {
 
   const handlePay = async (method: PaymentMethod) => {
     setProcessing(true);
+    setError("");
     try {
       const res = await fetch("/api/cobranzas/pay", {
         method: "POST",
@@ -113,11 +114,12 @@ export default function PagarPage() {
 
       if (json.redirect_url) {
         window.location.href = json.redirect_url;
+        return; // Don't reset processing — we're navigating away
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error al procesar");
-      setProcessing(false);
     }
+    setProcessing(false);
   };
 
   const handleConfirmTransfer = async () => {
