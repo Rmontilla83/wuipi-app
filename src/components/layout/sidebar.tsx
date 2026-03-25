@@ -115,9 +115,9 @@ export function Sidebar({ user }: SidebarProps) {
         )}
       >
         {collapsed ? (
-          <img src="/img/wuipi-logo.webp" alt="WUIPI" className="w-9 h-9 object-contain shrink-0" />
+          <img src="/img/wuipi-logo.webp" alt="WUIPI" className="w-10 h-10 object-contain shrink-0" />
         ) : (
-          <img src="/img/wuipi-logo.webp" alt="WUIPI" className="h-9 object-contain" />
+          <img src="/img/wuipi-logo.webp" alt="WUIPI" className="h-10 max-w-[180px] object-contain" />
         )}
       </div>
 
