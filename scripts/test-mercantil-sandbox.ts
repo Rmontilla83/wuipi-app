@@ -1,11 +1,5 @@
 /**
- * Mercantil Sandbox — Prueba completa 8 productos.
- * Estructuras corregidas según Postman oficial de Mercantil:
- *   - P1-P5: snake_case (merchant_identify, ipaddress, browser_agent)
- *   - P6: camelCase (transferSearchBy) — ya corregido
- *   - P7: scheduling (sin doc pública, se intenta snake_case)
- *   - P8: TED camelCase + nodos inboxType/clientId
- *
+ * Mercantil Sandbox — Prueba completa 8 productos + flujo getauth→pay.
  * Run: npx tsx scripts/test-mercantil-sandbox.ts
  */
 
@@ -26,6 +20,12 @@ function enc(plaintext: string, secretKey: string): string {
   const cipher = crypto.createCipheriv('aes-128-ecb', key, null);
   cipher.setAutoPadding(true);
   return cipher.update(plaintext, 'utf8', 'base64') + cipher.final('base64');
+}
+function dec(ciphertext: string, secretKey: string): string {
+  const key = deriveKey(secretKey);
+  const decipher = crypto.createDecipheriv('aes-128-ecb', key, null);
+  decipher.setAutoPadding(true);
+  return decipher.update(ciphertext, 'base64', 'utf8') + decipher.final('utf8');
 }
 
 // ── Config ──
@@ -76,13 +76,9 @@ async function post(url: string, clientId: string, body: Record<string, unknown>
 
 // ── Bloques comunes ──
 
-// P1-P5 usan snake_case: merchant_identify, ipaddress, browser_agent
+// P1-P5: snake_case
 function merchant_identify(c: Creds) {
-  return {
-    integratorId: 31,
-    merchantId: parseInt(c.merchantId, 10) || c.merchantId,
-    terminalId: 'abcde',
-  };
+  return { integratorId: 31, merchantId: parseInt(c.merchantId, 10) || c.merchantId, terminalId: 'abcde' };
 }
 const client_identify = {
   ipaddress: '127.0.0.1',
@@ -90,14 +86,16 @@ const client_identify = {
   mobile: { manufacturer: 'Samsung' },
 };
 
-// P6-P8 usan camelCase: merchantIdentify, ipAddress, browserAgent
+// P6-P8: camelCase
 function merchantIdentify(c: Creds) {
-  return {
-    integratorId: 31,
-    merchantId: parseInt(c.merchantId, 10) || c.merchantId,
-    terminalId: 'abcde',
-  };
+  return { integratorId: 31, merchantId: parseInt(c.merchantId, 10) || c.merchantId, terminalId: 'abcde' };
 }
+// P7 requiere model y osVersion
+const clientIdentifyFull = {
+  ipAddress: '127.0.0.1',
+  browserAgent: 'Chrome 18.1.3',
+  mobile: { manufacturer: 'Samsung', model: 'S9', osVersion: 'Android 14' },
+};
 const clientIdentify = {
   ipAddress: '127.0.0.1',
   browserAgent: 'Chrome 18.1.3',
@@ -105,12 +103,26 @@ const clientIdentify = {
 };
 
 // ══════════════════════════════════════════════════════════════════
-// P1a: getauth — Variante A: Postman (plano con prefijo V)
-// ══════════════════════════════════════════════════════════════════
-function test_p1a_cards_plain_with_prefix() {
-  const c = P.cards;
-  return post(`${BASE}/v1/payment/getauth`, c.clientId, {
-    merchant_identify: merchant_identify(c),
+async function main() {
+  console.log('\n' + '='.repeat(78));
+  console.log('  MERCANTIL SANDBOX — PRUEBAS COMPLETAS');
+  console.log(`  ${new Date().toISOString()}`);
+  console.log('='.repeat(78));
+
+  // ────────────────────────────────────────────────────────────────
+  // P1: FLUJO COMPLETO TARJETAS: getauth → pay
+  // ────────────────────────────────────────────────────────────────
+  console.log('\n' + '━'.repeat(78));
+  console.log('  P1: FLUJO COMPLETO TARJETAS — getauth → pay');
+  console.log('  Datos: V10780248, tarjeta 4532310053032530, venc 12/25, CVV 924');
+  console.log('━'.repeat(78));
+
+  const c1 = P.cards;
+
+  // Paso 1: getauth
+  console.log('\n  [Paso 1] getauth...');
+  const auth = await post(`${BASE}/v1/payment/getauth`, c1.clientId, {
+    merchant_identify: merchant_identify(c1),
     client_identify,
     transaction_authInfo: {
       trx_type: 'solaut',
@@ -119,157 +131,167 @@ function test_p1a_cards_plain_with_prefix() {
       card_number: '4532310053032530',
     },
   });
-}
+  console.log(`  HTTP: ${auth.status} | ${auth.durationMs}ms`);
+  const authData = auth.data as Record<string, unknown>;
+  const authInfo = authData?.authentication_info as Record<string, string> | undefined;
 
-// ══════════════════════════════════════════════════════════════════
-// P1b: getauth — Variante B: sin prefijo V, tarjeta cifrada
-// ══════════════════════════════════════════════════════════════════
-function test_p1b_cards_enc_no_prefix() {
-  const c = P.cards;
-  return post(`${BASE}/v1/payment/getauth`, c.clientId, {
-    merchant_identify: merchant_identify(c),
-    client_identify,
-    transaction_authInfo: {
-      trx_type: 'solaut',
-      payment_method: 'tdd',
-      customer_id: '10780248',
-      card_number: enc('4532310053032530', c.secretKey),
-    },
-  });
-}
+  if (auth.status === 200 && authInfo) {
+    // Descifrar datos del 2FA
+    try {
+      const tfType = dec(authInfo.twofactor_type, c1.secretKey);
+      const tfFieldType = dec(authInfo.twofactor_field_type, c1.secretKey);
+      const tfLength = dec(authInfo.twofactor_lenght, c1.secretKey);
+      console.log(`  2FA Type: ${tfType}`);
+      console.log(`  2FA Field Type: ${tfFieldType}`);
+      console.log(`  2FA Length: ${tfLength}`);
+      console.log(`  2FA Label (cifrado): ${authInfo.twofactor_label}`);
+      try {
+        const tfLabel = dec(authInfo.twofactor_label, c1.secretKey);
+        console.log(`  2FA Label (plano): ${tfLabel}`);
+      } catch { console.log('  2FA Label: no se pudo descifrar'); }
+    } catch (e) { console.log(`  Error descifrando 2FA: ${e}`); }
 
-// ══════════════════════════════════════════════════════════════════
-// P1c: getauth — Variante C: sin prefijo V, tarjeta plana
-// ══════════════════════════════════════════════════════════════════
-function test_p1c_cards_plain_no_prefix() {
-  const c = P.cards;
-  return post(`${BASE}/v1/payment/getauth`, c.clientId, {
-    merchant_identify: merchant_identify(c),
-    client_identify,
-    transaction_authInfo: {
-      trx_type: 'solaut',
-      payment_method: 'tdd',
-      customer_id: '10780248',
-      card_number: '4532310053032530',
-    },
-  });
-}
+    // Paso 2: pay (TDD con OTP)
+    console.log('\n  [Paso 2] pay (TDD)...');
+    const pay = await post(`${BASE}/v1/payment/pay`, c1.clientId, {
+      merchant_identify: merchant_identify(c1),
+      client_identify,
+      transaction: {
+        trx_type: 'compra',
+        payment_method: 'tdd',
+        card_number: '4532310053032530',
+        customer_id: 'V10780248',
+        account_type: 'cc',
+        expiration_date: '12/25',
+        cvv: enc('924', c1.secretKey),
+        currency: 'ves',
+        amount: 50.00,
+        invoice_number: `TEST-PAY-${Date.now()}`,
+        twofactor_auth: enc('123456', c1.secretKey),
+      },
+    });
+    console.log(`  HTTP: ${pay.status} | ${pay.durationMs}ms`);
+    console.log(`  Response: ${JSON.stringify(pay.data, null, 2).substring(0, 800)}`);
+  } else {
+    console.log(`  getauth falló: ${JSON.stringify(auth.data, null, 2).substring(0, 500)}`);
+  }
 
-// ══════════════════════════════════════════════════════════════════
-// P2: Pago Movil C2P
-// Postman: nodo "transaction_c2p", destination_bank_id como number
-// Datos xlsx: V18367443, origen 584142591177, destino 584241513063
-// ══════════════════════════════════════════════════════════════════
-function test_p2_c2p() {
-  const c = P.c2p;
-  return post(`${BASE}/v1/payment/c2p`, c.clientId, {
-    merchant_identify: merchant_identify(c),
+  // ────────────────────────────────────────────────────────────────
+  // P2: C2P (para obtener referencia fresca)
+  // ────────────────────────────────────────────────────────────────
+  console.log('\n' + '━'.repeat(78));
+  console.log('  P2: Pago Movil C2P (referencia fresca)');
+  console.log('━'.repeat(78));
+
+  const c2p = await post(`${BASE}/v1/payment/c2p`, P.c2p.clientId, {
+    merchant_identify: merchant_identify(P.c2p),
     client_identify,
     transaction_c2p: {
-      amount: 100.00,
+      amount: 150.00,
       currency: 'ves',
       destination_bank_id: 105,
-      destination_id: enc('V18367443', c.secretKey),
-      origin_mobile_number: enc('584142591177', c.secretKey),
-      destination_mobile_number: enc('584241513063', c.secretKey),
+      destination_id: enc('V18367443', P.c2p.secretKey),
+      origin_mobile_number: enc('584142591177', P.c2p.secretKey),
+      destination_mobile_number: enc('584241513063', P.c2p.secretKey),
       trx_type: 'compra',
       payment_method: 'c2p',
       invoice_number: `TEST-C2P-${Date.now()}`,
-      twofactor_auth: enc('00001111', c.secretKey),
+      twofactor_auth: enc('00001111', P.c2p.secretKey),
     },
   });
-}
+  console.log(`  HTTP: ${c2p.status} | ${c2p.durationMs}ms`);
+  const c2pData = c2p.data as Record<string, unknown>;
+  const c2pResp = c2pData?.transaction_c2p_response as Record<string, unknown> | undefined;
+  const c2pRef = c2pResp?.payment_reference ? String(c2pResp.payment_reference) : '6460003485';
+  const c2pInvoice = c2pResp?.invoice_number ? String(c2pResp.invoice_number) : '';
+  console.log(`  Status: ${c2pResp?.trx_status} | Ref: ${c2pRef} | Invoice: ${c2pInvoice}`);
 
-// ══════════════════════════════════════════════════════════════════
-// P3: Solicitud de Clave C2P (SCP)
-// Postman: nodo "transaction_scpInfo"
-// Datos xlsx: V18367443, destino 584241513063
-// ══════════════════════════════════════════════════════════════════
-function test_p3_c2pKey() {
-  const c = P.c2pKey;
-  return post(`${BASE}/v1/mobile-payment/scp`, c.clientId, {
-    merchant_identify: merchant_identify(c),
+  // ────────────────────────────────────────────────────────────────
+  // P3: SCP
+  // ────────────────────────────────────────────────────────────────
+  console.log('\n' + '━'.repeat(78));
+  console.log('  P3: Solicitud Clave C2P');
+  console.log('━'.repeat(78));
+
+  const scp = await post(`${BASE}/v1/mobile-payment/scp`, P.c2pKey.clientId, {
+    merchant_identify: merchant_identify(P.c2pKey),
     client_identify,
     transaction_scpInfo: {
-      destination_id: enc('V18367443', c.secretKey),
-      destination_mobile_number: enc('584241513063', c.secretKey),
+      destination_id: enc('V18367443', P.c2pKey.secretKey),
+      destination_mobile_number: enc('584241513063', P.c2pKey.secretKey),
     },
   });
-}
+  console.log(`  HTTP: ${scp.status} | ${scp.durationMs}ms`);
+  console.log(`  Response: ${JSON.stringify(scp.data, null, 2).substring(0, 300)}`);
 
-// ══════════════════════════════════════════════════════════════════
-// P4: Búsqueda de Pagos con Tarjetas
-// Postman: nodo "search_by", campo "procesing_date" (1 sola 's')
-// Formato fecha: YYYY/MM/DD (con slashes)
-// Datos xlsx tarjetas: fecha 2026/03/03, referencia del xlsx
-// ══════════════════════════════════════════════════════════════════
-function test_p4_searchCards() {
-  const c = P.searchCards;
-  return post(`${BASE}/v1/payment/search`, c.clientId, {
-    merchant_identify: {
-      integratorId: '31',
-      merchantId: c.merchantId,
-      terminalId: 'abcde',
-    },
+  // ────────────────────────────────────────────────────────────────
+  // P4: BÚSQUEDA TARJETAS — con ref del C2P exitoso
+  // ────────────────────────────────────────────────────────────────
+  console.log('\n' + '━'.repeat(78));
+  console.log(`  P4: Búsqueda Tarjetas — ref C2P: ${c2pRef}, fecha hoy`);
+  console.log('━'.repeat(78));
+
+  const p4 = await post(`${BASE}/v1/payment/search`, P.searchCards.clientId, {
+    merchant_identify: { integratorId: '31', merchantId: P.searchCards.merchantId, terminalId: 'abcde' },
     client_identify,
     search_by: {
       search_criteria: 'unique',
-      procesing_date: '2026/03/25',
-      invoice_number: '',
-      payment_reference: '25508782358',
+      procesing_date: new Date().toISOString().slice(0, 10).replace(/-/g, '/'),
+      invoice_number: c2pInvoice,
+      payment_reference: c2pRef,
     },
   });
-}
+  console.log(`  HTTP: ${p4.status} | ${p4.durationMs}ms`);
+  console.log(`  Response: ${JSON.stringify(p4.data, null, 2).substring(0, 500)}`);
 
-// P4b: Busqueda con fecha del xlsx original
-function test_p4b_searchCards_xlsx() {
-  const c = P.searchCards;
-  return post(`${BASE}/v1/payment/search`, c.clientId, {
-    merchant_identify: {
-      integratorId: '31',
-      merchantId: c.merchantId,
-      terminalId: 'abcde',
-    },
+  // ────────────────────────────────────────────────────────────────
+  // P5: BÚSQUEDA MÓVIL — con ref del C2P exitoso
+  // ────────────────────────────────────────────────────────────────
+  console.log('\n' + '━'.repeat(78));
+  console.log(`  P5: Búsqueda Móvil — ref: ${c2pRef}, fecha hoy`);
+  console.log('━'.repeat(78));
+
+  const p5 = await post(`${BASE}/v1/mobile-payment/search`, P.searchMobile.clientId, {
+    merchant_identify: merchant_identify(P.searchMobile),
     client_identify,
     search_by: {
-      search_criteria: 'unique',
-      procesing_date: '2026/03/03',
-      invoice_number: 'TEST-C2P-1774447407471',
-      payment_reference: '',
-    },
-  });
-}
-
-// ══════════════════════════════════════════════════════════════════
-// P5: Búsqueda Móvil
-// Postman/playground: nodo "search_by", teléfonos CIFRADOS
-// Datos xlsx: referencia 87860014874, monto 1318144, fecha 2026-03-03
-// ══════════════════════════════════════════════════════════════════
-function test_p5_searchMobile() {
-  const c = P.searchMobile;
-  return post(`${BASE}/v1/mobile-payment/search`, c.clientId, {
-    merchant_identify: merchant_identify(c),
-    client_identify,
-    search_by: {
-      amount: 1318144,
+      amount: 150.00,
       currency: 'ves',
-      destination_mobile_number: enc('584241513063', c.secretKey),
-      origin_mobile_number: enc('584142591177', c.secretKey),
+      destination_mobile_number: enc('584241513063', P.searchMobile.secretKey),
+      origin_mobile_number: enc('584142591177', P.searchMobile.secretKey),
+      payment_reference: c2pRef,
+      trx_date: new Date().toISOString().slice(0, 10),
+    },
+  });
+  console.log(`  HTTP: ${p5.status} | ${p5.durationMs}ms`);
+  console.log(`  Response: ${JSON.stringify(p5.data, null, 2).substring(0, 800)}`);
+
+  // P5b: con referencia del xlsx (87860014874)
+  console.log('\n  P5b: Búsqueda Móvil — ref xlsx 87860014874, fecha 2026-03-03');
+  const p5b = await post(`${BASE}/v1/mobile-payment/search`, P.searchMobile.clientId, {
+    merchant_identify: merchant_identify(P.searchMobile),
+    client_identify,
+    search_by: {
+      amount: 0,
+      currency: 'ves',
+      destination_mobile_number: '',
+      origin_mobile_number: '',
       payment_reference: '87860014874',
       trx_date: '2026-03-03',
     },
   });
-}
+  console.log(`  HTTP: ${p5b.status} | ${p5b.durationMs}ms`);
+  console.log(`  Response: ${JSON.stringify(p5b.data, null, 2).substring(0, 800)}`);
 
-// ══════════════════════════════════════════════════════════════════
-// P6: Búsqueda de Transferencias — YA CORREGIDO
-// camelCase, nodo "transferSearchBy"
-// ══════════════════════════════════════════════════════════════════
-function test_p6_searchTransfer() {
-  const c = P.searchTransfer;
-  // Datos proporcionados por Mercantil (valores ya cifrados por ellos)
-  return post(`${BASE}/v1/payment/transfer-search`, c.clientId, {
-    merchantIdentify: merchantIdentify(c),
+  // ────────────────────────────────────────────────────────────────
+  // P6: Búsqueda Transferencias (datos Mercantil — ya funciona)
+  // ────────────────────────────────────────────────────────────────
+  console.log('\n' + '━'.repeat(78));
+  console.log('  P6: Búsqueda Transferencias — datos Mercantil');
+  console.log('━'.repeat(78));
+
+  const p6 = await post(`${BASE}/v1/payment/transfer-search`, P.searchTransfer.clientId, {
+    merchantIdentify: merchantIdentify(P.searchTransfer),
     clientIdentify,
     transferSearchBy: {
       account: 'N1IH8GqG9krQTx24fwpq27oSCleBHZ2uJbMFId4jc/s=',
@@ -281,160 +303,63 @@ function test_p6_searchTransfer() {
       amount: 1250,
     },
   });
-}
+  console.log(`  HTTP: ${p6.status} | ${p6.durationMs}ms`);
+  console.log(`  Response: ${JSON.stringify(p6.data, null, 2).substring(0, 500)}`);
 
-// ══════════════════════════════════════════════════════════════════
-// P7: Agendamiento — consult-contract
-// Docs: apiportal.mercantilbanco.com — camelCase
-// Nodo: "consultContract" con contractNumber cifrado
-// ══════════════════════════════════════════════════════════════════
-function test_p7_scheduling() {
-  const c = P.scheduling;
-  return post(`${BASE}/v1/payment/consult-contract`, c.clientId, {
-    merchantIdentify: merchantIdentify(c),
-    clientIdentify,
+  // ────────────────────────────────────────────────────────────────
+  // P7: AGENDAMIENTO — con model y osVersion
+  // ────────────────────────────────────────────────────────────────
+  console.log('\n' + '━'.repeat(78));
+  console.log('  P7: Agendamiento — consult-contract (con model+osVersion)');
+  console.log('━'.repeat(78));
+
+  const p7 = await post(`${BASE}/v1/payment/consult-contract`, P.scheduling.clientId, {
+    merchantIdentify: merchantIdentify(P.scheduling),
+    clientIdentify: clientIdentifyFull,
     consultContract: {
-      contractNumber: enc('12345', c.secretKey),
+      contractNumber: enc('12345', P.scheduling.secretKey),
     },
   });
-}
+  console.log(`  HTTP: ${p7.status} | ${p7.durationMs}ms`);
+  console.log(`  Response: ${JSON.stringify(p7.data, null, 2).substring(0, 500)}`);
 
-// ══════════════════════════════════════════════════════════════════
-// P8: TED — listar-buzon
-// Postman/playground: camelCase, nodos inboxType (cifrado) y clientId
-// ══════════════════════════════════════════════════════════════════
-function test_p8_ted() {
-  const c = P.ted;
-  return post(`${BASE}/v2/ted/listar-buzon`, c.clientId, {
-    merchantIdentify: merchantIdentify(c),
-    clientIdentify: {
-      ipaddress: '127.0.0.1',
-      browserAgent: 'Chrome 18.1.3',
-      mobile: { manufacturer: 'Samsung' },
-    },
-    inboxType: enc('entrada', c.secretKey),
-    clientId: c.merchantId,
+  // ────────────────────────────────────────────────────────────────
+  // P8: TED (ya funciona)
+  // ────────────────────────────────────────────────────────────────
+  console.log('\n' + '━'.repeat(78));
+  console.log('  P8: TED listar-buzon');
+  console.log('━'.repeat(78));
+
+  const p8 = await post(`${BASE}/v2/ted/listar-buzon`, P.ted.clientId, {
+    merchantIdentify: merchantIdentify(P.ted),
+    clientIdentify: { ipaddress: '127.0.0.1', browserAgent: 'Chrome 18.1.3', mobile: { manufacturer: 'Samsung' } },
+    inboxType: enc('entrada', P.ted.secretKey),
+    clientId: P.ted.merchantId,
   });
-}
+  console.log(`  HTTP: ${p8.status} | ${p8.durationMs}ms`);
+  console.log(`  Response: ${JSON.stringify(p8.data, null, 2).substring(0, 300)}`);
 
-// ── Helpers ──
-function extractCode(data: unknown): string {
-  if (typeof data === 'object' && data !== null) {
-    const d = data as Record<string, unknown>;
-    if (d.code !== undefined) return String(d.code);
-    if (d.httpCode !== undefined) return String(d.httpCode);
-  }
-  return '-';
-}
-
-function extractErrorInfo(data: unknown): { code: string; error: string } {
-  const code = extractCode(data);
-  let error = '';
-  if (typeof data === 'object' && data !== null) {
-    const d = data as Record<string, unknown>;
-    if (d.errorList) error = JSON.stringify(d.errorList);
-    else if (d.moreInformation) error = String(d.moreInformation);
-    else if (d.message) error = String(d.message);
-    else if (d.httpMessage) error = String(d.httpMessage);
-  } else if (typeof data === 'string') {
-    error = data.substring(0, 120);
-  }
-  return { code, error };
-}
-
-function hasCreds(c: Creds): boolean {
-  return !!(c.merchantId && c.secretKey && c.clientId);
-}
-
-// ── Run ──
-async function main() {
-  const tests = [
-    { num: '1a', name: 'getauth plano+prefijo V',     endpoint: '/v1/payment/getauth',         fn: test_p1a_cards_plain_with_prefix, creds: P.cards },
-    { num: '1b', name: 'getauth sinV+tarjeta cifrada',endpoint: '/v1/payment/getauth',         fn: test_p1b_cards_enc_no_prefix,     creds: P.cards },
-    { num: '1c', name: 'getauth sinV+tarjeta plana',  endpoint: '/v1/payment/getauth',         fn: test_p1c_cards_plain_no_prefix,   creds: P.cards },
-    { num: 2,  name: 'Pago Movil C2P',               endpoint: '/v1/payment/c2p',             fn: test_p2_c2p,            creds: P.c2p },
-    { num: 3,  name: 'Solicitud Clave C2P (SCP)',     endpoint: '/v1/mobile-payment/scp',      fn: test_p3_c2pKey,         creds: P.c2pKey },
-    { num: '4a', name: 'Busq Tarjetas (hoy+ref)',     endpoint: '/v1/payment/search',          fn: test_p4_searchCards,    creds: P.searchCards },
-    { num: '4b', name: 'Busq Tarjetas (xlsx+invoice)',endpoint: '/v1/payment/search',          fn: test_p4b_searchCards_xlsx, creds: P.searchCards },
-    { num: 5,  name: 'Busqueda Movil xlsx',           endpoint: '/v1/mobile-payment/search',   fn: test_p5_searchMobile,   creds: P.searchMobile },
-    { num: 6,  name: 'Busqueda Transferencias',       endpoint: '/v1/payment/transfer-search', fn: test_p6_searchTransfer, creds: P.searchTransfer },
-    { num: 7,  name: 'Agendamiento (consult)',        endpoint: '/v1/payment/consult-contract',fn: test_p7_scheduling,     creds: P.scheduling },
-    { num: 8,  name: 'TED listar-buzon',              endpoint: '/v2/ted/listar-buzon',        fn: test_p8_ted,            creds: P.ted },
+  // ── RESUMEN ──
+  const all = [
+    { num: '1-auth', http: auth.status, name: 'getauth' },
+    { num: '1-pay', http: (auth.status === 200 ? ((auth.data as Record<string, unknown>)?.authentication_info ? 'tested' : 'skip') : 'skip') as string | number, name: 'pay' },
+    { num: '2', http: c2p.status, name: 'C2P' },
+    { num: '3', http: scp.status, name: 'SCP' },
+    { num: '4', http: p4.status, name: 'Busq Tarjetas' },
+    { num: '5', http: p5.status, name: 'Busq Movil' },
+    { num: '6', http: p6.status, name: 'Busq Transferencias' },
+    { num: '7', http: p7.status, name: 'Agendamiento' },
+    { num: '8', http: p8.status, name: 'TED' },
   ];
 
-  console.log('');
-  console.log('='.repeat(78));
-  console.log('  MERCANTIL SANDBOX — PRUEBA CON ESTRUCTURAS CORREGIDAS');
-  console.log(`  ${new Date().toISOString()}`);
-  console.log('  FIX: P1-P5 snake_case (merchant_identify, ipaddress, browser_agent)');
-  console.log('       P1 transaction_authInfo, P2 transaction_c2p, P3 transaction_scpInfo');
-  console.log('       P4 search_by+procesing_date, P5 search_by+trx_date');
-  console.log('       P8 TED inboxType+clientId');
-  console.log('='.repeat(78));
-
-  const results: { num: string | number; name: string; httpStatus: number; code: string; error: string; ms: number; hasCreds: boolean }[] = [];
-
-  for (const t of tests) {
-    console.log(`\n${'━'.repeat(78)}`);
-    console.log(`  P${t.num}: ${t.name}`);
-    console.log(`  Endpoint: ${t.endpoint}`);
-    console.log(`  Client-Id: ${t.creds.clientId || '(NO CONFIGURADO)'}`);
-    console.log('━'.repeat(78));
-
-    if (!hasCreds(t.creds)) {
-      console.log('  ⊘ SIN CREDENCIALES — omitido');
-      results.push({ num: t.num, name: t.name, httpStatus: -1, code: 'N/A', error: 'Sin credenciales', ms: 0, hasCreds: false });
-      continue;
-    }
-
-    const r = await t.fn();
-    const { code, error } = extractErrorInfo(r.data);
-
-    console.log(`\n  ▸ HTTP Status: ${r.status}`);
-    console.log(`  ▸ Code: ${code}`);
-    console.log(`  ▸ Tiempo: ${r.durationMs}ms`);
-    if (error) console.log(`  ▸ Error/Info: ${error}`);
-
-    const body = typeof r.data === 'string' ? r.data : JSON.stringify(r.data, null, 2);
-    console.log(`  ▸ Response:\n${body.substring(0, 1500)}`);
-
-    results.push({ num: t.num, name: t.name, httpStatus: r.status, code, error, ms: r.durationMs, hasCreds: true });
+  console.log('\n\n' + '═'.repeat(78));
+  console.log('  RESUMEN FINAL');
+  console.log('═'.repeat(78) + '\n');
+  for (const t of all) {
+    const icon = t.http === 200 ? '✓' : (typeof t.http === 'number' && t.http === 400 ? '~' : '✗');
+    console.log(`  ${icon} P${t.num}: ${t.name} — HTTP ${t.http}`);
   }
-
-  // ── Resumen ──
-  console.log(`\n\n${'═'.repeat(78)}`);
-  console.log('  RESUMEN — ANTES (500/99999 en todo) vs AHORA');
-  console.log('═'.repeat(78));
-  console.log('');
-  console.log('  #  Producto                     HTTP   Code      Cambió?   Tiempo');
-  console.log('  ' + '─'.repeat(74));
-
-  for (const r of results) {
-    if (!r.hasCreds) {
-      console.log(`  ${r.num}  ${r.name.padEnd(28)} ---    N/A       ---       (sin creds)`);
-      continue;
-    }
-    const changed = (r.httpStatus !== 500 || r.code !== '99999') ? '  SI' : '  NO';
-    const marker = changed === '  SI' ? ' ★' : '';
-    console.log(`  ${r.num}  ${r.name.padEnd(28)} ${String(r.httpStatus).padEnd(6)} ${r.code.padEnd(9)} ${changed}${marker}     ${r.ms}ms`);
-  }
-
-  console.log('  ' + '─'.repeat(74));
-  const tested = results.filter(r => r.hasCreds);
-  const changed = tested.filter(r => r.httpStatus !== 500 || r.code !== '99999');
-  console.log(`\n  Productos probados: ${tested.length}/8`);
-  console.log(`  Con cambio vs 500/99999: ${changed.length}`);
-  if (changed.length === 0) {
-    console.log('  → Todo sigue igual: 500/99999 en todos los productos.');
-  } else {
-    console.log('  → Productos con cambio (respuesta de negocio):');
-    for (const c of changed) {
-      console.log(`    ★ P${c.num} ${c.name}: HTTP ${c.httpStatus}, code ${c.code}`);
-      if (c.error) console.log(`      ${c.error.substring(0, 100)}`);
-    }
-  }
-
-  console.log(`\n${'═'.repeat(78)}\n`);
+  console.log('\n' + '═'.repeat(78) + '\n');
 }
 
 main().catch(console.error);
