@@ -114,13 +114,10 @@ export function Sidebar({ user }: SidebarProps) {
           collapsed ? "justify-center px-3" : "px-5"
         )}
       >
-        <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-wuipi-accent to-wuipi-purple flex items-center justify-center text-white font-extrabold text-sm shrink-0">
-          W
-        </div>
-        {!collapsed && (
-          <span className="text-xl font-bold text-white tracking-tight">
-            Wuipi
-          </span>
+        {collapsed ? (
+          <img src="/img/wuipi-logo.webp" alt="WUIPI" className="w-9 h-9 object-contain shrink-0" />
+        ) : (
+          <img src="/img/wuipi-logo.webp" alt="WUIPI" className="h-9 object-contain" />
         )}
       </div>
 
