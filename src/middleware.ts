@@ -2,6 +2,15 @@ import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
 export async function middleware(request: NextRequest) {
+  // Public routes — skip auth entirely (no Supabase call)
+  const publicPaths = ["/login", "/pay/", "/api/mercantil/webhook", "/api/mercantil/callback", "/api/mercantil/status/"];
+  const isPublic = publicPaths.some((path) => request.nextUrl.pathname.startsWith(path));
+
+  // For API routes that don't need middleware auth, pass through immediately
+  if (request.nextUrl.pathname.startsWith("/api/")) {
+    if (isPublic) return NextResponse.next();
+  }
+
   let response = NextResponse.next({
     request: { headers: request.headers },
   });
@@ -32,13 +41,13 @@ export async function middleware(request: NextRequest) {
     }
   );
 
+  // Use getSession() instead of getUser() — reads JWT locally, no HTTP call.
+  // getUser() makes a network request to Supabase on every request which
+  // causes MIDDLEWARE_INVOCATION_TIMEOUT on Vercel Hobby (1.5s limit).
   const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  // Public routes — no auth required
-  const publicPaths = ["/login", "/pay/", "/api/mercantil/webhook", "/api/mercantil/callback", "/api/mercantil/status/"];
-  const isPublic = publicPaths.some((path) => request.nextUrl.pathname.startsWith(path));
+    data: { session },
+  } = await supabase.auth.getSession();
+  const user = session?.user ?? null;
 
   // Redirect unauthenticated users to login (except public pages)
   if (!user && !isPublic) {
