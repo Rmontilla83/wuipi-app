@@ -105,11 +105,9 @@ const clientIdentify = {
 };
 
 // ══════════════════════════════════════════════════════════════════
-// P1: Pagos con Tarjetas — getauth (Solicitud de Autenticación)
-// Postman/playground: customer_id y card_number van SIN CIFRAR
-// Datos xlsx: V10780248, tarjeta 4532310053032530
+// P1a: getauth — Variante A: Postman (plano con prefijo V)
 // ══════════════════════════════════════════════════════════════════
-function test_p1_cards() {
+function test_p1a_cards_plain_with_prefix() {
   const c = P.cards;
   return post(`${BASE}/v1/payment/getauth`, c.clientId, {
     merchant_identify: merchant_identify(c),
@@ -118,6 +116,40 @@ function test_p1_cards() {
       trx_type: 'solaut',
       payment_method: 'tdd',
       customer_id: 'V10780248',
+      card_number: '4532310053032530',
+    },
+  });
+}
+
+// ══════════════════════════════════════════════════════════════════
+// P1b: getauth — Variante B: sin prefijo V, tarjeta cifrada
+// ══════════════════════════════════════════════════════════════════
+function test_p1b_cards_enc_no_prefix() {
+  const c = P.cards;
+  return post(`${BASE}/v1/payment/getauth`, c.clientId, {
+    merchant_identify: merchant_identify(c),
+    client_identify,
+    transaction_authInfo: {
+      trx_type: 'solaut',
+      payment_method: 'tdd',
+      customer_id: '10780248',
+      card_number: enc('4532310053032530', c.secretKey),
+    },
+  });
+}
+
+// ══════════════════════════════════════════════════════════════════
+// P1c: getauth — Variante C: sin prefijo V, tarjeta plana
+// ══════════════════════════════════════════════════════════════════
+function test_p1c_cards_plain_no_prefix() {
+  const c = P.cards;
+  return post(`${BASE}/v1/payment/getauth`, c.clientId, {
+    merchant_identify: merchant_identify(c),
+    client_identify,
+    transaction_authInfo: {
+      trx_type: 'solaut',
+      payment_method: 'tdd',
+      customer_id: '10780248',
       card_number: '4532310053032530',
     },
   });
@@ -168,9 +200,8 @@ function test_p3_c2pKey() {
 // ══════════════════════════════════════════════════════════════════
 // P4: Búsqueda de Pagos con Tarjetas
 // Postman: nodo "search_by", campo "procesing_date" (1 sola 's')
-// Formato fecha: YYYY/MM/DD (con slashes, NO guiones)
-// Requiere invoice_number o payment_reference (uno de los dos)
-// Datos xlsx tarjetas: referencia de pago del test P1
+// Formato fecha: YYYY/MM/DD (con slashes)
+// Datos xlsx tarjetas: fecha 2026/03/03, referencia del xlsx
 // ══════════════════════════════════════════════════════════════════
 function test_p4_searchCards() {
   const c = P.searchCards;
@@ -183,9 +214,28 @@ function test_p4_searchCards() {
     client_identify,
     search_by: {
       search_criteria: 'unique',
-      procesing_date: '2026/03/03',
+      procesing_date: '2026/03/25',
       invoice_number: '',
       payment_reference: '25508782358',
+    },
+  });
+}
+
+// P4b: Busqueda con fecha del xlsx original
+function test_p4b_searchCards_xlsx() {
+  const c = P.searchCards;
+  return post(`${BASE}/v1/payment/search`, c.clientId, {
+    merchant_identify: {
+      integratorId: '31',
+      merchantId: c.merchantId,
+      terminalId: 'abcde',
+    },
+    client_identify,
+    search_by: {
+      search_criteria: 'unique',
+      procesing_date: '2026/03/03',
+      invoice_number: 'TEST-C2P-1774447407471',
+      payment_reference: '',
     },
   });
 }
@@ -193,9 +243,7 @@ function test_p4_searchCards() {
 // ══════════════════════════════════════════════════════════════════
 // P5: Búsqueda Móvil
 // Postman/playground: nodo "search_by", teléfonos CIFRADOS
-// payment_reference obligatorio según API (aunque Postman lo muestra vacío)
-// trx_date formato YYYY-MM-DD (guiones, diferente de P4)
-// Datos: referencia 6460003485 (obtenida de P2 C2P response)
+// Datos xlsx: referencia 87860014874, monto 1318144, fecha 2026-03-03
 // ══════════════════════════════════════════════════════════════════
 function test_p5_searchMobile() {
   const c = P.searchMobile;
@@ -203,11 +251,11 @@ function test_p5_searchMobile() {
     merchant_identify: merchant_identify(c),
     client_identify,
     search_by: {
-      amount: 100.00,
+      amount: 1318144,
       currency: 'ves',
       destination_mobile_number: enc('584241513063', c.secretKey),
       origin_mobile_number: enc('584142591177', c.secretKey),
-      payment_reference: '6460003485',
+      payment_reference: '87860014874',
       trx_date: '2026-03-03',
     },
   });
@@ -297,14 +345,17 @@ function hasCreds(c: Creds): boolean {
 // ── Run ──
 async function main() {
   const tests = [
-    { num: 1, name: 'Tarjetas getauth',          endpoint: '/v1/payment/getauth',         fn: test_p1_cards,          creds: P.cards },
-    { num: 2, name: 'Pago Movil C2P',             endpoint: '/v1/payment/c2p',             fn: test_p2_c2p,            creds: P.c2p },
-    { num: 3, name: 'Solicitud Clave C2P (SCP)',   endpoint: '/v1/mobile-payment/scp',      fn: test_p3_c2pKey,         creds: P.c2pKey },
-    { num: 4, name: 'Busqueda Tarjetas',           endpoint: '/v1/payment/search',          fn: test_p4_searchCards,    creds: P.searchCards },
-    { num: 5, name: 'Busqueda Movil',              endpoint: '/v1/mobile-payment/search',   fn: test_p5_searchMobile,   creds: P.searchMobile },
-    { num: 6, name: 'Busqueda Transferencias',     endpoint: '/v1/payment/transfer-search', fn: test_p6_searchTransfer, creds: P.searchTransfer },
-    { num: 7, name: 'Agendamiento (consult)',      endpoint: '/v1/payment/consult-contract',fn: test_p7_scheduling,     creds: P.scheduling },
-    { num: 8, name: 'TED listar-buzon',            endpoint: '/v2/ted/listar-buzon',        fn: test_p8_ted,            creds: P.ted },
+    { num: '1a', name: 'getauth plano+prefijo V',     endpoint: '/v1/payment/getauth',         fn: test_p1a_cards_plain_with_prefix, creds: P.cards },
+    { num: '1b', name: 'getauth sinV+tarjeta cifrada',endpoint: '/v1/payment/getauth',         fn: test_p1b_cards_enc_no_prefix,     creds: P.cards },
+    { num: '1c', name: 'getauth sinV+tarjeta plana',  endpoint: '/v1/payment/getauth',         fn: test_p1c_cards_plain_no_prefix,   creds: P.cards },
+    { num: 2,  name: 'Pago Movil C2P',               endpoint: '/v1/payment/c2p',             fn: test_p2_c2p,            creds: P.c2p },
+    { num: 3,  name: 'Solicitud Clave C2P (SCP)',     endpoint: '/v1/mobile-payment/scp',      fn: test_p3_c2pKey,         creds: P.c2pKey },
+    { num: '4a', name: 'Busq Tarjetas (hoy+ref)',     endpoint: '/v1/payment/search',          fn: test_p4_searchCards,    creds: P.searchCards },
+    { num: '4b', name: 'Busq Tarjetas (xlsx+invoice)',endpoint: '/v1/payment/search',          fn: test_p4b_searchCards_xlsx, creds: P.searchCards },
+    { num: 5,  name: 'Busqueda Movil xlsx',           endpoint: '/v1/mobile-payment/search',   fn: test_p5_searchMobile,   creds: P.searchMobile },
+    { num: 6,  name: 'Busqueda Transferencias',       endpoint: '/v1/payment/transfer-search', fn: test_p6_searchTransfer, creds: P.searchTransfer },
+    { num: 7,  name: 'Agendamiento (consult)',        endpoint: '/v1/payment/consult-contract',fn: test_p7_scheduling,     creds: P.scheduling },
+    { num: 8,  name: 'TED listar-buzon',              endpoint: '/v2/ted/listar-buzon',        fn: test_p8_ted,            creds: P.ted },
   ];
 
   console.log('');
@@ -317,7 +368,7 @@ async function main() {
   console.log('       P8 TED inboxType+clientId');
   console.log('='.repeat(78));
 
-  const results: { num: number; name: string; httpStatus: number; code: string; error: string; ms: number; hasCreds: boolean }[] = [];
+  const results: { num: string | number; name: string; httpStatus: number; code: string; error: string; ms: number; hasCreds: boolean }[] = [];
 
   for (const t of tests) {
     console.log(`\n${'━'.repeat(78)}`);
