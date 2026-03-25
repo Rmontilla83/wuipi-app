@@ -2,14 +2,11 @@ import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
 export async function middleware(request: NextRequest) {
-  // Public routes — skip auth entirely (no Supabase call)
+  // Public routes — skip auth entirely (no Supabase call, no cookie manipulation)
   const publicPaths = ["/login", "/pay/", "/api/mercantil/webhook", "/api/mercantil/callback", "/api/mercantil/status/"];
   const isPublic = publicPaths.some((path) => request.nextUrl.pathname.startsWith(path));
 
-  // For API routes that don't need middleware auth, pass through immediately
-  if (request.nextUrl.pathname.startsWith("/api/")) {
-    if (isPublic) return NextResponse.next();
-  }
+  if (isPublic) return NextResponse.next();
 
   let response = NextResponse.next({
     request: { headers: request.headers },
@@ -49,17 +46,10 @@ export async function middleware(request: NextRequest) {
   } = await supabase.auth.getSession();
   const user = session?.user ?? null;
 
-  // Redirect unauthenticated users to login (except public pages)
-  if (!user && !isPublic) {
+  // Redirect unauthenticated users to login
+  if (!user) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
-    return NextResponse.redirect(url);
-  }
-
-  // Redirect authenticated users away from login
-  if (user && request.nextUrl.pathname.startsWith("/login")) {
-    const url = request.nextUrl.clone();
-    url.pathname = "/comando";
     return NextResponse.redirect(url);
   }
 
