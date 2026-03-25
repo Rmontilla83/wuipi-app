@@ -9,7 +9,14 @@ import { fetchBCVRate, convertUsdToBs } from "@/lib/integrations/bcv";
 import { MercantilSDK } from "@/lib/mercantil";
 import Stripe from "stripe";
 
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://wuipi-app.vercel.app";
+const FALLBACK_URL = "https://wuipi-app.vercel.app";
+
+function getAppUrl(): string {
+  const raw = process.env.NEXT_PUBLIC_APP_URL?.trim();
+  if (raw && raw.startsWith("https://")) return raw;
+  if (raw && raw.startsWith("http://localhost")) return raw;
+  return FALLBACK_URL;
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -44,7 +51,7 @@ export async function POST(request: NextRequest) {
         const result = sdk.createPayment({
           amount: amountBss,
           customerName: item.customer_name,
-          returnUrl: `${APP_URL}/pagar/${token}?status=callback`,
+          returnUrl: `${getAppUrl()}/pagar/${token}?status=callback`,
           currency: "ves",
           invoiceNumber: {
             number: item.invoice_number || token,
@@ -78,11 +85,13 @@ export async function POST(request: NextRequest) {
 
       try {
         const amountCents = Math.round(Number(item.amount_usd) * 100);
-        const successUrl = `${APP_URL}/pagar/${token}?status=success`;
-        const cancelUrl = `${APP_URL}/pagar/${token}?status=cancelled`;
+        const successUrl = `${getAppUrl()}/pagar/${token}?status=success`;
+        const cancelUrl = `${getAppUrl()}/pagar/${token}?status=cancelled`;
 
         console.log("[Pay] Stripe creating session:", {
           key_prefix: stripeKey.substring(0, 12) + "...",
+          app_url: getAppUrl(),
+          env_raw: process.env.NEXT_PUBLIC_APP_URL || "(empty)",
           amount_usd: Number(item.amount_usd),
           amount_cents: amountCents,
           success_url: successUrl,
