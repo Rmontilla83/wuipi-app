@@ -3,7 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 
 export async function middleware(request: NextRequest) {
   // Public routes — skip auth entirely (no Supabase call, no cookie manipulation)
-  const publicPaths = ["/login", "/pay/", "/api/mercantil/webhook", "/api/mercantil/callback", "/api/mercantil/status/"];
+  const publicPaths = ["/login", "/pay/", "/pagar/", "/api/mercantil/webhook", "/api/mercantil/callback", "/api/mercantil/status/", "/api/cobranzas/webhook/"];
   const isPublic = publicPaths.some((path) => request.nextUrl.pathname.startsWith(path));
 
   if (isPublic) return NextResponse.next();

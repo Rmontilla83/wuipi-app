@@ -229,6 +229,79 @@ export const crmCollectionQuotaSchema = z.object({
 });
 
 // ============================================
+// COLLECTION CAMPAIGNS SCHEMAS (Cobros Masivos)
+// ============================================
+
+export const collectionCampaignCreateSchema = z.object({
+  name: z.string().min(2, "El nombre de la campaña es requerido").max(255),
+  description: z.string().max(500).optional().nullable(),
+});
+
+export const collectionUploadRowSchema = z.object({
+  nombre_cliente: z.string().min(1, "Nombre del cliente requerido"),
+  cedula_rif: z.string().min(1, "Cédula/RIF requerido"),
+  email: z.string().email("Email inválido").optional().nullable().or(z.literal("")),
+  telefono: z.string().optional().nullable().or(z.literal("")),
+  monto_usd: z.number().positive("El monto debe ser mayor a 0"),
+  concepto: z.string().optional().nullable().or(z.literal("")),
+  numero_factura: z.string().optional().nullable().or(z.literal("")),
+});
+
+export const collectionUploadSchema = z.object({
+  campaign_name: z.string().min(2, "Nombre de campaña requerido"),
+  description: z.string().optional().nullable(),
+  rows: z.array(collectionUploadRowSchema).min(1, "Debe incluir al menos un registro"),
+});
+
+export const collectionPaySchema = z.object({
+  token: z.string().min(1, "Token requerido"),
+  method: z.enum(["debito_inmediato", "transferencia", "stripe"], { message: "Método de pago inválido" }),
+});
+
+export const collectionConfirmTransferSchema = z.object({
+  token: z.string().min(1, "Token requerido"),
+  reference: z.string().min(1, "Referencia de transferencia requerida"),
+});
+
+// ============================================
+// BEQUANT CONFIG SCHEMAS
+// ============================================
+export const bequantConfigSchema = z.object({
+  label: z.string().min(1, "Etiqueta requerida").max(100),
+  host: z.string().min(1, "Host requerido").max(255),
+  port: z.number().int().min(1).max(65535).default(3443),
+  username: z.string().min(1, "Usuario requerido").max(100),
+  password: z.string().min(1, "Contraseña requerida").max(255),
+  ssl_verify: z.boolean().default(false),
+  enabled: z.boolean().default(true),
+  notes: z.string().max(500).optional().nullable(),
+});
+
+export const bequantConfigUpdateSchema = bequantConfigSchema.partial().extend({
+  password: z.string().max(255).optional(),
+});
+
+export const bequantRatePolicySchema = z.object({
+  policyName: z.string().min(1, "Nombre de política requerido").max(100),
+  rateLimitDownlink: z.object({
+    rate: z.number().positive("Rate debe ser mayor a 0"),
+    burstRate: z.number().min(0, "Burst rate no puede ser negativo"),
+  }),
+  rateLimitUplink: z.object({
+    rate: z.number().positive("Rate debe ser mayor a 0"),
+    burstRate: z.number().min(0, "Burst rate no puede ser negativo"),
+  }),
+});
+
+export const bequantTestConnectionSchema = z.object({
+  host: z.string().min(1, "Host requerido"),
+  port: z.number().int().min(1).max(65535).default(3443),
+  username: z.string().min(1, "Usuario requerido"),
+  password: z.string().min(1, "Contraseña requerida"),
+  configId: z.string().uuid().optional(),
+});
+
+// ============================================
 // HELPER: validate and return typed data or error
 // ============================================
 export function validate<T>(schema: z.ZodSchema<T>, data: unknown): { success: true; data: T } | { success: false; error: string; details: z.ZodIssue[] } {

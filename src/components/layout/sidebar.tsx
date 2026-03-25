@@ -22,6 +22,7 @@ import {
   ChevronRight,
   LogOut,
   CreditCard,
+  Radio,
 } from "lucide-react";
 
 import type { LucideIcon } from "lucide-react";
@@ -54,6 +55,7 @@ const NAV_GROUPS: NavGroup[] = [
       { id: "soporte", label: "CRM Soporte", icon: Headphones, path: "/soporte" },
       { id: "ventas", label: "CRM Ventas", icon: TrendingUp, path: "/ventas" },
       { id: "cobranzas", label: "CRM Cobranzas", icon: Banknote, path: "/cobranzas" },
+      { id: "bequant", label: "Bequant QoE", icon: Radio, path: "/bequant" },
     ],
   },
   {
