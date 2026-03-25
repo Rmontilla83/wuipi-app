@@ -23,7 +23,11 @@ export default function LoginPage() {
     });
 
     if (error) {
-      setError("Credenciales inválidas. Intenta de nuevo.");
+      console.error("[Login] Supabase error:", error.message, error.status);
+      const msg = error.message === "Invalid login credentials"
+        ? "Credenciales inválidas. Intenta de nuevo."
+        : error.message || "Error al iniciar sesión";
+      setError(msg);
       setLoading(false);
       return;
     }
