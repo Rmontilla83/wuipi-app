@@ -77,7 +77,19 @@ export async function POST(request: NextRequest) {
       }
 
       try {
-        const stripe = new Stripe(stripeKey);
+        const amountCents = Math.round(Number(item.amount_usd) * 100);
+        const successUrl = `${APP_URL}/pagar/${token}?status=success`;
+        const cancelUrl = `${APP_URL}/pagar/${token}?status=cancelled`;
+
+        console.log("[Pay] Stripe creating session:", {
+          key_prefix: stripeKey.substring(0, 12) + "...",
+          amount_usd: Number(item.amount_usd),
+          amount_cents: amountCents,
+          success_url: successUrl,
+          cancel_url: cancelUrl,
+        });
+
+        const stripe = new Stripe(stripeKey, { apiVersion: "2025-04-30.basil" as Stripe.LatestApiVersion });
         const session = await stripe.checkout.sessions.create({
           payment_method_types: ["card"],
           line_items: [
@@ -86,16 +98,16 @@ export async function POST(request: NextRequest) {
                 currency: "usd",
                 product_data: {
                   name: item.concept || "Servicio WUIPI",
-                  description: item.invoice_number ? `Factura: ${item.invoice_number}` : undefined,
+                  ...(item.invoice_number ? { description: `Factura: ${item.invoice_number}` } : {}),
                 },
-                unit_amount: Math.round(Number(item.amount_usd) * 100),
+                unit_amount: amountCents,
               },
               quantity: 1,
             },
           ],
           mode: "payment",
-          success_url: `${APP_URL}/pagar/${token}?status=success`,
-          cancel_url: `${APP_URL}/pagar/${token}?status=cancelled`,
+          success_url: successUrl,
+          cancel_url: cancelUrl,
           metadata: {
             collection_token: token,
             item_id: item.id,
@@ -113,9 +125,18 @@ export async function POST(request: NextRequest) {
           session_id: session.id,
           amount_usd: Number(item.amount_usd),
         });
-      } catch (err) {
-        console.error("[Pay] Stripe error:", err);
-        return apiError("Error al procesar pago con tarjeta. Intente nuevamente.", 500);
+      } catch (err: unknown) {
+        const stripeErr = err as { message?: string; type?: string; code?: string; statusCode?: number };
+        console.error("[Pay] Stripe error details:", {
+          message: stripeErr.message,
+          type: stripeErr.type,
+          code: stripeErr.code,
+          statusCode: stripeErr.statusCode,
+        });
+        const userMsg = stripeErr.code === "api_key_expired"
+          ? "La configuración de pagos con tarjeta necesita actualización. Contacte soporte."
+          : `Error al procesar pago con tarjeta: ${stripeErr.message || "Intente nuevamente."}`;
+        return apiError(userMsg, 500);
       }
     }
 
