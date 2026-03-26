@@ -14,7 +14,7 @@ import {
 import { sendCollectionWhatsApp } from "@/lib/notifications/whatsapp";
 import { sendCollectionEmail } from "@/lib/notifications/email";
 
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://wuipi-app.vercel.app";
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://api.wuipi.net";
 
 export async function POST(request: NextRequest) {
   try {

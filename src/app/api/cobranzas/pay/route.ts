@@ -9,7 +9,7 @@ import { fetchBCVRate, convertUsdToBs } from "@/lib/integrations/bcv";
 import { MercantilSDK } from "@/lib/mercantil";
 import Stripe from "stripe";
 
-const FALLBACK_URL = "https://wuipi-app.vercel.app";
+const FALLBACK_URL = "https://api.wuipi.net";
 
 function getAppUrl(): string {
   const raw = process.env.NEXT_PUBLIC_APP_URL?.trim();

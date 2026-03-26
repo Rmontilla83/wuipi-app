@@ -10,7 +10,7 @@ env:
   # Stub secrets so type-check and build don't fail on missing env vars
   NEXT_PUBLIC_SUPABASE_URL: "https://placeholder.supabase.co"
   NEXT_PUBLIC_SUPABASE_ANON_KEY: "placeholder"
-  NEXT_PUBLIC_APP_URL: "https://wuipi-app.vercel.app"
+  NEXT_PUBLIC_APP_URL: "https://api.wuipi.net"
 
 jobs:
   quality:

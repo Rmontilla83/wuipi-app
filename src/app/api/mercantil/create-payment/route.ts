@@ -61,7 +61,7 @@ export async function POST(request: NextRequest) {
     const paymentToken = generatePaymentToken();
 
     // Get return URL
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://wuipi-app.vercel.app";
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://api.wuipi.net";
     const returnUrl = `${appUrl}/api/mercantil/callback?token=${paymentToken}`;
 
     // Create SDK and build payment URL

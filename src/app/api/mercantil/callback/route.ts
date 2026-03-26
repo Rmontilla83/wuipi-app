@@ -13,11 +13,11 @@ export async function GET(request: NextRequest) {
 
   if (!token) {
     // No token — redirect to home
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://wuipi-app.vercel.app";
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://api.wuipi.net";
     return NextResponse.redirect(appUrl);
   }
 
   // Redirect to the payment status page
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://wuipi-app.vercel.app";
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://api.wuipi.net";
   return NextResponse.redirect(`${appUrl}/pay/${token}`);
 }

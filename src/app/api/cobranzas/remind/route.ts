@@ -12,7 +12,7 @@ import {
 import { sendCollectionWhatsApp } from "@/lib/notifications/whatsapp";
 import { sendCollectionEmail } from "@/lib/notifications/email";
 
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://wuipi-app.vercel.app";
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://api.wuipi.net";
 const MAX_REMINDERS = 3;
 const CUTOFF_DAY = 8; // Día de corte WUIPI
 

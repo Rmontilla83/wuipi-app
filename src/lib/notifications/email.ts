@@ -57,7 +57,7 @@ function buildCollectionEmailHtml(params: SendEmailParams): string {
           <!-- Header -->
           <tr>
             <td style="background:linear-gradient(135deg,#03318C,#060633);padding:32px 40px;text-align:center;">
-              <img src="https://wuipi-app.vercel.app/img/wuipi-logo.png" alt="WUIPI" width="64" height="64" style="display:block;margin:0 auto 8px;" />
+              <img src="https://api.wuipi.net/img/wuipi-logo.png" alt="WUIPI" width="64" height="64" style="display:block;margin:0 auto 8px;" />
               <p style="color:rgba(255,255,255,0.8);margin:0;font-size:14px;">Telecomunicaciones</p>
             </td>
           </tr>
@@ -160,7 +160,7 @@ export async function sendPaymentConfirmationEmail(params: {
     <tr><td align="center">
       <table width="600" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
         <tr><td style="background:linear-gradient(135deg,#03318C,#060633);padding:32px 40px;text-align:center;">
-          <img src="https://wuipi-app.vercel.app/img/wuipi-logo.png" alt="WUIPI" width="64" height="64" style="display:block;margin:0 auto;" />
+          <img src="https://api.wuipi.net/img/wuipi-logo.png" alt="WUIPI" width="64" height="64" style="display:block;margin:0 auto;" />
         </td></tr>
         <tr><td style="padding:40px;text-align:center;">
           <div style="width:64px;height:64px;background:#10b981;border-radius:50%;margin:0 auto 16px;display:flex;align-items:center;justify-content:center;">
