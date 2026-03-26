@@ -52,13 +52,24 @@ function headerBlock(gradient: string): string {
 }
 
 const FOOTER = `
+  <!-- WhatsApp help button -->
   <tr>
-    <td style="background:#f8fafc;padding:32px 40px;border-top:1px solid #e5e7eb;">
+    <td style="padding:0 40px 28px;" class="inner-pad">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+        <tr><td align="center">
+          <a href="https://wa.me/584248800723" target="_blank" style="display:inline-block;background:#25D366;color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:8px;font-family:${FONT_STACK};font-size:13px;font-weight:600;">
+            &#9742; &iquest;Necesitas ayuda? Escr&iacute;benos por WhatsApp
+          </a>
+        </td></tr>
+      </table>
+    </td>
+  </tr>
+  <!-- Footer -->
+  <tr>
+    <td style="background:#f8fafc;padding:24px 40px;border-top:1px solid #e5e7eb;">
       <table width="100%" cellpadding="0" cellspacing="0" border="0" role="presentation">
         <tr><td align="center">
-          <p style="margin:0 0 6px;font-family:${FONT_STACK};font-size:13px;color:#6b7280;font-weight:600;">WUIPI Telecomunicaciones</p>
-          <p style="margin:0 0 4px;font-family:${FONT_STACK};font-size:12px;color:#9ca3af;">wuipi.net &middot; soporte@wuipi.net &middot; +58 412-7195425</p>
-          <p style="margin:0;font-family:${FONT_STACK};font-size:11px;color:#d1d5db;">Puerto La Cruz, Anzo&aacute;tegui, Venezuela</p>
+          <p style="margin:0;font-family:${FONT_STACK};font-size:12px;color:#9ca3af;">WUIPI Telecomunicaciones &mdash; wuipi.net</p>
         </td></tr>
       </table>
     </td>
