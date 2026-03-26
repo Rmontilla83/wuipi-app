@@ -6,9 +6,12 @@ import { NextRequest } from "next/server";
 import { apiSuccess, apiError, apiServerError } from "@/lib/api-helpers";
 import { validate, collectionCampaignCreateSchema } from "@/lib/validations/schemas";
 import { getCampaigns, createCampaign, getCampaign, getItemsByCampaign, deleteCampaign } from "@/lib/dal/collection-campaigns";
+import { requirePermission } from "@/lib/auth/check-permission";
 
 export async function GET(request: NextRequest) {
   try {
+    const caller = await requirePermission("cobranzas", "read");
+    if (!caller) return apiError("No tienes permiso para ver campañas", 403);
     const { searchParams } = request.nextUrl;
     const id = searchParams.get("id");
 
@@ -31,6 +34,8 @@ export async function GET(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
+    const caller = await requirePermission("cobranzas", "delete");
+    if (!caller) return apiError("No tienes permiso para eliminar campañas", 403);
     const { searchParams } = request.nextUrl;
     const id = searchParams.get("id");
     if (!id) return apiError("id requerido", 400);
@@ -50,6 +55,8 @@ export async function DELETE(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    const caller = await requirePermission("cobranzas", "create");
+    if (!caller) return apiError("No tienes permiso para crear campañas", 403);
     const body = await request.json();
     const parsed = validate(collectionCampaignCreateSchema, body);
     if (!parsed.success) return apiError(parsed.error, 400);

@@ -2,7 +2,20 @@
 // WUIPI APP - Core Type Definitions
 // ===========================================
 
-export type UserRole = "admin" | "gerente" | "soporte" | "finanzas" | "infraestructura" | "tecnico" | "vendedor" | "cliente";
+export type UserRole =
+  | "super_admin"
+  | "admin"
+  | "gerente"
+  | "supervisor"
+  | "analista_cobranzas"
+  | "analista_soporte"
+  // Legacy roles (backward compat)
+  | "soporte"
+  | "finanzas"
+  | "infraestructura"
+  | "tecnico"
+  | "vendedor"
+  | "cliente";
 
 export interface UserProfile {
   id: string;
@@ -11,6 +24,7 @@ export interface UserProfile {
   role: UserRole;
   avatar_url?: string;
   phone?: string;
+  department?: string;
   is_active: boolean;
   created_at: string;
   updated_at: string;
@@ -37,14 +51,19 @@ export interface ModuleHealth {
 
 // Dashboard permission map — matches sidebar nav IDs
 export const ROLE_PERMISSIONS: Record<UserRole, string[]> = {
-  admin:           ["comando", "supervisor", "soporte", "ventas", "cobranzas", "bequant", "infraestructura", "erp", "pagos", "clientes", "portal-admin", "configuracion", "actualizaciones"],
-  gerente:         ["comando", "supervisor", "soporte", "ventas", "cobranzas", "bequant", "infraestructura", "erp", "pagos", "clientes", "configuracion", "actualizaciones"],
-  finanzas:        ["comando", "cobranzas", "erp", "pagos", "clientes"],
-  soporte:         ["comando", "soporte", "clientes"],
-  infraestructura: ["comando", "bequant", "infraestructura", "clientes"],
-  tecnico:         ["soporte"],
-  vendedor:        ["comando", "ventas", "clientes"],
-  cliente:         ["portal"],
+  super_admin:         ["comando", "supervisor", "soporte", "ventas", "cobranzas", "bequant", "infraestructura", "erp", "pagos", "clientes", "portal-admin", "configuracion", "actualizaciones"],
+  admin:               ["comando", "supervisor", "soporte", "ventas", "cobranzas", "bequant", "infraestructura", "erp", "pagos", "clientes", "portal-admin", "configuracion", "actualizaciones"],
+  gerente:             ["comando", "supervisor", "soporte", "ventas", "cobranzas", "bequant", "infraestructura", "erp", "pagos", "clientes", "configuracion", "actualizaciones"],
+  supervisor:          ["comando", "soporte", "cobranzas", "clientes"],
+  analista_cobranzas:  ["cobranzas", "clientes"],
+  analista_soporte:    ["soporte", "clientes"],
+  // Legacy roles
+  finanzas:            ["comando", "cobranzas", "erp", "pagos", "clientes"],
+  soporte:             ["comando", "soporte", "clientes"],
+  infraestructura:     ["comando", "bequant", "infraestructura", "clientes"],
+  tecnico:             ["soporte"],
+  vendedor:            ["comando", "ventas", "clientes"],
+  cliente:             ["portal"],
 };
 
 export type { NetworkOverview, NetworkNode, NetworkAlert } from "./prtg";

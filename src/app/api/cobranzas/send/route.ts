@@ -13,6 +13,7 @@ import {
 } from "@/lib/dal/collection-campaigns";
 import { sendCollectionWhatsApp } from "@/lib/notifications/whatsapp";
 import { sendCollectionEmail } from "@/lib/notifications/email";
+import { requirePermission } from "@/lib/auth/check-permission";
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://api.wuipi.net";
 const DEFAULT_BATCH_SIZE = 25; // Process 25 items per request to avoid Vercel timeout
@@ -27,6 +28,9 @@ interface ItemResult {
 
 export async function POST(request: NextRequest) {
   try {
+    const caller = await requirePermission("cobranzas", "send");
+    if (!caller) return apiError("No tienes permiso para enviar cobros", 403);
+
     const { campaign_id, batch_size, offset: batchOffset } = await request.json();
     if (!campaign_id) return apiError("campaign_id requerido", 400);
 
