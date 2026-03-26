@@ -324,3 +324,72 @@ export async function getPendingReminders(): Promise<CollectionItem[]> {
   if (error) throw error;
   return data || [];
 }
+
+// ---------- Delete campaign ----------
+
+export async function deleteCampaign(id: string): Promise<void> {
+  const sb = createAdminSupabase();
+  // Delete notifications for all items in this campaign
+  const { data: items } = await sb
+    .from("collection_items")
+    .select("id")
+    .eq("campaign_id", id);
+  if (items && items.length > 0) {
+    const itemIds = items.map((i) => i.id);
+    await sb.from("collection_notifications").delete().in("item_id", itemIds);
+  }
+  // Delete items
+  await sb.from("collection_items").delete().eq("campaign_id", id);
+  // Delete campaign
+  const { error } = await sb.from("collection_campaigns").delete().eq("id", id);
+  if (error) throw error;
+}
+
+// ---------- Duplicate detection ----------
+
+export async function findDuplicateItems(
+  identifiers: Array<{ email?: string; cedula_rif?: string }>
+): Promise<Array<{ email?: string; cedula_rif?: string; campaign_name: string; campaign_id: string; status: string }>> {
+  const sb = createAdminSupabase();
+
+  // Get all items from active campaigns (not paid, not cancelled)
+  const { data: campaigns } = await sb
+    .from("collection_campaigns")
+    .select("id, name")
+    .in("status", ["draft", "sending", "active"]);
+  if (!campaigns || campaigns.length === 0) return [];
+
+  const campaignIds = campaigns.map((c) => c.id);
+  const campaignMap = new Map(campaigns.map((c) => [c.id, c.name]));
+
+  const { data: existingItems } = await sb
+    .from("collection_items")
+    .select("customer_email, customer_cedula_rif, campaign_id, status")
+    .in("campaign_id", campaignIds)
+    .not("status", "in", '("paid","expired","cancelled")');
+  if (!existingItems) return [];
+
+  const duplicates: Array<{ email?: string; cedula_rif?: string; campaign_name: string; campaign_id: string; status: string }> = [];
+
+  for (const ident of identifiers) {
+    for (const existing of existingItems) {
+      const matchEmail = ident.email && existing.customer_email &&
+        ident.email.toLowerCase() === existing.customer_email.toLowerCase();
+      const matchCedula = ident.cedula_rif && existing.customer_cedula_rif &&
+        ident.cedula_rif.toUpperCase() === existing.customer_cedula_rif.toUpperCase();
+
+      if (matchEmail || matchCedula) {
+        duplicates.push({
+          email: ident.email,
+          cedula_rif: ident.cedula_rif,
+          campaign_name: campaignMap.get(existing.campaign_id) || "Desconocida",
+          campaign_id: existing.campaign_id,
+          status: existing.status,
+        });
+        break; // One match per identifier is enough
+      }
+    }
+  }
+
+  return duplicates;
+}

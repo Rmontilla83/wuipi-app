@@ -5,7 +5,7 @@ import { Card } from "@/components/ui/card";
 import {
   Plus, Search, RefreshCw, Upload, Send, Download,
   CheckCircle2, Clock, AlertCircle, FileSpreadsheet, ExternalLink,
-  ChevronLeft, RotateCcw, Calendar,
+  ChevronLeft, RotateCcw, Calendar, Trash2, Pencil, Save, X,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 
@@ -265,7 +265,25 @@ export default function CampaignsTab() {
                       </span>
                     </div>
                   </div>
-                  <div className="flex items-center gap-4 ml-4">
+                  <div className="flex items-center gap-3 ml-4">
+                    {/* Delete button — only draft/cancelled */}
+                    {["draft", "cancelled"].includes(c.status) && (
+                      <button
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          if (!confirm("¿Eliminar esta campaña y todos sus items? Esta acción no se puede deshacer.")) return;
+                          try {
+                            const res = await fetch(`/api/cobranzas/campaigns?id=${c.id}`, { method: "DELETE" });
+                            if (!res.ok) { const j = await res.json(); alert(j.error || "Error"); return; }
+                            fetchCampaigns();
+                          } catch { alert("Error al eliminar"); }
+                        }}
+                        className="p-2 rounded-lg text-gray-600 hover:text-red-400 hover:bg-red-400/10 transition-colors"
+                        title="Eliminar campaña"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    )}
                     {/* Progress ring */}
                     <div className="relative w-12 h-12">
                       <svg className="w-12 h-12 -rotate-90" viewBox="0 0 44 44">
@@ -321,6 +339,8 @@ function CreateCampaignView({
   const [rows, setRows] = useState<UploadRow[]>([]);
   const [errors, setErrors] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
+  const [duplicates, setDuplicates] = useState<Array<{ cedula_rif?: string; email?: string; campaign_name: string }>>([]);
+  const [includeDuplicates, setIncludeDuplicates] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // --- Odoo phone normalizer: "58 412-9441604" → "04129441604" ---
@@ -367,7 +387,7 @@ function CreateCampaignView({
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = (evt) => {
+    reader.onload = async (evt) => {
       try {
         const data = new Uint8Array(evt.target?.result as ArrayBuffer);
         const wb = XLSX.read(data, { type: "array" });
@@ -462,6 +482,20 @@ function CreateCampaignView({
         if (!campaignName && file.name) {
           setCampaignName(file.name.replace(/\.\w+$/, "").replace(/[_-]/g, " "));
         }
+
+        // Check for duplicates in active campaigns
+        try {
+          const dupRes = await fetch("/api/cobranzas/duplicates", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ rows: parsed.map((r) => ({ email: r.email, cedula_rif: r.cedula_rif })) }),
+          });
+          const dupJson = await dupRes.json();
+          if (dupJson.duplicates?.length > 0) {
+            setDuplicates(dupJson.duplicates);
+          }
+        } catch { /* ignore duplicate check errors */ }
+
         setStep("preview");
       } catch {
         setErrors(["Error al leer el archivo. Asegúrese de que sea un archivo Excel válido."]);
@@ -492,6 +526,23 @@ function CreateCampaignView({
 
     setSaving(true);
     setErrors([]);
+
+    // Filter out duplicates if not explicitly included
+    let finalRows = rows;
+    if (duplicates.length > 0 && !includeDuplicates) {
+      const dupSet = new Set(duplicates.map((d) => (d.cedula_rif || d.email || "").toLowerCase()));
+      finalRows = rows.filter((r) => {
+        const byRif = r.cedula_rif && dupSet.has(r.cedula_rif.toLowerCase());
+        const byEmail = r.email && dupSet.has(r.email.toLowerCase());
+        return !byRif && !byEmail;
+      });
+      if (finalRows.length === 0) {
+        setErrors(["Todos los clientes son duplicados. Marca 'Incluir de todas formas' o carga otro archivo."]);
+        setSaving(false);
+        return;
+      }
+    }
+
     try {
       const res = await fetch("/api/cobranzas/upload", {
         method: "POST",
@@ -499,7 +550,7 @@ function CreateCampaignView({
         body: JSON.stringify({
           campaign_name: campaignName,
           description: description || null,
-          rows,
+          rows: finalRows,
         }),
       });
       const json = await res.json();
@@ -600,6 +651,31 @@ function CreateCampaignView({
               </p>
             </Card>
           </div>
+
+          {/* Duplicate warning */}
+          {duplicates.length > 0 && (
+            <Card className="!p-3 border-amber-500/30 bg-amber-500/5">
+              <p className="text-amber-400 text-xs font-semibold mb-1">
+                <AlertCircle size={12} className="inline mr-1" />
+                {duplicates.length} cliente(s) ya están en campañas activas
+              </p>
+              <ul className="text-amber-300/80 text-xs space-y-0.5 mb-2">
+                {duplicates.slice(0, 5).map((d, i) => (
+                  <li key={i}>{d.cedula_rif || d.email} — en &ldquo;{d.campaign_name}&rdquo;</li>
+                ))}
+                {duplicates.length > 5 && <li className="text-gray-500">...y {duplicates.length - 5} más</li>}
+              </ul>
+              <label className="flex items-center gap-2 text-xs text-gray-400 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={includeDuplicates}
+                  onChange={(e) => setIncludeDuplicates(e.target.checked)}
+                  className="rounded border-gray-600"
+                />
+                Incluir de todas formas en esta campaña
+              </label>
+            </Card>
+          )}
 
           {/* Editable table */}
           <Card className="!p-0 overflow-hidden">
@@ -758,6 +834,9 @@ function CampaignDetailView({
   const [message, setMessage] = useState("");
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [sendResults, setSendResults] = useState<any>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState<Partial<CampaignItem>>({});
+  const [sendingItemId, setSendingItemId] = useState<string | null>(null);
 
   const st = statusConfig[campaign.status] || statusConfig.draft;
   const pct =
@@ -1088,65 +1167,98 @@ function CampaignDetailView({
                 <th className="text-left p-3 font-medium">Concepto</th>
                 <th className="text-right p-3 font-medium">Monto USD</th>
                 <th className="text-center p-3 font-medium">Estado</th>
-                <th className="text-left p-3 font-medium">Método</th>
                 <th className="text-left p-3 font-medium">Referencia</th>
-                <th className="text-center p-3 pr-4 font-medium">Link</th>
+                <th className="text-center p-3 font-medium">Link</th>
+                <th className="text-center p-3 pr-4 font-medium">Acciones</th>
               </tr>
             </thead>
             <tbody>
               {filteredItems.map((item) => {
                 const ist = itemStatusConfig[item.status] || itemStatusConfig.pending;
+                const isEditing = editingId === item.id;
+
+                if (isEditing) {
+                  return (
+                    <tr key={item.id} className="border-b border-[#F46800]/30 bg-[#F46800]/5">
+                      <td className="p-2 pl-4">
+                        <input value={editForm.customer_name || ""} onChange={(e) => setEditForm((f) => ({ ...f, customer_name: e.target.value }))}
+                          className="w-full bg-transparent text-white text-xs border-b border-[#F46800]/30 focus:border-[#F46800] focus:outline-none px-1 py-0.5" />
+                        <input value={editForm.customer_phone || ""} onChange={(e) => setEditForm((f) => ({ ...f, customer_phone: e.target.value }))}
+                          placeholder="Teléfono" className="w-full bg-transparent text-gray-400 text-[10px] border-b border-transparent hover:border-wuipi-border focus:border-[#F46800] focus:outline-none px-1 py-0.5 mt-0.5" />
+                        <input value={editForm.customer_email || ""} onChange={(e) => setEditForm((f) => ({ ...f, customer_email: e.target.value }))}
+                          placeholder="Email" className="w-full bg-transparent text-gray-400 text-[10px] border-b border-transparent hover:border-wuipi-border focus:border-[#F46800] focus:outline-none px-1 py-0.5" />
+                      </td>
+                      <td className="p-2 text-gray-300 text-xs">{item.customer_cedula_rif}</td>
+                      <td className="p-2">
+                        <input value={editForm.concept || ""} onChange={(e) => setEditForm((f) => ({ ...f, concept: e.target.value }))}
+                          className="w-full bg-transparent text-gray-300 text-xs border-b border-[#F46800]/30 focus:border-[#F46800] focus:outline-none px-1 py-0.5" />
+                      </td>
+                      <td className="p-2 text-right">
+                        <input type="number" value={editForm.amount_usd || 0} onChange={(e) => setEditForm((f) => ({ ...f, amount_usd: parseFloat(e.target.value) || 0 }))}
+                          className="w-20 bg-transparent text-emerald-400 text-xs text-right font-bold border-b border-[#F46800]/30 focus:border-[#F46800] focus:outline-none px-1 py-0.5" />
+                      </td>
+                      <td className="p-2 text-center"><span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${ist.color}`}>{ist.label}</span></td>
+                      <td className="p-2 text-gray-400 text-xs font-mono">{item.payment_reference || "—"}</td>
+                      <td className="p-2 text-center">
+                        <a href={`${APP_URL}/pagar/${item.payment_token}`} target="_blank" rel="noopener noreferrer" className="text-[#F46800] hover:text-[#F46800]/80"><ExternalLink size={14} /></a>
+                      </td>
+                      <td className="p-2 pr-4 text-center">
+                        <div className="flex items-center justify-center gap-1">
+                          <button onClick={async () => {
+                            try {
+                              const res = await fetch("/api/cobranzas/items", { method: "PATCH", headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({ id: item.id, ...editForm }) });
+                              if (!res.ok) { const j = await res.json(); setMessage(`Error: ${j.error}`); return; }
+                              setEditingId(null);
+                              onRefresh();
+                            } catch { setMessage("Error al guardar"); }
+                          }} className="p-1.5 rounded bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30" title="Guardar"><Save size={12} /></button>
+                          <button onClick={() => setEditingId(null)} className="p-1.5 rounded bg-gray-500/20 text-gray-400 hover:bg-gray-500/30" title="Cancelar"><X size={12} /></button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                }
+
                 return (
-                  <tr
-                    key={item.id}
-                    className="border-b border-wuipi-border/50 hover:bg-wuipi-card-hover transition-colors"
-                  >
+                  <tr key={item.id} className="border-b border-wuipi-border/50 hover:bg-wuipi-card-hover transition-colors">
                     <td className="p-3 pl-4">
-                      <p className="text-white font-medium text-xs">
-                        {item.customer_name}
-                      </p>
-                      <p className="text-gray-600 text-[10px]">
-                        {item.customer_email || item.customer_phone || ""}
-                      </p>
+                      <p className="text-white font-medium text-xs">{item.customer_name}</p>
+                      <p className="text-gray-600 text-[10px]">{item.customer_email || item.customer_phone || ""}</p>
                     </td>
-                    <td className="p-3 text-gray-300 text-xs">
-                      {item.customer_cedula_rif}
-                    </td>
-                    <td className="p-3 text-gray-300 text-xs truncate max-w-[200px]">
-                      {item.concept || "—"}
-                    </td>
-                    <td className="p-3 text-right text-xs font-bold text-emerald-400">
-                      {fmtUSD(Number(item.amount_usd))}
-                    </td>
+                    <td className="p-3 text-gray-300 text-xs">{item.customer_cedula_rif}</td>
+                    <td className="p-3 text-gray-300 text-xs truncate max-w-[200px]">{item.concept || "—"}</td>
+                    <td className="p-3 text-right text-xs font-bold text-emerald-400">{fmtUSD(Number(item.amount_usd))}</td>
+                    <td className="p-3 text-center"><span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${ist.color}`}>{ist.label}</span></td>
+                    <td className="p-3 text-gray-400 text-xs font-mono">{item.payment_reference || "—"}</td>
                     <td className="p-3 text-center">
-                      <span
-                        className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${ist.color}`}
-                      >
-                        {ist.label}
-                      </span>
-                    </td>
-                    <td className="p-3 text-gray-400 text-xs">
-                      {item.payment_method === "debito_inmediato"
-                        ? "Débito"
-                        : item.payment_method === "transferencia"
-                        ? "Transferencia"
-                        : item.payment_method === "stripe"
-                        ? "Tarjeta USD"
-                        : "—"}
-                    </td>
-                    <td className="p-3 text-gray-400 text-xs font-mono">
-                      {item.payment_reference || "—"}
+                      <a href={`${APP_URL}/pagar/${item.payment_token}`} target="_blank" rel="noopener noreferrer" className="text-[#F46800] hover:text-[#F46800]/80" onClick={(e) => e.stopPropagation()}><ExternalLink size={14} /></a>
                     </td>
                     <td className="p-3 pr-4 text-center">
-                      <a
-                        href={`${APP_URL}/pagar/${item.payment_token}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-[#F46800] hover:text-[#F46800]/80"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <ExternalLink size={14} />
-                      </a>
+                      <div className="flex items-center justify-center gap-1">
+                        {item.status !== "paid" && (
+                          <button onClick={() => { setEditingId(item.id); setEditForm({ customer_name: item.customer_name, customer_email: item.customer_email, customer_phone: item.customer_phone, concept: item.concept, amount_usd: Number(item.amount_usd) }); }}
+                            className="p-1.5 rounded text-gray-500 hover:text-white hover:bg-white/10" title="Editar"><Pencil size={12} /></button>
+                        )}
+                        {item.status !== "paid" && (
+                          <button
+                            disabled={sendingItemId === item.id}
+                            onClick={async () => {
+                              setSendingItemId(item.id);
+                              try {
+                                const res = await fetch("/api/cobranzas/items", { method: "POST", headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({ id: item.id, customer_name: item.customer_name, customer_phone: item.customer_phone, customer_email: item.customer_email, amount_usd: item.amount_usd, concept: item.concept, invoice_number: item.invoice_number, payment_token: item.payment_token }) });
+                                const j = await res.json();
+                                setMessage(`${item.customer_name}: WA=${j.whatsapp || "—"} Email=${j.email || "—"}`);
+                                onRefresh();
+                              } catch { setMessage("Error al enviar"); }
+                              finally { setSendingItemId(null); }
+                            }}
+                            className="p-1.5 rounded text-gray-500 hover:text-[#03318C] hover:bg-[#03318C]/10" title="Enviar individual">
+                            {sendingItemId === item.id ? <RefreshCw size={12} className="animate-spin" /> : <Send size={12} />}
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 );

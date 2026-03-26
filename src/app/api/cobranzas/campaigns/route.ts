@@ -5,7 +5,7 @@ export const dynamic = "force-dynamic";
 import { NextRequest } from "next/server";
 import { apiSuccess, apiError, apiServerError } from "@/lib/api-helpers";
 import { validate, collectionCampaignCreateSchema } from "@/lib/validations/schemas";
-import { getCampaigns, createCampaign, getCampaign, getItemsByCampaign } from "@/lib/dal/collection-campaigns";
+import { getCampaigns, createCampaign, getCampaign, getItemsByCampaign, deleteCampaign } from "@/lib/dal/collection-campaigns";
 
 export async function GET(request: NextRequest) {
   try {
@@ -24,6 +24,25 @@ export async function GET(request: NextRequest) {
 
     const campaigns = await getCampaigns();
     return apiSuccess({ campaigns });
+  } catch (error) {
+    return apiServerError(error);
+  }
+}
+
+export async function DELETE(request: NextRequest) {
+  try {
+    const { searchParams } = request.nextUrl;
+    const id = searchParams.get("id");
+    if (!id) return apiError("id requerido", 400);
+
+    const campaign = await getCampaign(id);
+    if (!campaign) return apiError("Campaña no encontrada", 404);
+    if (!["draft", "cancelled"].includes(campaign.status)) {
+      return apiError("Solo se pueden eliminar campañas en borrador o canceladas", 400);
+    }
+
+    await deleteCampaign(id);
+    return apiSuccess({ deleted: true });
   } catch (error) {
     return apiServerError(error);
   }
