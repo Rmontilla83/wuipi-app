@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import {
   Building2,
@@ -55,9 +55,13 @@ export default function PagarPage() {
   const [transferRef, setTransferRef] = useState("");
   const [confirmingSent, setConfirmingSent] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
+  const [pollingTimedOut, setPollingTimedOut] = useState(false);
+  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Check for callback status
   const callbackStatus = searchParams.get("status");
+  const isPostPayment = callbackStatus === "callback" || callbackStatus === "success";
 
   const fetchData = useCallback(async () => {
     try {
@@ -73,32 +77,46 @@ export default function PagarPage() {
         const bcvJson = await bcvRes.json();
         if (bcvRes.ok) setBcv(bcvJson);
       }
+
+      return json;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error al cargar los datos");
+      return null;
     } finally {
       setLoading(false);
     }
   }, [token]);
 
   useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+    fetchData().then((json) => {
+      // If already paid or no post-payment callback, don't poll
+      if (!isPostPayment || !json || json.status === "paid" || json.status === "conciliating") return;
 
-  // Poll for payment status after callback
-  useEffect(() => {
-    if (!callbackStatus || !data || data.status === "paid") return;
-    const interval = setInterval(async () => {
-      try {
-        const res = await fetch(`/api/cobranzas/${token}`);
-        const json = await res.json();
-        if (json.status === "paid") {
-          setData(json);
-          clearInterval(interval);
-        }
-      } catch { /* ignore */ }
-    }, 5000);
-    return () => clearInterval(interval);
-  }, [callbackStatus, data, token]);
+      // Start polling every 3 seconds
+      pollingRef.current = setInterval(async () => {
+        try {
+          const res = await fetch(`/api/cobranzas/${token}`);
+          const poll = await res.json();
+          if (res.ok && (poll.status === "paid" || poll.status === "conciliating")) {
+            setData(poll);
+            if (pollingRef.current) clearInterval(pollingRef.current);
+            if (timeoutRef.current) clearTimeout(timeoutRef.current);
+          }
+        } catch { /* ignore polling errors */ }
+      }, 3000);
+
+      // Timeout after 30 seconds — stop spinner, show success message
+      timeoutRef.current = setTimeout(() => {
+        if (pollingRef.current) clearInterval(pollingRef.current);
+        setPollingTimedOut(true);
+      }, 30000);
+    });
+
+    return () => {
+      if (pollingRef.current) clearInterval(pollingRef.current);
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    };
+  }, [fetchData, isPostPayment, token]);
 
   const handlePay = async (method: PaymentMethod) => {
     setProcessing(true);
@@ -204,7 +222,30 @@ export default function PagarPage() {
   }
 
   // ---- Waiting for callback ----
-  if (callbackStatus === "callback" || callbackStatus === "success") {
+  if (isPostPayment) {
+    // Polling timed out — show reassuring message instead of infinite spinner
+    if (pollingTimedOut) {
+      return (
+        <PageShell>
+          <div className="max-w-md mx-auto text-center py-12">
+            <div className="relative w-20 h-20 mx-auto mb-6">
+              <div className="relative w-20 h-20 rounded-full bg-emerald-500/10 flex items-center justify-center">
+                <CheckCircle2 className="w-10 h-10 text-emerald-400" />
+              </div>
+            </div>
+            <h2 className="text-white text-xl font-semibold mb-2">Tu pago fue recibido</h2>
+            <p className="text-gray-400 text-sm mb-4">
+              Estamos procesando la confirmación. Esto puede tomar unos minutos.
+            </p>
+            <p className="text-gray-500 text-xs">
+              Recibirás una confirmación por WhatsApp y email. Ya puedes cerrar esta página.
+            </p>
+          </div>
+        </PageShell>
+      );
+    }
+
+    // Still polling — show spinner
     return (
       <PageShell>
         <div className="max-w-md mx-auto text-center py-12">
