@@ -2,7 +2,9 @@
 export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from "next/server";
-import { markItemPaid } from "@/lib/dal/collection-campaigns";
+import { markItemPaid, getItemsByToken } from "@/lib/dal/collection-campaigns";
+import { sendPaymentConfirmationWhatsApp } from "@/lib/notifications/whatsapp";
+import { sendPaymentConfirmationEmail } from "@/lib/notifications/email";
 import Stripe from "stripe";
 
 export async function POST(request: NextRequest) {
@@ -34,10 +36,40 @@ export async function POST(request: NextRequest) {
 
     if (token) {
       try {
+        // Fetch item data before marking paid (for notification details)
+        const item = await getItemsByToken(token);
+
         await markItemPaid(token, {
           payment_method: "stripe",
           payment_reference: session.payment_intent as string || session.id,
         });
+
+        // Send payment confirmation notifications
+        if (item) {
+          const reference = (session.payment_intent as string) || session.id;
+          const amount = `$${Number(item.amount_usd).toFixed(2)} USD`;
+          const concept = item.concept || "Servicio WUIPI";
+
+          if (item.customer_phone) {
+            sendPaymentConfirmationWhatsApp({
+              phone: item.customer_phone,
+              customerName: item.customer_name,
+              reference,
+              amount,
+              concept,
+            }).catch((err) => console.error("[Stripe Webhook] WA confirmation error:", err));
+          }
+
+          if (item.customer_email) {
+            sendPaymentConfirmationEmail({
+              email: item.customer_email,
+              customerName: item.customer_name,
+              reference,
+              amount,
+              concept,
+            }).catch((err) => console.error("[Stripe Webhook] Email confirmation error:", err));
+          }
+        }
       } catch (err) {
         console.error("[Stripe Webhook] Error marking item paid:", err);
       }

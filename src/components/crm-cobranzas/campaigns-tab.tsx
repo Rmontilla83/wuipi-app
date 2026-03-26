@@ -3,9 +3,9 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Card } from "@/components/ui/card";
 import {
-  Plus, Search, RefreshCw, Upload, Send, Download, Eye,
+  Plus, Search, RefreshCw, Upload, Send, Download,
   CheckCircle2, Clock, AlertCircle, FileSpreadsheet, ExternalLink,
-  ChevronLeft, Filter, RotateCcw, Banknote,
+  ChevronLeft, RotateCcw, Calendar,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 
@@ -76,6 +76,48 @@ const itemStatusConfig: Record<string, { label: string; color: string }> = {
   expired: { label: "Expirado", color: "text-orange-400 bg-orange-400/10" },
   conciliating: { label: "Conciliando", color: "text-yellow-400 bg-yellow-400/10" },
 };
+
+// ---------- Cutoff indicator ----------
+const CUTOFF_DAY = 8;
+
+function getCutoffInfo(): { daysLeft: number; label: string; color: string; bgColor: string } {
+  const today = new Date();
+  const currentDay = today.getDate();
+  const currentMonth = today.getMonth();
+  const currentYear = today.getFullYear();
+
+  // Calculate next cutoff date
+  let cutoffDate: Date;
+  if (currentDay <= CUTOFF_DAY) {
+    cutoffDate = new Date(currentYear, currentMonth, CUTOFF_DAY);
+  } else {
+    cutoffDate = new Date(currentYear, currentMonth + 1, CUTOFF_DAY);
+  }
+
+  const diffMs = cutoffDate.getTime() - today.getTime();
+  const daysLeft = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
+
+  let color: string;
+  let bgColor: string;
+  if (daysLeft > 5) {
+    color = "text-emerald-400";
+    bgColor = "bg-emerald-400/10 border-emerald-400/20";
+  } else if (daysLeft >= 3) {
+    color = "text-amber-400";
+    bgColor = "bg-amber-400/10 border-amber-400/20";
+  } else {
+    color = "text-red-400";
+    bgColor = "bg-red-400/10 border-red-400/20";
+  }
+
+  const label = daysLeft === 0
+    ? "Hoy es día de corte"
+    : daysLeft === 1
+    ? "Falta 1 día para el corte"
+    : `Faltan ${daysLeft} días para el corte`;
+
+  return { daysLeft, label, color, bgColor };
+}
 
 // ============================================
 // MAIN COMPONENT
@@ -297,7 +339,7 @@ function CreateCampaignView({
   // --- Odoo cédula normalizer: detect V/J prefix by length ---
   const normalizeCedula = (raw: unknown): string => {
     if (!raw || raw === "NaN" || raw === "nan") return "";
-    let s = String(raw).replace(/[\t\n\r\s]/g, "").trim();
+    const s = String(raw).replace(/[\t\n\r\s]/g, "").trim();
     // Already has prefix
     if (/^[VJEGP]-?/i.test(s)) return s.toUpperCase();
     // Strip non-alphanumeric
@@ -877,6 +919,23 @@ function CampaignDetailView({
           <p className="text-blue-300 text-xs">{message}</p>
         </Card>
       )}
+
+      {/* Cutoff indicator */}
+      {(() => {
+        const cutoff = getCutoffInfo();
+        return (
+          <Card className={`!p-3 border ${cutoff.bgColor} flex items-center gap-3`}>
+            <div className={`flex items-center justify-center w-8 h-8 rounded-full ${cutoff.bgColor}`}>
+              <Calendar size={16} className={cutoff.color} />
+            </div>
+            <div className="flex-1">
+              <p className={`text-sm font-semibold ${cutoff.color}`}>{cutoff.label}</p>
+              <p className="text-xs text-gray-500">Fecha de corte: día {CUTOFF_DAY} de cada mes</p>
+            </div>
+            <div className={`text-2xl font-bold ${cutoff.color}`}>{cutoff.daysLeft}</div>
+          </Card>
+        );
+      })()}
 
       {/* Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">

@@ -20,11 +20,26 @@ interface SendEmailParams {
   invoiceNumber?: string;
   paymentUrl: string;
   isReminder?: boolean;
+  reminderType?: "initial" | "48h" | "urgent";
 }
 
 function buildCollectionEmailHtml(params: SendEmailParams): string {
-  const { customerName, amountUsd, concept, invoiceNumber, paymentUrl, isReminder } = params;
-  const subject = isReminder ? "Recordatorio de pago pendiente" : "Nuevo cobro";
+  const { customerName, amountUsd, concept, invoiceNumber, paymentUrl, reminderType } = params;
+  const isReminder = reminderType === "48h" || reminderType === "urgent" || params.isReminder;
+
+  const subject = reminderType === "urgent"
+    ? "Último aviso — pago pendiente"
+    : isReminder
+    ? "Recordatorio de pago pendiente"
+    : "Tienes un cobro pendiente";
+
+  const urgentBanner = reminderType === "urgent"
+    ? `<tr><td style="background:#fef2f2;padding:12px 40px;border-bottom:1px solid #fecaca;">
+        <p style="color:#dc2626;margin:0;font-size:13px;font-weight:600;text-align:center;">
+          La fecha de corte (día 8) está muy próxima. Realiza tu pago para evitar la suspensión del servicio.
+        </p>
+      </td></tr>`
+    : "";
 
   return `
 <!DOCTYPE html>
@@ -46,10 +61,11 @@ function buildCollectionEmailHtml(params: SendEmailParams): string {
               <p style="color:rgba(255,255,255,0.8);margin:0;font-size:14px;">Telecomunicaciones</p>
             </td>
           </tr>
+          ${urgentBanner}
           <!-- Body -->
           <tr>
             <td style="padding:40px;">
-              <h2 style="color:#060633;margin:0 0 8px;font-size:20px;">${isReminder ? "Recordatorio de pago" : "Tienes un cobro pendiente"}</h2>
+              <h2 style="color:#060633;margin:0 0 8px;font-size:20px;">${subject}</h2>
               <p style="color:#6b7280;margin:0 0 24px;font-size:15px;">Hola ${customerName},</p>
 
               <!-- Amount card -->
@@ -58,8 +74,9 @@ function buildCollectionEmailHtml(params: SendEmailParams): string {
                   <td style="padding:24px;">
                     <p style="color:#6b7280;margin:0 0 4px;font-size:12px;text-transform:uppercase;letter-spacing:0.5px;">Monto a pagar</p>
                     <p style="color:#060633;margin:0 0 16px;font-size:32px;font-weight:700;">$${amountUsd.toFixed(2)} <span style="font-size:16px;color:#6b7280;">USD</span></p>
-                    <p style="color:#374151;margin:0;font-size:14px;">📋 ${concept}</p>
+                    <p style="color:#374151;margin:0;font-size:14px;">${concept}</p>
                     ${invoiceNumber ? `<p style="color:#6b7280;margin:4px 0 0;font-size:13px;">Factura: ${invoiceNumber}</p>` : ""}
+                    <p style="color:#9ca3af;margin:8px 0 0;font-size:12px;">Fecha de corte: día 8 de cada mes</p>
                   </td>
                 </tr>
               </table>
@@ -107,7 +124,12 @@ export async function sendCollectionEmail(params: SendEmailParams): Promise<void
     return;
   }
 
-  const subject = params.isReminder
+  const isUrgent = params.reminderType === "urgent";
+  const isReminder = params.reminderType === "48h" || params.isReminder;
+
+  const subject = isUrgent
+    ? `Último aviso: Cobro pendiente — $${params.amountUsd.toFixed(2)} USD — WUIPI`
+    : isReminder
     ? `Recordatorio: Cobro pendiente — $${params.amountUsd.toFixed(2)} USD`
     : `Cobro pendiente — $${params.amountUsd.toFixed(2)} USD — WUIPI`;
 
@@ -142,9 +164,9 @@ export async function sendPaymentConfirmationEmail(params: {
         </td></tr>
         <tr><td style="padding:40px;text-align:center;">
           <div style="width:64px;height:64px;background:#10b981;border-radius:50%;margin:0 auto 16px;display:flex;align-items:center;justify-content:center;">
-            <span style="color:#fff;font-size:32px;">✓</span>
+            <span style="color:#fff;font-size:32px;">&#10003;</span>
           </div>
-          <h2 style="color:#060633;margin:0 0 8px;">¡Pago recibido!</h2>
+          <h2 style="color:#060633;margin:0 0 8px;">Pago recibido</h2>
           <p style="color:#6b7280;margin:0 0 24px;">Hola ${params.customerName},</p>
           <table width="100%" style="background:#f0fdf4;border-radius:8px;border:1px solid #bbf7d0;margin-bottom:24px;">
             <tr><td style="padding:24px;">
@@ -154,9 +176,13 @@ export async function sendPaymentConfirmationEmail(params: {
               <p style="color:#6b7280;margin:4px 0 0;font-size:13px;">${params.concept}</p>
             </td></tr>
           </table>
+          <p style="color:#374151;margin:0 0 16px;font-size:14px;line-height:1.5;">
+            Ya no es necesaria ninguna acción de tu parte.<br>
+            El registro del pago puede tomar algunas horas, pero tu servicio ya está asegurado.
+          </p>
         </td></tr>
         <tr><td style="background:#f8fafc;padding:24px 40px;border-top:1px solid #e5e7eb;text-align:center;">
-          <p style="color:#9ca3af;margin:0;font-size:12px;">WUIPI Telecomunicaciones — wuipi.net</p>
+          <p style="color:#9ca3af;margin:0;font-size:12px;">WUIPI Telecomunicaciones — wuipi.net<br>Soporte: soporte@wuipi.net</p>
         </td></tr>
       </table>
     </td></tr>
@@ -167,7 +193,7 @@ export async function sendPaymentConfirmationEmail(params: {
   await resend.emails.send({
     from: FROM_EMAIL,
     to: params.email,
-    subject: `✅ Pago confirmado — Ref: ${params.reference} — WUIPI`,
+    subject: `Pago confirmado — Ref: ${params.reference} — WUIPI`,
     html,
   });
 }

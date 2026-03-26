@@ -38,7 +38,7 @@ export async function POST(request: NextRequest) {
 
       const paymentUrl = `${APP_URL}/pagar/${item.payment_token}`;
 
-      // Send WhatsApp
+      // Send WhatsApp — initial send uses "cobranza_pago_pendiente" template
       if (item.customer_phone) {
         const notif = await createNotification({ item_id: item.id, channel: "whatsapp" });
         try {
@@ -48,6 +48,7 @@ export async function POST(request: NextRequest) {
             amountUsd: Number(item.amount_usd),
             concept: item.concept || "Servicio WUIPI",
             paymentUrl,
+            reminderType: "initial",
           });
           await updateNotification(notif.id, { status: "sent", sent_at: new Date().toISOString() });
         } catch (err) {
@@ -68,6 +69,7 @@ export async function POST(request: NextRequest) {
             concept: item.concept || "Servicio WUIPI",
             invoiceNumber: item.invoice_number || undefined,
             paymentUrl,
+            reminderType: "initial",
           });
           await updateNotification(notif.id, { status: "sent", sent_at: new Date().toISOString() });
         } catch (err) {

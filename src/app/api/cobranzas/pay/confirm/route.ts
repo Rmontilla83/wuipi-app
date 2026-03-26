@@ -5,6 +5,8 @@ import { NextRequest } from "next/server";
 import { apiSuccess, apiError, apiServerError } from "@/lib/api-helpers";
 import { validate, collectionConfirmTransferSchema } from "@/lib/validations/schemas";
 import { getItemsByToken, updateItem } from "@/lib/dal/collection-campaigns";
+import { sendPaymentConfirmationWhatsApp } from "@/lib/notifications/whatsapp";
+import { sendPaymentConfirmationEmail } from "@/lib/notifications/email";
 
 export async function POST(request: NextRequest) {
   try {
@@ -23,6 +25,30 @@ export async function POST(request: NextRequest) {
       payment_method: "transferencia",
       payment_reference: reference,
     });
+
+    // Send payment confirmation notifications
+    const amount = `$${Number(item.amount_usd).toFixed(2)} USD`;
+    const concept = item.concept || "Servicio WUIPI";
+
+    if (item.customer_phone) {
+      sendPaymentConfirmationWhatsApp({
+        phone: item.customer_phone,
+        customerName: item.customer_name,
+        reference,
+        amount,
+        concept,
+      }).catch((err) => console.error("[PayConfirm] WA confirmation error:", err));
+    }
+
+    if (item.customer_email) {
+      sendPaymentConfirmationEmail({
+        email: item.customer_email,
+        customerName: item.customer_name,
+        reference,
+        amount,
+        concept,
+      }).catch((err) => console.error("[PayConfirm] Email confirmation error:", err));
+    }
 
     return apiSuccess({
       status: "conciliating",

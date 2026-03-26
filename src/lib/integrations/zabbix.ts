@@ -476,7 +476,7 @@ export async function getInfraProblems(): Promise<InfraProblem[]> {
 
   // Resolve host names for problems via their trigger objectids
   const triggerIds = [...new Set(problems.map((p) => p.objectid).filter(Boolean))];
-  let triggerHostMap = new Map<string, { hostid: string; name: string }>();
+  const triggerHostMap = new Map<string, { hostid: string; name: string }>();
 
   if (triggerIds.length > 0) {
     try {
