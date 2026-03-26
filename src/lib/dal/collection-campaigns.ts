@@ -60,7 +60,7 @@ export interface CollectionNotification {
 // ---------- Token generation ----------
 
 export function generateCollectionToken(): string {
-  return `wpy_${crypto.randomBytes(8).toString("hex")}`;
+  return `wpy_${crypto.randomBytes(32).toString("hex")}`;
 }
 
 // ---------- Campaigns ----------

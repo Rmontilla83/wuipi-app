@@ -259,13 +259,13 @@ export const collectionUploadSchema = z.object({
 });
 
 export const collectionPaySchema = z.object({
-  token: z.string().min(1, "Token requerido"),
+  token: z.string().regex(/^wpy_[a-f0-9]{16,64}$/, "Token de pago inválido"),
   method: z.enum(["debito_inmediato", "transferencia", "stripe"], { message: "Método de pago inválido" }),
 });
 
 export const collectionConfirmTransferSchema = z.object({
-  token: z.string().min(1, "Token requerido"),
-  reference: z.string().min(1, "Referencia de transferencia requerida"),
+  token: z.string().regex(/^wpy_[a-f0-9]{16,64}$/, "Token de pago inválido"),
+  reference: z.string().min(1, "Referencia requerida").max(50, "Referencia muy larga"),
 });
 
 // ============================================

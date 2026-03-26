@@ -20,13 +20,16 @@ export async function POST(request: NextRequest) {
   const sig = request.headers.get("stripe-signature");
 
   if (!sig) {
+    console.error("[Stripe Webhook] Missing stripe-signature header");
     return NextResponse.json({ error: "Missing signature" }, { status: 400 });
   }
 
   let event: Stripe.Event;
   try {
+    // constructEvent validates signature + timestamp (rejects events > 5min old by default)
     event = stripe.webhooks.constructEvent(body, sig, webhookSecret);
-  } catch {
+  } catch (err) {
+    console.error("[Stripe Webhook] Signature verification failed:", err instanceof Error ? err.message : err);
     return NextResponse.json({ error: "Invalid signature" }, { status: 400 });
   }
 
@@ -36,8 +39,13 @@ export async function POST(request: NextRequest) {
 
     if (token) {
       try {
-        // Fetch item data before marking paid (for notification details)
         const item = await getItemsByToken(token);
+
+        // Idempotency: skip if already paid
+        if (item?.status === "paid") {
+          console.warn("[Stripe Webhook] Item already paid, skipping:", token);
+          return NextResponse.json({ received: true });
+        }
 
         await markItemPaid(token, {
           payment_method: "stripe",
@@ -71,7 +79,7 @@ export async function POST(request: NextRequest) {
           }
         }
       } catch (err) {
-        console.error("[Stripe Webhook] Error marking item paid:", err);
+        console.error("[Stripe Webhook] Error processing payment:", err);
       }
     }
   }

@@ -1,12 +1,13 @@
 // POST /api/cobranzas/pay — Inicia pago (genera URL Mercantil o Stripe session)
 export const dynamic = "force-dynamic";
 
-import { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { apiSuccess, apiError, apiServerError } from "@/lib/api-helpers";
 import { validate, collectionPaySchema } from "@/lib/validations/schemas";
 import { getItemsByToken, updateItem } from "@/lib/dal/collection-campaigns";
 import { fetchBCVRate, convertUsdToBs } from "@/lib/integrations/bcv";
 import { MercantilSDK } from "@/lib/mercantil";
+import { checkRateLimit, getClientIP } from "@/lib/utils/rate-limit";
 import Stripe from "stripe";
 
 const FALLBACK_URL = "https://api.wuipi.net";
@@ -20,6 +21,13 @@ function getAppUrl(): string {
 
 export async function POST(request: NextRequest) {
   try {
+    // Rate limit: 10 requests per minute per IP
+    const ip = getClientIP(request.headers);
+    const rl = checkRateLimit(`pay:${ip}`, 10, 60_000);
+    if (!rl.allowed) {
+      return NextResponse.json({ error: "Demasiadas solicitudes, intenta en un minuto" }, { status: 429 });
+    }
+
     const body = await request.json();
     const parsed = validate(collectionPaySchema, body);
     if (!parsed.success) return apiError(parsed.error, 400);
