@@ -361,10 +361,7 @@ function PageShell({ children }: { children: React.ReactNode }) {
       <header className="border-b border-white/5 bg-[#0a0a1a]/80 backdrop-blur-xl sticky top-0 z-50">
         <div className="max-w-lg mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <img src="/img/wuipi-logo.webp" alt="WUIPI" className="h-9 w-9 object-contain" />
-            <span className="text-white font-semibold text-base">Wuipi</span>
-            <div className="h-4 w-px bg-white/10" />
-            <p className="text-gray-400 text-xs">Portal de pago</p>
+            <img src="/img/wuipi-logo.webp" alt="WUIPI" className="h-10 object-contain" />
           </div>
           <div className="flex items-center gap-1 text-gray-600 text-[10px]">
             <Shield className="w-3 h-3" />
