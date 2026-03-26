@@ -340,7 +340,7 @@ export default function PagarPage() {
           />
         </div>
 
-        {/* Action area */}
+        {/* Action area — sticky on mobile */}
         {selectedMethod === "transferencia" ? (
           <TransferDetails
             amountBss={amountBss}
@@ -354,38 +354,41 @@ export default function PagarPage() {
             onCopy={copyToClipboard}
           />
         ) : selectedMethod ? (
-          <button
-            onClick={() => handlePay(selectedMethod)}
-            disabled={processing}
-            className="w-full flex items-center justify-center gap-2 py-4 rounded-xl text-white font-semibold text-base transition-all duration-200 shadow-lg hover:shadow-xl active:scale-[0.98]"
-            style={{
-              background:
-                selectedMethod === "debito_inmediato"
-                  ? "linear-gradient(135deg, #03318C, #060633)"
-                  : "linear-gradient(135deg, #635BFF, #4B44D4)",
-            }}
-          >
-            {processing ? (
-              <Loader2 className="w-5 h-5 animate-spin" />
-            ) : (
-              <>
-                Pagar ahora
-                <ArrowRight className="w-5 h-5" />
-              </>
-            )}
-          </button>
+          <div className="sticky bottom-0 left-0 right-0 bg-[#0a0a1a]/95 backdrop-blur-lg py-4 -mx-4 px-4 border-t border-white/5 sm:static sm:bg-transparent sm:backdrop-blur-none sm:py-0 sm:mx-0 sm:px-0 sm:border-0">
+            <button
+              onClick={() => handlePay(selectedMethod)}
+              disabled={processing}
+              aria-label={`Pagar $${Number(data.amount_usd).toFixed(2)} USD`}
+              className="w-full flex items-center justify-center gap-2 py-4 rounded-xl text-white font-semibold text-base transition-all duration-200 shadow-lg hover:shadow-xl active:scale-[0.98]"
+              style={{
+                background:
+                  selectedMethod === "debito_inmediato"
+                    ? "linear-gradient(135deg, #03318C, #060633)"
+                    : "linear-gradient(135deg, #635BFF, #4B44D4)",
+              }}
+            >
+              {processing ? (
+                <Loader2 className="w-5 h-5 animate-spin" />
+              ) : (
+                <>
+                  Pagar ahora
+                  <ArrowRight className="w-5 h-5" />
+                </>
+              )}
+            </button>
+          </div>
         ) : null}
 
         {/* Error */}
         {error && (
-          <div className="mt-4 p-3 rounded-xl bg-red-500/10 border border-red-500/20">
+          <div className="mt-4 p-3 rounded-xl bg-red-500/10 border border-red-500/20" role="alert">
             <p className="text-red-400 text-xs text-center">{error}</p>
           </div>
         )}
 
         {/* Security badge */}
         <div className="flex items-center justify-center gap-2 mt-6 text-gray-500">
-          <Shield className="w-3.5 h-3.5" />
+          <Shield className="w-3.5 h-3.5" aria-hidden="true" />
           <span className="text-xs">Pago seguro y encriptado</span>
         </div>
       </div>
