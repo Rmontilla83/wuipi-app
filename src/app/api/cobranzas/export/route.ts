@@ -1,4 +1,4 @@
-// POST /api/cobranzas/export — Genera Excel para Odoo 18
+// POST /api/cobranzas/export — Genera Excel para Odoo 18 (Plantilla Asiento Contable)
 export const dynamic = "force-dynamic";
 
 import { NextRequest } from "next/server";
@@ -15,54 +15,57 @@ export async function POST(request: NextRequest) {
     if (!campaign) return apiError("Campaña no encontrada", 404);
 
     const items = await getItemsByCampaign(campaign_id);
-    // Export all items (paid + conciliating) for Odoo reconciliation
-    const exportItems = items.filter((i) => i.status === "paid" || i.status === "conciliating");
+    const paidItems = items.filter((i) => i.status === "paid");
 
-    if (exportItems.length === 0) {
-      return apiError("No hay pagos registrados para exportar", 400);
+    if (paidItems.length === 0) {
+      return apiError("No hay pagos confirmados para exportar", 400);
     }
 
-    // Build rows for Odoo 18 accounting import
-    const rows = exportItems.map((item) => ({
-      Fecha: item.paid_at
-        ? new Date(item.paid_at).toISOString().split("T")[0]
-        : "",
-      Referencia: item.payment_reference || "",
-      Cliente: item.customer_name,
-      "RIF/Cédula": item.customer_cedula_rif,
-      "Monto USD": Number(item.amount_usd),
-      "Monto Bs.": item.amount_bss ? Number(item.amount_bss) : "",
-      "Tasa BCV": item.bcv_rate ? Number(item.bcv_rate) : "",
-      "Método de pago":
-        item.payment_method === "debito_inmediato"
-          ? "Débito Inmediato"
-          : item.payment_method === "transferencia"
-          ? "Transferencia Bancaria"
-          : item.payment_method === "stripe"
-          ? "Tarjeta Internacional"
-          : "",
-      "Referencia bancaria": item.mercantil_reference || item.payment_reference || "",
-      Estado: item.status === "paid" ? "Pagado" : item.status,
-      "Número de factura": item.invoice_number || "",
-    }));
+    // Build rows — Odoo 18 Asiento Contable template
+    const rows = paidItems.map((item) => {
+      const isStripe = item.payment_method === "stripe";
+      const isBs = item.payment_method === "debito_inmediato" || item.payment_method === "transferencia";
+
+      return {
+        date: item.paid_at
+          ? new Date(item.paid_at).toISOString().split("T")[0]
+          : new Date().toISOString().split("T")[0],
+        journal_id: isStripe ? "Stripe USD" : "Banco Mercantil 3031",
+        Memo: item.mercantil_reference || item.payment_reference || item.stripe_session_id || "",
+        amount: isStripe
+          ? Number(item.amount_usd)
+          : (item.amount_bss ? Number(item.amount_bss) : Number(item.amount_usd)),
+        state: "Borrador",
+        Moneda: isStripe ? "USD" : "VED",
+        "Cliente/proveedor": item.customer_name,
+        "Tasa de Imputación": isBs && item.bcv_rate ? Number(item.bcv_rate) : "",
+      };
+    });
 
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.json_to_sheet(rows);
 
-    // Auto-size columns
-    const colWidths = Object.keys(rows[0] || {}).map((key) => ({
-      wch: Math.max(key.length, 15),
-    }));
-    ws["!cols"] = colWidths;
+    // Column widths
+    ws["!cols"] = [
+      { wch: 12 },  // date
+      { wch: 24 },  // journal_id
+      { wch: 30 },  // Memo
+      { wch: 14 },  // amount
+      { wch: 10 },  // state
+      { wch: 8 },   // Moneda
+      { wch: 35 },  // Cliente/proveedor
+      { wch: 18 },  // Tasa de Imputación
+    ];
 
-    XLSX.utils.book_append_sheet(wb, ws, "Pagos");
+    XLSX.utils.book_append_sheet(wb, ws, "Asiento Contable");
 
     const buffer = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
+    const today = new Date().toISOString().split("T")[0];
 
     return new Response(buffer, {
       headers: {
         "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "Content-Disposition": `attachment; filename="cobranzas-${campaign.name.replace(/\s+/g, "-")}-${new Date().toISOString().split("T")[0]}.xlsx"`,
+        "Content-Disposition": `attachment; filename="Plantilla_Bs_V18_cobranzas_${today}.xlsx"`,
       },
     });
   } catch (error) {
