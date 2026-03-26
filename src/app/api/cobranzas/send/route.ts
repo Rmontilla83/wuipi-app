@@ -16,16 +16,16 @@ import { sendCollectionEmail } from "@/lib/notifications/email";
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://api.wuipi.net";
 
+interface ItemResult {
+  name: string;
+  phone: string | null;
+  email: string | null;
+  whatsapp: { status: number | string; ok: boolean; response: unknown; normalizedPhone?: string; template?: string; lang?: string; fallback?: unknown } | null;
+  email_result: { status: string; response?: unknown; error?: string } | null;
+}
+
 export async function POST(request: NextRequest) {
   try {
-    // ── Env var diagnostic ──
-    console.log("[send] === ENV CHECK ===");
-    console.log("[send] WHATSAPP_PHONE_NUMBER_ID:", process.env.WHATSAPP_PHONE_NUMBER_ID?.substring(0, 6) ?? "UNDEFINED");
-    console.log("[send] WHATSAPP_ACCESS_TOKEN:", process.env.WHATSAPP_ACCESS_TOKEN?.substring(0, 10) ?? "UNDEFINED");
-    console.log("[send] RESEND_API_KEY:", process.env.RESEND_API_KEY?.substring(0, 10) ?? "UNDEFINED");
-    console.log("[send] NEXT_PUBLIC_APP_URL:", process.env.NEXT_PUBLIC_APP_URL ?? "UNDEFINED");
-    console.log("[send] APP_URL resolved:", APP_URL);
-
     const { campaign_id } = await request.json();
     if (!campaign_id) return apiError("campaign_id requerido", 400);
 
@@ -35,32 +35,37 @@ export async function POST(request: NextRequest) {
       return apiError("La campaña no está en estado válido para enviar", 400);
     }
 
-    // Update campaign to sending
     await updateCampaign(campaign_id, { status: "sending" });
 
     const items = await getItemsByCampaign(campaign_id);
-    const sendable = items.filter((i) => i.status === "pending" || i.status === "sent");
-    console.log("[send] Total items:", items.length, "| Sendable (pending/sent):", sendable.length);
-
-    const results = { sent: 0, failed: 0, errors: [] as string[] };
+    let sent = 0;
+    let failed = 0;
+    const itemResults: ItemResult[] = [];
+    const env = {
+      WHATSAPP_PHONE_NUMBER_ID: process.env.WHATSAPP_PHONE_NUMBER_ID?.substring(0, 6) ?? "MISSING",
+      WHATSAPP_ACCESS_TOKEN: process.env.WHATSAPP_ACCESS_TOKEN ? `${process.env.WHATSAPP_ACCESS_TOKEN.substring(0, 10)}...` : "MISSING",
+      WHATSAPP_TEMPLATE_LANG: process.env.WHATSAPP_TEMPLATE_LANG ?? "default(es)",
+      RESEND_API_KEY: process.env.RESEND_API_KEY ? `${process.env.RESEND_API_KEY.substring(0, 10)}...` : "MISSING",
+      APP_URL,
+    };
 
     for (const item of items) {
-      if (item.status !== "pending" && item.status !== "sent") {
-        console.log(`[send] SKIP item ${item.id} — status=${item.status}`);
-        continue;
-      }
+      if (item.status !== "pending" && item.status !== "sent") continue;
 
       const paymentUrl = `${APP_URL}/pagar/${item.payment_token}`;
-      console.log(`[send] ── Item ${item.id} ──`);
-      console.log(`[send]   name=${item.customer_name} phone=${item.customer_phone} email=${item.customer_email}`);
-      console.log(`[send]   amount=$${item.amount_usd} status=${item.status} token=${item.payment_token}`);
+      const result: ItemResult = {
+        name: item.customer_name,
+        phone: item.customer_phone,
+        email: item.customer_email,
+        whatsapp: null,
+        email_result: null,
+      };
 
-      // Send WhatsApp — initial send uses "cobranza_pago_pendiente" template
+      // ── WhatsApp ──
       if (item.customer_phone) {
-        console.log(`[send]   WA: sending to ${item.customer_phone}...`);
         const notif = await createNotification({ item_id: item.id, channel: "whatsapp" });
         try {
-          await sendCollectionWhatsApp({
+          const waResult = await sendCollectionWhatsApp({
             phone: item.customer_phone,
             customerName: item.customer_name,
             amountUsd: Number(item.amount_usd),
@@ -68,21 +73,33 @@ export async function POST(request: NextRequest) {
             paymentUrl,
             reminderType: "initial",
           });
-          await updateNotification(notif.id, { status: "sent", sent_at: new Date().toISOString() });
-          console.log(`[send]   WA: SUCCESS`);
+          result.whatsapp = {
+            status: waResult.status,
+            ok: waResult.ok,
+            response: waResult.response,
+            normalizedPhone: waResult.normalizedPhone,
+            template: waResult.template,
+            lang: waResult.lang,
+            fallback: waResult.fallback ?? null,
+          };
+          await updateNotification(notif.id, {
+            status: waResult.ok ? "sent" : "failed",
+            sent_at: waResult.ok ? new Date().toISOString() : undefined,
+            error_message: waResult.ok ? undefined : JSON.stringify(waResult.response).substring(0, 500),
+          });
+          if (!waResult.ok) failed++;
         } catch (err) {
           const msg = err instanceof Error ? err.message : "Error desconocido";
-          await updateNotification(notif.id, { status: "failed", error_message: msg });
-          results.errors.push(`WhatsApp ${item.customer_phone}: ${msg}`);
-          console.error(`[send]   WA: FAILED — ${msg}`);
+          result.whatsapp = { status: "exception", ok: false, response: msg };
+          await updateNotification(notif.id, { status: "failed", error_message: msg.substring(0, 500) });
+          failed++;
         }
       } else {
-        console.log(`[send]   WA: SKIPPED — no phone`);
+        result.whatsapp = { status: "skipped", ok: false, response: "no phone number" };
       }
 
-      // Send Email
+      // ── Email ──
       if (item.customer_email) {
-        console.log(`[send]   Email: sending to ${item.customer_email}...`);
         const notif = await createNotification({ item_id: item.id, channel: "email" });
         try {
           await sendCollectionEmail({
@@ -94,31 +111,30 @@ export async function POST(request: NextRequest) {
             paymentUrl,
             reminderType: "initial",
           });
+          result.email_result = { status: "sent" };
           await updateNotification(notif.id, { status: "sent", sent_at: new Date().toISOString() });
-          console.log(`[send]   Email: SUCCESS`);
         } catch (err) {
           const msg = err instanceof Error ? err.message : "Error desconocido";
-          await updateNotification(notif.id, { status: "failed", error_message: msg });
-          results.errors.push(`Email ${item.customer_email}: ${msg}`);
-          console.error(`[send]   Email: FAILED — ${msg}`);
+          result.email_result = { status: "failed", error: msg };
+          await updateNotification(notif.id, { status: "failed", error_message: msg.substring(0, 500) });
         }
       } else {
-        console.log(`[send]   Email: SKIPPED — no email`);
+        result.email_result = { status: "skipped" };
       }
 
-      // Mark item as sent
       await updateItem(item.id, { status: "sent" });
-      results.sent++;
+      sent++;
+      itemResults.push(result);
     }
 
-    // Update campaign to active
     await updateCampaign(campaign_id, { status: "active" });
-
-    console.log("[send] === DONE ===", JSON.stringify(results));
 
     return apiSuccess({
       campaign_id,
-      ...results,
+      sent,
+      failed,
+      env,
+      results: itemResults,
     });
   } catch (error) {
     console.error("[send] UNHANDLED ERROR:", error);

@@ -23,10 +23,21 @@ interface TemplateComponent {
   parameters: Array<{ type: "text"; text: string }>;
 }
 
+export interface WhatsAppResult {
+  ok: boolean;
+  status: number;
+  phone: string;
+  normalizedPhone: string;
+  template: string;
+  lang: string;
+  phoneNumberId: string;
+  response: Record<string, unknown>;
+  fallback?: { ok: boolean; status: number; response: Record<string, unknown> };
+}
+
 // ---------- Phone normalization ----------
 
 function normalizePhone(phone: string): string {
-  // Strip everything except digits
   let digits = phone.replace(/\D/g, "");
 
   // Venezuelan local format "0412..." → international "58412..."
@@ -63,7 +74,18 @@ async function sendWhatsApp(
   templateName: TemplateName,
   components: TemplateComponent[],
   fallbackText: string
-): Promise<void> {
+): Promise<WhatsAppResult> {
+  const result: WhatsAppResult = {
+    ok: false,
+    status: 0,
+    phone: "",
+    normalizedPhone: phone,
+    template: templateName,
+    lang: TEMPLATE_LANG,
+    phoneNumberId: PHONE_NUMBER_ID,
+    response: {},
+  };
+
   // ── 1. Try template message ──
   const templatePayload = {
     messaging_product: "whatsapp",
@@ -76,24 +98,18 @@ async function sendWhatsApp(
     },
   };
 
-  console.log(`[WA] SENDING template="${templateName}" lang="${TEMPLATE_LANG}" to=${phone} phone_id=${PHONE_NUMBER_ID}`);
-  console.log(`[WA] REQUEST: ${JSON.stringify(templatePayload)}`);
-
   const res = await callMetaAPI(templatePayload);
+  result.status = res.status;
+  result.response = res.body;
+  result.ok = res.ok;
 
-  console.log(`[WA] META RESPONSE status=${res.status}: ${JSON.stringify(res.body)}`);
-
-  if (res.ok) return; // Success
+  if (res.ok) return result;
 
   // ── 2. Template failed — check if we should fallback to text ──
   const errCode = res.body?.error && (res.body.error as Record<string, unknown>).code;
-  const errMsg = res.body?.error && (res.body.error as Record<string, unknown>).message;
-  console.log(`[WA] TEMPLATE FAILED code=${errCode} message=${errMsg}`);
 
-  // Template not found / not approved / parameter mismatch
   const templateErrors = [132000, 132001, 132005, 132007, 132012, 132015];
   if (templateErrors.includes(Number(errCode))) {
-    console.log(`[WA] FALLBACK to text message (24h window required)`);
     const textPayload = {
       messaging_product: "whatsapp",
       to: phone,
@@ -101,17 +117,17 @@ async function sendWhatsApp(
       text: { body: fallbackText },
     };
 
-    console.log(`[WA] SENDING text fallback to=${phone}`);
     const fbRes = await callMetaAPI(textPayload);
-    console.log(`[WA] FALLBACK RESPONSE status=${fbRes.status}: ${JSON.stringify(fbRes.body)}`);
+    result.fallback = { ok: fbRes.ok, status: fbRes.status, response: fbRes.body };
+    result.ok = fbRes.ok;
 
     if (!fbRes.ok) {
       throw new Error(`WhatsApp text fallback failed ${fbRes.status}: ${JSON.stringify(fbRes.body)}`);
     }
-    return;
+    return result;
   }
 
-  // Non-template error — throw directly
+  // Non-template error — throw but still include result
   throw new Error(`WhatsApp API error ${res.status}: ${JSON.stringify(res.body)}`);
 }
 
@@ -126,18 +142,19 @@ export interface SendCollectionWhatsAppParams {
   reminderType?: "initial" | "48h" | "urgent";
 }
 
-export async function sendCollectionWhatsApp(params: SendCollectionWhatsAppParams): Promise<void> {
+export async function sendCollectionWhatsApp(params: SendCollectionWhatsAppParams): Promise<WhatsAppResult> {
   const { phone, customerName, amountUsd, concept, paymentUrl, reminderType } = params;
 
   if (!ACCESS_TOKEN) {
-    console.warn("[WA] SKIP — WHATSAPP_ACCESS_TOKEN is empty");
-    return;
+    return {
+      ok: false, status: 0, phone, normalizedPhone: "",
+      template: "", lang: TEMPLATE_LANG, phoneNumberId: PHONE_NUMBER_ID,
+      response: { _skip: "WHATSAPP_ACCESS_TOKEN is empty" },
+    };
   }
 
   const normalizedPhone = normalizePhone(phone);
   const montoStr = `$${amountUsd.toFixed(2)} USD`;
-
-  console.log(`[WA] INPUT phone="${phone}" → normalized="${normalizedPhone}" name="${customerName}" type=${reminderType ?? "initial"}`);
 
   let templateName: TemplateName;
   let components: TemplateComponent[];
@@ -205,7 +222,9 @@ export async function sendCollectionWhatsApp(params: SendCollectionWhatsAppParam
       break;
   }
 
-  await sendWhatsApp(normalizedPhone, templateName, components, fallbackText);
+  const result = await sendWhatsApp(normalizedPhone, templateName, components, fallbackText);
+  result.phone = phone;
+  return result;
 }
 
 export async function sendPaymentConfirmationWhatsApp(params: {

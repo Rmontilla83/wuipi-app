@@ -756,6 +756,8 @@ function CampaignDetailView({
   const [filterStatus, setFilterStatus] = useState("all");
   const [search, setSearch] = useState("");
   const [message, setMessage] = useState("");
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [sendResults, setSendResults] = useState<any>(null);
 
   const st = statusConfig[campaign.status] || statusConfig.draft;
   const pct =
@@ -779,6 +781,7 @@ function CampaignDetailView({
     if (!confirm("¿Enviar cobros por WhatsApp y Email a todos los clientes pendientes?")) return;
     setSending(true);
     setMessage("");
+    setSendResults(null);
     try {
       const res = await fetch("/api/cobranzas/send", {
         method: "POST",
@@ -788,6 +791,7 @@ function CampaignDetailView({
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Error");
       setMessage(`Enviados: ${json.sent} | Fallidos: ${json.failed}`);
+      setSendResults(json);
       onRefresh();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Error";
@@ -917,6 +921,81 @@ function CampaignDetailView({
       {message && (
         <Card className="!p-3 border-blue-500/30 bg-blue-500/5">
           <p className="text-blue-300 text-xs">{message}</p>
+        </Card>
+      )}
+
+      {/* Send results detail panel */}
+      {sendResults && (
+        <Card className="!p-0 border-amber-500/30 bg-amber-500/5 overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-2 border-b border-amber-500/20">
+            <p className="text-amber-300 text-xs font-semibold">
+              Resultado del envío — {sendResults.sent} enviados, {sendResults.failed} fallidos
+            </p>
+            <button
+              onClick={() => setSendResults(null)}
+              className="text-gray-500 hover:text-white text-xs"
+            >
+              Cerrar
+            </button>
+          </div>
+
+          {/* Env vars */}
+          {sendResults.env && (
+            <div className="px-4 py-2 border-b border-amber-500/10 bg-black/20">
+              <p className="text-[10px] text-gray-500 font-mono">
+                WA_PHONE_ID: {sendResults.env.WHATSAPP_PHONE_NUMBER_ID} |
+                WA_TOKEN: {sendResults.env.WHATSAPP_ACCESS_TOKEN} |
+                WA_LANG: {sendResults.env.WHATSAPP_TEMPLATE_LANG} |
+                RESEND: {sendResults.env.RESEND_API_KEY} |
+                URL: {sendResults.env.APP_URL}
+              </p>
+            </div>
+          )}
+
+          {/* Per-item results */}
+          <div className="max-h-[400px] overflow-y-auto">
+            {sendResults.results?.map((r: {
+              name: string;
+              phone: string | null;
+              email: string | null;
+              whatsapp: { ok: boolean; status: number | string; normalizedPhone?: string; template?: string; lang?: string; response: unknown; fallback?: unknown } | null;
+              email_result: { status: string; error?: string } | null;
+            }, i: number) => (
+              <div key={i} className="px-4 py-2 border-b border-wuipi-border/30 text-xs">
+                <p className="text-white font-medium">{r.name}</p>
+
+                {/* WhatsApp */}
+                <div className="mt-1 flex items-start gap-2">
+                  <span className={`font-semibold shrink-0 ${r.whatsapp?.ok ? "text-emerald-400" : "text-red-400"}`}>
+                    WA {r.whatsapp?.ok ? "OK" : "FAIL"}
+                  </span>
+                  <span className="text-gray-400 font-mono break-all">
+                    phone={r.phone} → {r.whatsapp?.normalizedPhone || "?"} |
+                    tpl={r.whatsapp?.template || "?"} lang={r.whatsapp?.lang || "?"} |
+                    status={String(r.whatsapp?.status || "?")}
+                  </span>
+                </div>
+                <pre className="mt-0.5 text-[10px] text-gray-500 font-mono bg-black/20 rounded p-1 overflow-x-auto whitespace-pre-wrap break-all max-h-24"
+                  dangerouslySetInnerHTML={{ __html: JSON.stringify(r.whatsapp?.response ?? null, null, 2) }}
+                />
+                {r.whatsapp?.fallback ? (
+                  <pre className="mt-0.5 text-[10px] text-amber-500/80 font-mono bg-black/20 rounded p-1 overflow-x-auto whitespace-pre-wrap break-all max-h-24"
+                    dangerouslySetInnerHTML={{ __html: "FALLBACK: " + JSON.stringify(r.whatsapp.fallback, null, 2) }}
+                  />
+                ) : null}
+
+                {/* Email */}
+                <div className="mt-1 flex items-center gap-2">
+                  <span className={`font-semibold ${r.email_result?.status === "sent" ? "text-emerald-400" : r.email_result?.status === "skipped" ? "text-gray-500" : "text-red-400"}`}>
+                    Email {r.email_result?.status || "?"}
+                  </span>
+                  {r.email_result?.error && (
+                    <span className="text-red-300 font-mono">{r.email_result.error}</span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
         </Card>
       )}
 
