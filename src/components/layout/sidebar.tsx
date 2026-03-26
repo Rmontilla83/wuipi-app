@@ -110,14 +110,20 @@ export function Sidebar({ user }: SidebarProps) {
       {/* Logo */}
       <div
         className={cn(
-          "flex items-center border-b border-wuipi-border shrink-0",
-          collapsed ? "justify-center px-2 h-16" : "px-4 h-20"
+          "flex items-center border-b border-wuipi-border h-16 shrink-0",
+          collapsed ? "justify-center px-2" : "px-5"
         )}
       >
-        {collapsed ? (
-          <img src="/img/wuipi-logo.webp" alt="WUIPI" className="w-12 h-12 object-contain shrink-0" />
-        ) : (
-          <img src="/img/wuipi-logo.webp" alt="WUIPI" className="w-full max-w-[200px] object-contain" />
+        <img
+          src="/img/wuipi-logo.webp"
+          alt="WUIPI"
+          className={cn(
+            "object-contain shrink-0",
+            collapsed ? "w-10 h-10" : "w-[42px] h-[42px]"
+          )}
+        />
+        {!collapsed && (
+          <span className="ml-3 text-xl font-bold text-white tracking-tight">Wuipi</span>
         )}
       </div>
 
