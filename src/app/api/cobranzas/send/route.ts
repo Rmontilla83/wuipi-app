@@ -18,6 +18,14 @@ const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://api.wuipi.net";
 
 export async function POST(request: NextRequest) {
   try {
+    // ── Env var diagnostic ──
+    console.log("[send] === ENV CHECK ===");
+    console.log("[send] WHATSAPP_PHONE_NUMBER_ID:", process.env.WHATSAPP_PHONE_NUMBER_ID?.substring(0, 6) ?? "UNDEFINED");
+    console.log("[send] WHATSAPP_ACCESS_TOKEN:", process.env.WHATSAPP_ACCESS_TOKEN?.substring(0, 10) ?? "UNDEFINED");
+    console.log("[send] RESEND_API_KEY:", process.env.RESEND_API_KEY?.substring(0, 10) ?? "UNDEFINED");
+    console.log("[send] NEXT_PUBLIC_APP_URL:", process.env.NEXT_PUBLIC_APP_URL ?? "UNDEFINED");
+    console.log("[send] APP_URL resolved:", APP_URL);
+
     const { campaign_id } = await request.json();
     if (!campaign_id) return apiError("campaign_id requerido", 400);
 
@@ -31,15 +39,25 @@ export async function POST(request: NextRequest) {
     await updateCampaign(campaign_id, { status: "sending" });
 
     const items = await getItemsByCampaign(campaign_id);
+    const sendable = items.filter((i) => i.status === "pending" || i.status === "sent");
+    console.log("[send] Total items:", items.length, "| Sendable (pending/sent):", sendable.length);
+
     const results = { sent: 0, failed: 0, errors: [] as string[] };
 
     for (const item of items) {
-      if (item.status !== "pending" && item.status !== "sent") continue;
+      if (item.status !== "pending" && item.status !== "sent") {
+        console.log(`[send] SKIP item ${item.id} — status=${item.status}`);
+        continue;
+      }
 
       const paymentUrl = `${APP_URL}/pagar/${item.payment_token}`;
+      console.log(`[send] ── Item ${item.id} ──`);
+      console.log(`[send]   name=${item.customer_name} phone=${item.customer_phone} email=${item.customer_email}`);
+      console.log(`[send]   amount=$${item.amount_usd} status=${item.status} token=${item.payment_token}`);
 
       // Send WhatsApp — initial send uses "cobranza_pago_pendiente" template
       if (item.customer_phone) {
+        console.log(`[send]   WA: sending to ${item.customer_phone}...`);
         const notif = await createNotification({ item_id: item.id, channel: "whatsapp" });
         try {
           await sendCollectionWhatsApp({
@@ -51,15 +69,20 @@ export async function POST(request: NextRequest) {
             reminderType: "initial",
           });
           await updateNotification(notif.id, { status: "sent", sent_at: new Date().toISOString() });
+          console.log(`[send]   WA: SUCCESS`);
         } catch (err) {
           const msg = err instanceof Error ? err.message : "Error desconocido";
           await updateNotification(notif.id, { status: "failed", error_message: msg });
           results.errors.push(`WhatsApp ${item.customer_phone}: ${msg}`);
+          console.error(`[send]   WA: FAILED — ${msg}`);
         }
+      } else {
+        console.log(`[send]   WA: SKIPPED — no phone`);
       }
 
       // Send Email
       if (item.customer_email) {
+        console.log(`[send]   Email: sending to ${item.customer_email}...`);
         const notif = await createNotification({ item_id: item.id, channel: "email" });
         try {
           await sendCollectionEmail({
@@ -72,11 +95,15 @@ export async function POST(request: NextRequest) {
             reminderType: "initial",
           });
           await updateNotification(notif.id, { status: "sent", sent_at: new Date().toISOString() });
+          console.log(`[send]   Email: SUCCESS`);
         } catch (err) {
           const msg = err instanceof Error ? err.message : "Error desconocido";
           await updateNotification(notif.id, { status: "failed", error_message: msg });
           results.errors.push(`Email ${item.customer_email}: ${msg}`);
+          console.error(`[send]   Email: FAILED — ${msg}`);
         }
+      } else {
+        console.log(`[send]   Email: SKIPPED — no email`);
       }
 
       // Mark item as sent
@@ -87,11 +114,14 @@ export async function POST(request: NextRequest) {
     // Update campaign to active
     await updateCampaign(campaign_id, { status: "active" });
 
+    console.log("[send] === DONE ===", JSON.stringify(results));
+
     return apiSuccess({
       campaign_id,
       ...results,
     });
   } catch (error) {
+    console.error("[send] UNHANDLED ERROR:", error);
     return apiServerError(error);
   }
 }

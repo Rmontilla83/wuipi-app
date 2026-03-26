@@ -63,23 +63,31 @@ function normalizePhone(phone: string): string {
 // ---------- API call with template→text fallback ----------
 
 async function sendWhatsApp(body: Record<string, unknown>, fallbackText?: string): Promise<void> {
+  const payload = JSON.stringify(body);
+  console.log(`[WhatsApp] POST ${API_URL}`);
+  console.log(`[WhatsApp] to=${body.to} type=${body.type} template=${(body.template as Record<string, unknown>)?.name ?? "text"}`);
+  console.log(`[WhatsApp] token prefix=${ACCESS_TOKEN.substring(0, 10)}... phone_id=${PHONE_NUMBER_ID}`);
+
   const res = await fetch(API_URL, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${ACCESS_TOKEN}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify(body),
+    body: payload,
   });
 
+  const resBody = await res.json().catch(() => ({}));
+  console.log(`[WhatsApp] Response: status=${res.status}`, JSON.stringify(resBody));
+
   if (!res.ok) {
-    const errData = await res.json().catch(() => ({}));
-    const errorCode = errData?.error?.code;
+    const errorCode = resBody?.error?.code;
 
     // Template not approved or not found — fallback to text (only works within 24h window)
     if (fallbackText && (errorCode === 132015 || errorCode === 132001 || errorCode === 132000)) {
-      console.warn(`[WhatsApp] Template not approved, falling back to text message`);
+      console.warn(`[WhatsApp] Template not approved (code=${errorCode}), falling back to text message`);
       const fallbackBody = buildTextFallback(body.to as string, fallbackText);
+      console.log(`[WhatsApp] Fallback POST to=${body.to} type=text`);
       const fallbackRes = await fetch(API_URL, {
         method: "POST",
         headers: {
@@ -88,16 +96,17 @@ async function sendWhatsApp(body: Record<string, unknown>, fallbackText?: string
         },
         body: JSON.stringify(fallbackBody),
       });
+      const fbResBody = await fallbackRes.json().catch(() => ({}));
+      console.log(`[WhatsApp] Fallback response: status=${fallbackRes.status}`, JSON.stringify(fbResBody));
       if (!fallbackRes.ok) {
-        const fbErr = await fallbackRes.json().catch(() => ({}));
         throw new Error(
-          `WhatsApp API error ${fallbackRes.status} (fallback): ${JSON.stringify(fbErr)}`
+          `WhatsApp API error ${fallbackRes.status} (fallback): ${JSON.stringify(fbResBody)}`
         );
       }
       return;
     }
 
-    throw new Error(`WhatsApp API error ${res.status}: ${JSON.stringify(errData)}`);
+    throw new Error(`WhatsApp API error ${res.status}: ${JSON.stringify(resBody)}`);
   }
 }
 
@@ -116,11 +125,13 @@ export async function sendCollectionWhatsApp(params: SendCollectionWhatsAppParam
   const { phone, customerName, amountUsd, concept, paymentUrl, reminderType } = params;
 
   if (!ACCESS_TOKEN) {
-    console.warn("[WhatsApp] ACCESS_TOKEN not configured, skipping send");
+    console.warn("[WhatsApp] ACCESS_TOKEN is EMPTY — skipping send. Check WHATSAPP_ACCESS_TOKEN env var.");
     return;
   }
 
+  console.log(`[WhatsApp] sendCollectionWhatsApp: phone=${phone} name=${customerName} type=${reminderType ?? "initial"}`);
   const normalizedPhone = normalizePhone(phone);
+  console.log(`[WhatsApp] normalized phone: ${normalizedPhone}`);
   const montoStr = `$${amountUsd.toFixed(2)} USD`;
 
   // Determine which template to use

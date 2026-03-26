@@ -118,9 +118,12 @@ function buildCollectionEmailHtml(params: SendEmailParams): string {
 }
 
 export async function sendCollectionEmail(params: SendEmailParams): Promise<void> {
+  console.log(`[Email] sendCollectionEmail: to=${params.email} name=${params.customerName} type=${params.reminderType ?? "initial"}`);
+  console.log(`[Email] RESEND_API_KEY prefix=${process.env.RESEND_API_KEY?.substring(0, 10) ?? "UNDEFINED"} FROM=${FROM_EMAIL}`);
+
   const resend = getResend();
   if (!resend) {
-    console.warn("[Email] RESEND_API_KEY not configured, skipping send");
+    console.warn("[Email] RESEND_API_KEY is EMPTY — skipping send. Check env var.");
     return;
   }
 
@@ -133,12 +136,14 @@ export async function sendCollectionEmail(params: SendEmailParams): Promise<void
     ? `Recordatorio: Cobro pendiente — $${params.amountUsd.toFixed(2)} USD`
     : `Cobro pendiente — $${params.amountUsd.toFixed(2)} USD — WUIPI`;
 
-  await resend.emails.send({
+  console.log(`[Email] Sending: from=${FROM_EMAIL} to=${params.email} subject="${subject}"`);
+  const result = await resend.emails.send({
     from: FROM_EMAIL,
     to: params.email,
     subject,
     html: buildCollectionEmailHtml(params),
   });
+  console.log(`[Email] Resend response:`, JSON.stringify(result));
 }
 
 export async function sendPaymentConfirmationEmail(params: {
