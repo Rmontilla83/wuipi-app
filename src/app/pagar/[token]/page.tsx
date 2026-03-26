@@ -37,7 +37,7 @@ interface BCVData {
   source: string;
 }
 
-type PaymentMethod = "debito_inmediato" | "transferencia" | "stripe";
+type PaymentMethod = "debito_inmediato" | "transferencia" | "stripe" | "paypal";
 
 // ---------- Main Component ----------
 
@@ -338,6 +338,17 @@ export default function PagarPage() {
             onClick={() => setSelectedMethod("stripe")}
             accent="#635BFF"
           />
+
+          {/* PayPal */}
+          <PaymentMethodCard
+            icon={<Globe className="w-5 h-5" />}
+            title="PayPal"
+            subtitle={`$${Number(data.amount_usd).toFixed(2)} USD`}
+            description="Paga con tu cuenta PayPal o tarjeta"
+            selected={selectedMethod === "paypal"}
+            onClick={() => setSelectedMethod("paypal")}
+            accent="#0070BA"
+          />
         </div>
 
         {/* Action area — sticky on mobile */}
@@ -364,6 +375,8 @@ export default function PagarPage() {
                 background:
                   selectedMethod === "debito_inmediato"
                     ? "linear-gradient(135deg, #03318C, #060633)"
+                    : selectedMethod === "paypal"
+                    ? "linear-gradient(135deg, #0070BA, #003087)"
                     : "linear-gradient(135deg, #635BFF, #4B44D4)",
               }}
             >

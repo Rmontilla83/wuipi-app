@@ -9,6 +9,7 @@ import { fetchBCVRate, convertUsdToBs } from "@/lib/integrations/bcv";
 import { MercantilSDK } from "@/lib/mercantil";
 import { checkRateLimit, getClientIP } from "@/lib/utils/rate-limit";
 import Stripe from "stripe";
+import { isPayPalConfigured, createPayPalOrder } from "@/lib/integrations/paypal";
 
 const FALLBACK_URL = "https://api.wuipi.net";
 
@@ -155,6 +156,35 @@ export async function POST(request: NextRequest) {
           : `Error al procesar pago con tarjeta: ${stripeErr.message || "Intente nuevamente."}`;
         return apiError(userMsg, 500);
       }
+    }
+
+    // ---- PayPal ----
+    if (method === "paypal") {
+      if (!isPayPalConfigured()) {
+        return apiError("PayPal no está disponible en este momento", 503);
+      }
+
+      const successUrl = `${getAppUrl()}/pagar/${token}?status=success`;
+      const cancelUrl = `${getAppUrl()}/pagar/${token}?status=cancelled`;
+
+      const order = await createPayPalOrder({
+        amountUsd: Number(item.amount_usd),
+        description: item.concept || "Servicio WUIPI",
+        returnUrl: successUrl,
+        cancelUrl,
+        customId: token,
+      });
+
+      await updateItem(item.id, {
+        metadata: { ...((item.metadata as Record<string, unknown>) || {}), paypal_order_id: order.orderId },
+      });
+
+      return apiSuccess({
+        method: "paypal",
+        redirect_url: order.approveUrl,
+        order_id: order.orderId,
+        amount_usd: Number(item.amount_usd),
+      });
     }
 
     // ---- Transferencia — no redirect, just info ----
