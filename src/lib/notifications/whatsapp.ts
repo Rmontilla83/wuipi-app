@@ -1,14 +1,16 @@
 // ============================================================
 // WhatsApp Notifications — Meta Business API
 // Phone Number ID: 506922512512507
-// Plantillas aprobadas de Meta para cobranzas
 // ============================================================
 
 const PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_NUMBER_ID || "506922512512507";
 const ACCESS_TOKEN = process.env.WHATSAPP_ACCESS_TOKEN || "";
 const API_URL = `https://graph.facebook.com/v21.0/${PHONE_NUMBER_ID}/messages`;
 
-// ---------- Templates ----------
+// Language code for approved templates — try "es" first, common alternatives: "es_ES", "es_MX", "es_AR"
+const TEMPLATE_LANG = process.env.WHATSAPP_TEMPLATE_LANG || "es";
+
+// ---------- Types ----------
 
 type TemplateName =
   | "cobranza_pago_pendiente"
@@ -21,93 +23,96 @@ interface TemplateComponent {
   parameters: Array<{ type: "text"; text: string }>;
 }
 
-function buildTemplatePayload(
-  phone: string,
-  templateName: TemplateName,
-  components: TemplateComponent[]
-) {
-  return {
-    messaging_product: "whatsapp",
-    to: phone,
-    type: "template",
-    template: {
-      name: templateName,
-      language: { code: "es" },
-      components,
-    },
-  };
-}
-
-function buildTextFallback(phone: string, text: string) {
-  return {
-    messaging_product: "whatsapp",
-    to: phone,
-    type: "text",
-    text: { body: text },
-  };
-}
-
 // ---------- Phone normalization ----------
 
 function normalizePhone(phone: string): string {
-  let cleaned = phone.replace(/[\s\-()]/g, "");
-  if (cleaned.startsWith("0")) {
-    cleaned = "58" + cleaned.slice(1);
+  // Strip everything except digits
+  let digits = phone.replace(/\D/g, "");
+
+  // Venezuelan local format "0412..." → international "58412..."
+  if (digits.startsWith("0") && digits.length === 11) {
+    digits = "58" + digits.slice(1);
   }
-  if (!cleaned.startsWith("+")) {
-    cleaned = "+" + cleaned;
+
+  // If still doesn't start with country code, assume Venezuela
+  if (!digits.startsWith("58") && digits.length === 10) {
+    digits = "58" + digits;
   }
-  return cleaned.replace("+", ""); // WhatsApp API expects no + prefix
+
+  return digits; // Meta expects digits only, no + prefix
 }
 
-// ---------- API call with template→text fallback ----------
+// ---------- API call ----------
 
-async function sendWhatsApp(body: Record<string, unknown>, fallbackText?: string): Promise<void> {
-  const payload = JSON.stringify(body);
-  console.log(`[WhatsApp] POST ${API_URL}`);
-  console.log(`[WhatsApp] to=${body.to} type=${body.type} template=${(body.template as Record<string, unknown>)?.name ?? "text"}`);
-  console.log(`[WhatsApp] token prefix=${ACCESS_TOKEN.substring(0, 10)}... phone_id=${PHONE_NUMBER_ID}`);
-
+async function callMetaAPI(payload: Record<string, unknown>): Promise<{ ok: boolean; status: number; body: Record<string, unknown> }> {
   const res = await fetch(API_URL, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${ACCESS_TOKEN}`,
       "Content-Type": "application/json",
     },
-    body: payload,
+    body: JSON.stringify(payload),
   });
 
-  const resBody = await res.json().catch(() => ({}));
-  console.log(`[WhatsApp] Response: status=${res.status}`, JSON.stringify(resBody));
+  const body = await res.json().catch(() => ({ _parseError: true }));
+  return { ok: res.ok, status: res.status, body };
+}
 
-  if (!res.ok) {
-    const errorCode = resBody?.error?.code;
+async function sendWhatsApp(
+  phone: string,
+  templateName: TemplateName,
+  components: TemplateComponent[],
+  fallbackText: string
+): Promise<void> {
+  // ── 1. Try template message ──
+  const templatePayload = {
+    messaging_product: "whatsapp",
+    to: phone,
+    type: "template",
+    template: {
+      name: templateName,
+      language: { code: TEMPLATE_LANG },
+      components,
+    },
+  };
 
-    // Template not approved or not found — fallback to text (only works within 24h window)
-    if (fallbackText && (errorCode === 132015 || errorCode === 132001 || errorCode === 132000)) {
-      console.warn(`[WhatsApp] Template not approved (code=${errorCode}), falling back to text message`);
-      const fallbackBody = buildTextFallback(body.to as string, fallbackText);
-      console.log(`[WhatsApp] Fallback POST to=${body.to} type=text`);
-      const fallbackRes = await fetch(API_URL, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${ACCESS_TOKEN}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(fallbackBody),
-      });
-      const fbResBody = await fallbackRes.json().catch(() => ({}));
-      console.log(`[WhatsApp] Fallback response: status=${fallbackRes.status}`, JSON.stringify(fbResBody));
-      if (!fallbackRes.ok) {
-        throw new Error(
-          `WhatsApp API error ${fallbackRes.status} (fallback): ${JSON.stringify(fbResBody)}`
-        );
-      }
-      return;
+  console.log(`[WA] SENDING template="${templateName}" lang="${TEMPLATE_LANG}" to=${phone} phone_id=${PHONE_NUMBER_ID}`);
+  console.log(`[WA] REQUEST: ${JSON.stringify(templatePayload)}`);
+
+  const res = await callMetaAPI(templatePayload);
+
+  console.log(`[WA] META RESPONSE status=${res.status}: ${JSON.stringify(res.body)}`);
+
+  if (res.ok) return; // Success
+
+  // ── 2. Template failed — check if we should fallback to text ──
+  const errCode = res.body?.error && (res.body.error as Record<string, unknown>).code;
+  const errMsg = res.body?.error && (res.body.error as Record<string, unknown>).message;
+  console.log(`[WA] TEMPLATE FAILED code=${errCode} message=${errMsg}`);
+
+  // Template not found / not approved / parameter mismatch
+  const templateErrors = [132000, 132001, 132005, 132007, 132012, 132015];
+  if (templateErrors.includes(Number(errCode))) {
+    console.log(`[WA] FALLBACK to text message (24h window required)`);
+    const textPayload = {
+      messaging_product: "whatsapp",
+      to: phone,
+      type: "text",
+      text: { body: fallbackText },
+    };
+
+    console.log(`[WA] SENDING text fallback to=${phone}`);
+    const fbRes = await callMetaAPI(textPayload);
+    console.log(`[WA] FALLBACK RESPONSE status=${fbRes.status}: ${JSON.stringify(fbRes.body)}`);
+
+    if (!fbRes.ok) {
+      throw new Error(`WhatsApp text fallback failed ${fbRes.status}: ${JSON.stringify(fbRes.body)}`);
     }
-
-    throw new Error(`WhatsApp API error ${res.status}: ${JSON.stringify(resBody)}`);
+    return;
   }
+
+  // Non-template error — throw directly
+  throw new Error(`WhatsApp API error ${res.status}: ${JSON.stringify(res.body)}`);
 }
 
 // ---------- Public API ----------
@@ -125,34 +130,30 @@ export async function sendCollectionWhatsApp(params: SendCollectionWhatsAppParam
   const { phone, customerName, amountUsd, concept, paymentUrl, reminderType } = params;
 
   if (!ACCESS_TOKEN) {
-    console.warn("[WhatsApp] ACCESS_TOKEN is EMPTY — skipping send. Check WHATSAPP_ACCESS_TOKEN env var.");
+    console.warn("[WA] SKIP — WHATSAPP_ACCESS_TOKEN is empty");
     return;
   }
 
-  console.log(`[WhatsApp] sendCollectionWhatsApp: phone=${phone} name=${customerName} type=${reminderType ?? "initial"}`);
   const normalizedPhone = normalizePhone(phone);
-  console.log(`[WhatsApp] normalized phone: ${normalizedPhone}`);
   const montoStr = `$${amountUsd.toFixed(2)} USD`;
 
-  // Determine which template to use
+  console.log(`[WA] INPUT phone="${phone}" → normalized="${normalizedPhone}" name="${customerName}" type=${reminderType ?? "initial"}`);
+
   let templateName: TemplateName;
   let components: TemplateComponent[];
   let fallbackText: string;
 
   switch (reminderType) {
     case "48h":
-      // 1er y 2do recordatorio
       templateName = "recordatorio_pago_48h";
-      components = [
-        {
-          type: "body",
-          parameters: [
-            { type: "text", text: customerName },
-            { type: "text", text: montoStr },
-            { type: "text", text: paymentUrl },
-          ],
-        },
-      ];
+      components = [{
+        type: "body",
+        parameters: [
+          { type: "text", text: customerName },
+          { type: "text", text: montoStr },
+          { type: "text", text: paymentUrl },
+        ],
+      }];
       fallbackText =
         `Recordatorio de pago — WUIPI Telecomunicaciones\n\n` +
         `Hola ${customerName},\n\n` +
@@ -163,18 +164,15 @@ export async function sendCollectionWhatsApp(params: SendCollectionWhatsAppParam
       break;
 
     case "urgent":
-      // 3er recordatorio — último aviso
       templateName = "recordatorio_pago_urgente";
-      components = [
-        {
-          type: "body",
-          parameters: [
-            { type: "text", text: customerName },
-            { type: "text", text: montoStr },
-            { type: "text", text: paymentUrl },
-          ],
-        },
-      ];
+      components = [{
+        type: "body",
+        parameters: [
+          { type: "text", text: customerName },
+          { type: "text", text: montoStr },
+          { type: "text", text: paymentUrl },
+        ],
+      }];
       fallbackText =
         `Último aviso de pago — WUIPI Telecomunicaciones\n\n` +
         `Hola ${customerName},\n\n` +
@@ -185,19 +183,16 @@ export async function sendCollectionWhatsApp(params: SendCollectionWhatsAppParam
       break;
 
     default:
-      // Envío inicial
       templateName = "cobranza_pago_pendiente";
-      components = [
-        {
-          type: "body",
-          parameters: [
-            { type: "text", text: customerName },
-            { type: "text", text: concept },
-            { type: "text", text: montoStr },
-            { type: "text", text: paymentUrl },
-          ],
-        },
-      ];
+      components = [{
+        type: "body",
+        parameters: [
+          { type: "text", text: customerName },
+          { type: "text", text: concept },
+          { type: "text", text: montoStr },
+          { type: "text", text: paymentUrl },
+        ],
+      }];
       fallbackText =
         `Nuevo cobro — WUIPI Telecomunicaciones\n\n` +
         `Hola ${customerName},\n\n` +
@@ -210,8 +205,7 @@ export async function sendCollectionWhatsApp(params: SendCollectionWhatsAppParam
       break;
   }
 
-  const body = buildTemplatePayload(normalizedPhone, templateName, components);
-  await sendWhatsApp(body, fallbackText);
+  await sendWhatsApp(normalizedPhone, templateName, components, fallbackText);
 }
 
 export async function sendPaymentConfirmationWhatsApp(params: {
@@ -225,18 +219,15 @@ export async function sendPaymentConfirmationWhatsApp(params: {
 
   const normalizedPhone = normalizePhone(params.phone);
 
-  // Template: pago_confirmado (nombre, concepto, monto, referencia)
-  const body = buildTemplatePayload(normalizedPhone, "pago_confirmado", [
-    {
-      type: "body",
-      parameters: [
-        { type: "text", text: params.customerName },
-        { type: "text", text: params.concept },
-        { type: "text", text: params.amount },
-        { type: "text", text: params.reference },
-      ],
-    },
-  ]);
+  const components: TemplateComponent[] = [{
+    type: "body",
+    parameters: [
+      { type: "text", text: params.customerName },
+      { type: "text", text: params.concept },
+      { type: "text", text: params.amount },
+      { type: "text", text: params.reference },
+    ],
+  }];
 
   const fallbackText =
     `Pago recibido — WUIPI Telecomunicaciones\n\n` +
@@ -249,5 +240,5 @@ export async function sendPaymentConfirmationWhatsApp(params: {
     `El registro del pago puede tomar algunas horas, pero tu servicio ya está asegurado.\n\n` +
     `Gracias por tu pago.`;
 
-  await sendWhatsApp(body, fallbackText);
+  await sendWhatsApp(normalizedPhone, "pago_confirmado", components, fallbackText);
 }
