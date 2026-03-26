@@ -1,4 +1,4 @@
-// POST /api/cobranzas/send — Dispara WhatsApp + Email para una campaña
+// POST /api/cobranzas/send — Dispara WhatsApp + Email para una campaña (con soporte de batches)
 export const dynamic = "force-dynamic";
 
 import { NextRequest } from "next/server";
@@ -15,6 +15,7 @@ import { sendCollectionWhatsApp } from "@/lib/notifications/whatsapp";
 import { sendCollectionEmail } from "@/lib/notifications/email";
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://api.wuipi.net";
+const DEFAULT_BATCH_SIZE = 25; // Process 25 items per request to avoid Vercel timeout
 
 interface ItemResult {
   name: string;
@@ -26,32 +27,33 @@ interface ItemResult {
 
 export async function POST(request: NextRequest) {
   try {
-    const { campaign_id } = await request.json();
+    const { campaign_id, batch_size, offset: batchOffset } = await request.json();
     if (!campaign_id) return apiError("campaign_id requerido", 400);
 
     const campaign = await getCampaign(campaign_id);
     if (!campaign) return apiError("Campaña no encontrada", 404);
-    if (campaign.status !== "draft" && campaign.status !== "active") {
+    if (!["draft", "active", "sending"].includes(campaign.status)) {
       return apiError("La campaña no está en estado válido para enviar", 400);
     }
 
-    await updateCampaign(campaign_id, { status: "sending" });
+    // Mark as sending (only on first batch)
+    if (campaign.status === "draft") {
+      await updateCampaign(campaign_id, { status: "sending" });
+    }
 
-    const items = await getItemsByCampaign(campaign_id);
+    const allItems = await getItemsByCampaign(campaign_id);
+    const sendable = allItems.filter((i) => i.status === "pending" || i.status === "sent");
+
+    // Batch slicing
+    const size = Math.min(batch_size || DEFAULT_BATCH_SIZE, 50);
+    const start = batchOffset || 0;
+    const batch = sendable.slice(start, start + size);
+
     let sent = 0;
     let failed = 0;
     const itemResults: ItemResult[] = [];
-    const env = {
-      WHATSAPP_PHONE_NUMBER_ID: process.env.WHATSAPP_PHONE_NUMBER_ID?.substring(0, 6) ?? "MISSING",
-      WHATSAPP_ACCESS_TOKEN: process.env.WHATSAPP_ACCESS_TOKEN ? `${process.env.WHATSAPP_ACCESS_TOKEN.substring(0, 10)}...` : "MISSING",
-      WHATSAPP_TEMPLATE_LANG: process.env.WHATSAPP_TEMPLATE_LANG ?? "default(es)",
-      RESEND_API_KEY: process.env.RESEND_API_KEY ? `${process.env.RESEND_API_KEY.substring(0, 10)}...` : "MISSING",
-      APP_URL,
-    };
 
-    for (const item of items) {
-      if (item.status !== "pending" && item.status !== "sent") continue;
-
+    for (const item of batch) {
       const paymentUrl = `${APP_URL}/pagar/${item.payment_token}`;
       const result: ItemResult = {
         name: item.customer_name,
@@ -74,13 +76,9 @@ export async function POST(request: NextRequest) {
             reminderType: "initial",
           });
           result.whatsapp = {
-            status: waResult.status,
-            ok: waResult.ok,
-            response: waResult.response,
-            normalizedPhone: waResult.normalizedPhone,
-            template: waResult.template,
-            lang: waResult.lang,
-            fallback: waResult.fallback ?? null,
+            status: waResult.status, ok: waResult.ok, response: waResult.response,
+            normalizedPhone: waResult.normalizedPhone, template: waResult.template,
+            lang: waResult.lang, fallback: waResult.fallback ?? null,
           };
           await updateNotification(notif.id, {
             status: waResult.ok ? "sent" : "failed",
@@ -95,7 +93,7 @@ export async function POST(request: NextRequest) {
           failed++;
         }
       } else {
-        result.whatsapp = { status: "skipped", ok: false, response: "no phone number" };
+        result.whatsapp = { status: "skipped", ok: false, response: "no phone" };
       }
 
       // ── Email ──
@@ -127,13 +125,20 @@ export async function POST(request: NextRequest) {
       itemResults.push(result);
     }
 
-    await updateCampaign(campaign_id, { status: "active" });
+    const totalSendable = sendable.length;
+    const nextOffset = start + batch.length;
+    const hasMore = nextOffset < totalSendable;
+
+    // Mark campaign active when all batches done
+    if (!hasMore) {
+      await updateCampaign(campaign_id, { status: "active" });
+    }
 
     return apiSuccess({
       campaign_id,
       sent,
       failed,
-      env,
+      batch: { offset: start, size: batch.length, total: totalSendable, next_offset: hasMore ? nextOffset : null, has_more: hasMore },
       results: itemResults,
     });
   } catch (error) {

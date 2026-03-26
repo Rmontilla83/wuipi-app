@@ -837,6 +837,7 @@ function CampaignDetailView({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<Partial<CampaignItem>>({});
   const [sendingItemId, setSendingItemId] = useState<string | null>(null);
+  const [sendProgress, setSendProgress] = useState<{ sent: number; total: number } | null>(null);
 
   const st = statusConfig[campaign.status] || statusConfig.draft;
   const pct =
@@ -861,22 +862,50 @@ function CampaignDetailView({
     setSending(true);
     setMessage("");
     setSendResults(null);
+    setSendProgress(null);
+
+    let offset = 0;
+    let totalSent = 0;
+    let totalFailed = 0;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let lastJson: any = null;
+
     try {
-      const res = await fetch("/api/cobranzas/send", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ campaign_id: campaign.id }),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || "Error");
-      setMessage(`Enviados: ${json.sent} | Fallidos: ${json.failed}`);
-      setSendResults(json);
+      // Send in batches of 25
+      while (true) {
+        const res = await fetch("/api/cobranzas/send", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ campaign_id: campaign.id, batch_size: 25, offset }),
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || "Error");
+
+        totalSent += json.sent || 0;
+        totalFailed += json.failed || 0;
+        lastJson = json;
+
+        // Update progress
+        const total = json.batch?.total || totalSent;
+        setSendProgress({ sent: totalSent, total });
+        setMessage(`Enviando... ${totalSent} de ${total}`);
+
+        if (!json.batch?.has_more) break;
+        offset = json.batch.next_offset;
+
+        // Brief delay between batches to avoid rate limits
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+
+      setMessage(`Completado: ${totalSent} enviados | ${totalFailed} fallidos`);
+      setSendResults(lastJson);
       onRefresh();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Error";
-      setMessage(`Error: ${msg}`);
+      setMessage(`Error en batch ${offset}: ${msg} (${totalSent} ya enviados)`);
     } finally {
       setSending(false);
+      setSendProgress(null);
     }
   };
 
@@ -996,10 +1025,23 @@ function CampaignDetailView({
         </div>
       </div>
 
-      {/* Message */}
+      {/* Message + progress */}
       {message && (
         <Card className="!p-3 border-blue-500/30 bg-blue-500/5">
           <p className="text-blue-300 text-xs">{message}</p>
+          {sendProgress && (
+            <div className="mt-2">
+              <div className="w-full h-1.5 bg-wuipi-border rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-blue-400 rounded-full transition-all duration-300"
+                  style={{ width: `${sendProgress.total > 0 ? Math.round((sendProgress.sent / sendProgress.total) * 100) : 0}%` }}
+                />
+              </div>
+              <p className="text-blue-400/60 text-[10px] mt-1">
+                {sendProgress.sent} de {sendProgress.total} ({sendProgress.total > 0 ? Math.round((sendProgress.sent / sendProgress.total) * 100) : 0}%)
+              </p>
+            </div>
+          )}
         </Card>
       )}
 
