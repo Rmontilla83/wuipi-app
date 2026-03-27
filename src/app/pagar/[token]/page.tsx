@@ -206,16 +206,68 @@ export default function PagarPage() {
     return (
       <PageShell>
         <div className="max-w-md mx-auto text-center py-12">
-          <div className="w-16 h-16 rounded-full bg-yellow-500/10 flex items-center justify-center mx-auto mb-4">
-            <Clock className="w-8 h-8 text-yellow-400" />
+          <div className="w-16 h-16 rounded-full bg-amber-500/10 flex items-center justify-center mx-auto mb-4">
+            <CheckCircle2 className="w-8 h-8 text-amber-400" />
           </div>
-          <h2 className="text-white text-xl font-semibold mb-2">Verificando transferencia</h2>
+          <h2 className="text-white text-xl font-semibold mb-2">Pago en proceso de verificación</h2>
           <p className="text-gray-400 text-sm mb-4">
-            Tu transferencia está siendo verificada. Recibirás una confirmación por WhatsApp cuando sea procesada.
+            Ya no es necesaria ninguna acción de tu parte. Recibirás una confirmación por WhatsApp cuando sea procesada.
           </p>
-          <p className="text-gray-500 text-xs">
-            Referencia: {data.payment_reference}
+          {data.payment_reference && (
+            <p className="text-gray-500 text-xs">
+              Referencia: {data.payment_reference}
+            </p>
+          )}
+        </div>
+      </PageShell>
+    );
+  }
+
+  // ---- Expired ----
+  if (data.status === "expired") {
+    return (
+      <PageShell>
+        <div className="max-w-md mx-auto text-center py-12">
+          <div className="w-16 h-16 rounded-full bg-gray-500/10 flex items-center justify-center mx-auto mb-4">
+            <AlertCircle className="w-8 h-8 text-gray-400" />
+          </div>
+          <h2 className="text-white text-xl font-semibold mb-2">Enlace expirado</h2>
+          <p className="text-gray-400 text-sm mb-4">
+            Este enlace de pago ha expirado. Contacta a WUIPI para asistencia.
           </p>
+          <a
+            href="https://wa.me/584248800723"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#25D366] text-white text-sm font-semibold hover:bg-[#25D366]/90"
+          >
+            Contactar por WhatsApp
+          </a>
+        </div>
+      </PageShell>
+    );
+  }
+
+  // ---- Failed ----
+  if (data.status === "failed") {
+    return (
+      <PageShell>
+        <div className="max-w-md mx-auto text-center py-12">
+          <div className="w-16 h-16 rounded-full bg-red-500/10 flex items-center justify-center mx-auto mb-4">
+            <AlertCircle className="w-8 h-8 text-red-400" />
+          </div>
+          <h2 className="text-white text-xl font-semibold mb-2">Error en el pago</h2>
+          <p className="text-gray-400 text-sm mb-4">
+            Hubo un problema con tu pago. Contacta a WUIPI para asistencia.
+          </p>
+          <a
+            href="https://wa.me/584248800723"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#25D366] text-white text-sm font-semibold hover:bg-[#25D366]/90"
+          >
+            Contactar por WhatsApp
+          </a>
         </div>
       </PageShell>
     );
