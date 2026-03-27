@@ -50,6 +50,7 @@ export async function GET(
       payment_method: item.payment_method,
       payment_reference: item.payment_reference,
       paid_at: item.paid_at,
+      _v: 2, // version marker to confirm deployment
     });
   } catch (error) {
     return apiServerError(error);
