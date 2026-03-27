@@ -186,6 +186,7 @@ export async function POST(request: NextRequest) {
         redirect_url: order.approveUrl,
         order_id: order.orderId,
         amount_usd: Number(item.amount_usd),
+        _debug_return_url: returnUrl,
       });
     }
 

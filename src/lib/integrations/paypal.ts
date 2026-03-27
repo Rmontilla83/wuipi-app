@@ -65,6 +65,8 @@ export async function createPayPalOrder(params: {
         cancel_url: params.cancelUrl,
         brand_name: "WUIPI Telecomunicaciones",
         user_action: "PAY_NOW",
+        shipping_preference: "NO_SHIPPING",
+        landing_page: "LOGIN",
       },
     }),
   });
