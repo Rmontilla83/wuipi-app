@@ -87,15 +87,16 @@ CREATE POLICY "Admins full access items"
     )
   );
 
--- Acceso público por token (para la página /pagar/[token])
-CREATE POLICY "Public read items by token"
-  ON collection_items FOR SELECT
-  USING (true);
-
-CREATE POLICY "Public update items payment"
-  ON collection_items FOR UPDATE
-  USING (true)
-  WITH CHECK (true);
+-- Items: authorized roles only (service role bypasses RLS for public endpoints)
+CREATE POLICY "Authorized roles access items"
+  ON collection_items FOR ALL
+  USING (
+    EXISTS (
+      SELECT 1 FROM profiles
+      WHERE profiles.id = auth.uid()
+      AND profiles.role::text IN ('super_admin', 'admin', 'finanzas', 'analista_cobranzas')
+    )
+  );
 
 CREATE POLICY "Admins full access notifications"
   ON collection_notifications FOR ALL

@@ -1,15 +1,23 @@
 // POST /api/cobranzas/pay/confirm — Confirma transferencia manual
 export const dynamic = "force-dynamic";
 
-import { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { apiSuccess, apiError, apiServerError } from "@/lib/api-helpers";
 import { validate, collectionConfirmTransferSchema } from "@/lib/validations/schemas";
 import { getItemsByToken, updateItem } from "@/lib/dal/collection-campaigns";
 import { sendPaymentConfirmationWhatsApp } from "@/lib/notifications/whatsapp";
 import { sendPaymentConfirmationEmail } from "@/lib/notifications/email";
+import { checkRateLimit, getClientIP } from "@/lib/utils/rate-limit";
 
 export async function POST(request: NextRequest) {
   try {
+    // Rate limit: 5 transfer confirmations per minute per IP
+    const ip = getClientIP(request.headers);
+    const rl = checkRateLimit(`confirm:${ip}`, 5, 60_000);
+    if (!rl.allowed) {
+      return NextResponse.json({ error: "Demasiadas solicitudes" }, { status: 429 });
+    }
+
     const body = await request.json();
     const parsed = validate(collectionConfirmTransferSchema, body);
     if (!parsed.success) return apiError(parsed.error, 400);
@@ -18,6 +26,8 @@ export async function POST(request: NextRequest) {
     const item = await getItemsByToken(token);
     if (!item) return apiError("Enlace de pago no encontrado", 404);
     if (item.status === "paid") return apiError("Este cobro ya fue pagado", 400);
+    if (item.status === "conciliating") return apiError("Ya se reportó un pago para este cobro", 400);
+    if (!["pending", "sent", "viewed"].includes(item.status)) return apiError("Este cobro no puede recibir pagos", 400);
 
     // Mark as conciliating — admin will verify via transfer search
     await updateItem(item.id, {

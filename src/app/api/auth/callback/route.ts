@@ -4,7 +4,10 @@ import { NextResponse } from "next/server";
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get("code");
-  const next = searchParams.get("next") ?? "/comando";
+  const rawNext = searchParams.get("next") ?? "/comando";
+
+  // Validate redirect target — must be a relative path, no protocol or external domain
+  const next = /^\/[a-zA-Z0-9\-_/]*$/.test(rawNext) ? rawNext : "/comando";
 
   if (code) {
     const supabase = createServerSupabase();

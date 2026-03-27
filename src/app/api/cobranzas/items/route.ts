@@ -8,7 +8,9 @@ import {
   updateItem,
   createNotification,
   updateNotification,
+  getItemsByToken,
 } from "@/lib/dal/collection-campaigns";
+import { createAdminSupabase } from "@/lib/supabase/server";
 import { sendCollectionWhatsApp } from "@/lib/notifications/whatsapp";
 import { sendCollectionEmail } from "@/lib/notifications/email";
 
@@ -19,9 +21,23 @@ export async function PATCH(request: NextRequest) {
     const { id, ...updates } = await request.json();
     if (!id) return apiError("id requerido", 400);
 
-    // Only allow safe fields
+    // Look up current item to check status
+    const sb = createAdminSupabase();
+    const { data: currentItem } = await sb
+      .from("collection_items")
+      .select("status")
+      .eq("id", id)
+      .single();
+
+    if (!currentItem) return apiError("Item no encontrado", 404);
+
+    // amount_usd only editable when item hasn't been sent yet
+    const safeFields = ["customer_name", "customer_email", "customer_phone", "concept", "invoice_number"];
+    if (currentItem.status === "pending") {
+      safeFields.push("amount_usd");
+    }
+
     const allowed: Record<string, unknown> = {};
-    const safeFields = ["customer_name", "customer_email", "customer_phone", "amount_usd", "concept", "invoice_number"];
     for (const field of safeFields) {
       if (field in updates) allowed[field] = updates[field];
     }

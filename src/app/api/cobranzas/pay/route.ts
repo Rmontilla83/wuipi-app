@@ -97,15 +97,7 @@ export async function POST(request: NextRequest) {
         const successUrl = `${getAppUrl()}/pagar/${token}?status=success`;
         const cancelUrl = `${getAppUrl()}/pagar/${token}?status=cancelled`;
 
-        console.log("[Pay] Stripe creating session:", {
-          key_prefix: stripeKey.substring(0, 12) + "...",
-          app_url: getAppUrl(),
-          env_raw: process.env.NEXT_PUBLIC_APP_URL || "(empty)",
-          amount_usd: Number(item.amount_usd),
-          amount_cents: amountCents,
-          success_url: successUrl,
-          cancel_url: cancelUrl,
-        });
+        console.log("[Pay] Stripe session:", { amount_usd: Number(item.amount_usd), token });
 
         const stripe = new Stripe(stripeKey, { apiVersion: "2025-04-30.basil" as Stripe.LatestApiVersion });
         const session = await stripe.checkout.sessions.create({
@@ -186,7 +178,6 @@ export async function POST(request: NextRequest) {
         redirect_url: order.approveUrl,
         order_id: order.orderId,
         amount_usd: Number(item.amount_usd),
-        _debug_return_url: returnUrl,
       });
     }
 

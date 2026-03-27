@@ -47,6 +47,15 @@ export async function POST(request: NextRequest) {
           return NextResponse.json({ received: true });
         }
 
+        // Verify amount matches (tolerance $0.01)
+        if (item && session.amount_total) {
+          const expectedCents = Math.round(Number(item.amount_usd) * 100);
+          if (Math.abs(session.amount_total - expectedCents) > 1) {
+            console.error(`[Stripe Webhook] AMOUNT MISMATCH: expected=${expectedCents} charged=${session.amount_total} token=${token}`);
+            return NextResponse.json({ received: true }); // Acknowledge but don't mark paid
+          }
+        }
+
         await markItemPaid(token, {
           payment_method: "stripe",
           payment_reference: session.payment_intent as string || session.id,

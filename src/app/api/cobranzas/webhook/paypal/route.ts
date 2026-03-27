@@ -51,6 +51,14 @@ export async function GET(request: NextRequest) {
       console.log("[PayPal Return] Item:", item ? `${item.id} status=${item.status}` : "NOT FOUND");
 
       if (item && item.status !== "paid") {
+        // Verify captured amount matches expected amount (tolerance $0.01)
+        const expectedAmount = Number(item.amount_usd);
+        const capturedAmount = parseFloat(capture.amount);
+        if (Math.abs(capturedAmount - expectedAmount) > 0.01) {
+          console.error(`[PayPal Return] AMOUNT MISMATCH: expected=${expectedAmount} captured=${capturedAmount}`);
+          return safeRedirect(`/pagar/${wpy_token}?status=failed`);
+        }
+
         try {
           await markItemPaid(wpy_token, {
             payment_method: "paypal",
