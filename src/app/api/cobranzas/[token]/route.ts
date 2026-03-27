@@ -24,6 +24,19 @@ export async function GET(
     }
 
     const item = await getItemsByToken(params.token);
+
+    // DEBUG: direct query to compare
+    const { createClient } = await import("@supabase/supabase-js");
+    const directSb = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    );
+    const { data: directItem } = await directSb
+      .from("collection_items")
+      .select("id, status, payment_method, paid_at")
+      .eq("payment_token", params.token)
+      .single();
+
     if (!item) {
       return apiError("Enlace de pago no encontrado o expirado", 404);
     }
@@ -50,7 +63,9 @@ export async function GET(
       payment_method: item.payment_method,
       payment_reference: item.payment_reference,
       paid_at: item.paid_at,
-      _v: 2, // version marker to confirm deployment
+      _v: 3,
+      _debug_dal: { status: item.status, payment_method: item.payment_method, paid_at: item.paid_at },
+      _debug_direct: directItem,
     });
   } catch (error) {
     return apiServerError(error);
