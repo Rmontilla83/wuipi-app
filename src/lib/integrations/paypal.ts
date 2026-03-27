@@ -91,6 +91,7 @@ export async function capturePayPalOrder(orderId: string): Promise<{
 }> {
   const token = await getAccessToken();
 
+  console.log(`[PayPal] Capturing order: ${orderId} via ${BASE_URL}`);
   const res = await fetch(`${BASE_URL}/v2/checkout/orders/${orderId}/capture`, {
     method: "POST",
     headers: {
@@ -99,18 +100,21 @@ export async function capturePayPalOrder(orderId: string): Promise<{
     },
   });
 
+  const data = await res.json().catch(() => ({}));
+  console.log(`[PayPal] Capture response status=${res.status}:`, JSON.stringify(data));
+
   if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(`PayPal capture error ${res.status}: ${JSON.stringify(err)}`);
+    throw new Error(`PayPal capture error ${res.status}: ${JSON.stringify(data)}`);
   }
 
-  const data = await res.json();
   const capture = data.purchase_units?.[0]?.payments?.captures?.[0];
+  const customId = data.purchase_units?.[0]?.custom_id ||
+    data.purchase_units?.[0]?.payments?.captures?.[0]?.custom_id || "";
 
   return {
     status: data.status,
     captureId: capture?.id || data.id,
-    customId: data.purchase_units?.[0]?.custom_id || "",
+    customId,
     amount: capture?.amount?.value || "0",
   };
 }

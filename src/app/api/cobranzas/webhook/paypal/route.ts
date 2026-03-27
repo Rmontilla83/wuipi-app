@@ -1,5 +1,5 @@
-// POST /api/cobranzas/webhook/paypal — PayPal webhook (order capture on return)
-// Also handles GET for PayPal return URL redirect
+// GET /api/cobranzas/webhook/paypal — PayPal return URL (capture + redirect)
+// PayPal redirects here after user approves: ?token={orderID}&PayerID={payerID}&collection_token={wpy_xxx}
 export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from "next/server";
@@ -10,29 +10,51 @@ import { sendPaymentConfirmationEmail } from "@/lib/notifications/email";
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://api.wuipi.net";
 
-// PayPal redirects user here after approval — capture the order
 export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
-  const orderId = searchParams.get("token"); // PayPal sends order ID as "token" param
-  const customToken = searchParams.get("custom_id");
 
-  if (!orderId) {
-    return NextResponse.redirect(`${APP_URL}/pagar/error`);
+  // PayPal sends: token={PayPal order ID}, PayerID={payer ID}
+  // We added: collection_token={wpy_xxx} in the return_url
+  const paypalOrderId = searchParams.get("token");
+  const payerId = searchParams.get("PayerID");
+  const collectionToken = searchParams.get("collection_token");
+
+  console.log("[PayPal Return] Params:", { paypalOrderId, payerId, collectionToken });
+  console.log("[PayPal Return] Full URL:", request.nextUrl.toString());
+
+  if (!paypalOrderId) {
+    console.error("[PayPal Return] Missing PayPal order ID (token param)");
+    return NextResponse.redirect(`${APP_URL}/pagar/${collectionToken || "error"}?status=failed`);
   }
 
   try {
-    const capture = await capturePayPalOrder(orderId);
+    // 1. Capture the payment
+    console.log("[PayPal Return] Capturing order:", paypalOrderId);
+    const capture = await capturePayPalOrder(paypalOrderId);
+    console.log("[PayPal Return] Capture result:", JSON.stringify(capture));
 
-    if (capture.status === "COMPLETED" && capture.customId) {
-      const item = await getItemsByToken(capture.customId);
+    // Use collection_token from our query param, or fallback to customId from PayPal
+    const wpy_token = collectionToken || capture.customId;
+
+    if (!wpy_token) {
+      console.error("[PayPal Return] No collection token found");
+      return NextResponse.redirect(`${APP_URL}/pagar/error?status=failed`);
+    }
+
+    if (capture.status === "COMPLETED") {
+      // 2. Look up the item
+      const item = await getItemsByToken(wpy_token);
+      console.log("[PayPal Return] Item found:", item ? `id=${item.id} status=${item.status}` : "NOT FOUND");
 
       if (item && item.status !== "paid") {
-        await markItemPaid(capture.customId, {
-          payment_method: "paypal" as "stripe", // Extend type later
+        // 3. Mark as paid
+        await markItemPaid(wpy_token, {
+          payment_method: "paypal",
           payment_reference: capture.captureId,
         });
+        console.log("[PayPal Return] Item marked as paid, ref:", capture.captureId);
 
-        // Send confirmations
+        // 4. Send confirmations (fire and forget)
         const amount = `$${capture.amount} USD`;
         const concept = item.concept || "Servicio WUIPI";
 
@@ -43,7 +65,7 @@ export async function GET(request: NextRequest) {
             reference: capture.captureId,
             amount,
             concept,
-          }).catch((err) => console.error("[PayPal] WA error:", err));
+          }).catch((err) => console.error("[PayPal] WA confirmation error:", err));
         }
 
         if (item.customer_email) {
@@ -53,27 +75,27 @@ export async function GET(request: NextRequest) {
             reference: capture.captureId,
             amount,
             concept,
-          }).catch((err) => console.error("[PayPal] Email error:", err));
+          }).catch((err) => console.error("[PayPal] Email confirmation error:", err));
         }
       }
 
-      // Redirect to payment page with success
-      return NextResponse.redirect(`${APP_URL}/pagar/${capture.customId}?status=success`);
+      // 5. Redirect to payment page with success
+      console.log("[PayPal Return] Redirecting to success:", `${APP_URL}/pagar/${wpy_token}?status=success`);
+      return NextResponse.redirect(`${APP_URL}/pagar/${wpy_token}?status=success`);
     }
 
-    // Capture didn't complete
-    return NextResponse.redirect(`${APP_URL}/pagar/${customToken || "error"}?status=failed`);
+    // Capture returned non-COMPLETED status
+    console.error("[PayPal Return] Capture status not COMPLETED:", capture.status);
+    return NextResponse.redirect(`${APP_URL}/pagar/${wpy_token}?status=failed`);
   } catch (err) {
-    console.error("[PayPal Webhook] Error capturing order:", err);
-    return NextResponse.redirect(`${APP_URL}/pagar/${customToken || "error"}?status=failed`);
+    console.error("[PayPal Return] Error:", err instanceof Error ? err.message : err);
+    return NextResponse.redirect(`${APP_URL}/pagar/${collectionToken || "error"}?status=failed`);
   }
 }
 
-// POST endpoint for PayPal IPN/webhook notifications
+// POST endpoint for PayPal IPN/webhook notifications (optional, not used in current flow)
 export async function POST(request: NextRequest) {
-  // PayPal webhook verification would go here
-  // For now, the GET redirect handles the capture flow
   const body = await request.json().catch(() => ({}));
-  console.log("[PayPal Webhook] Received:", JSON.stringify(body));
+  console.log("[PayPal Webhook POST] Received:", JSON.stringify(body));
   return NextResponse.json({ received: true });
 }

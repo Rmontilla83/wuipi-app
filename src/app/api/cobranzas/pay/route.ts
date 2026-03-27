@@ -164,13 +164,15 @@ export async function POST(request: NextRequest) {
         return apiError("PayPal no está disponible en este momento", 503);
       }
 
-      const successUrl = `${getAppUrl()}/pagar/${token}?status=success`;
+      // return_url must point to our capture endpoint, NOT to the payment page
+      // PayPal appends ?token={orderID}&PayerID={payerID} to the return_url
+      const returnUrl = `${getAppUrl()}/api/cobranzas/webhook/paypal?collection_token=${token}`;
       const cancelUrl = `${getAppUrl()}/pagar/${token}?status=cancelled`;
 
       const order = await createPayPalOrder({
         amountUsd: Number(item.amount_usd),
         description: item.concept || "Servicio WUIPI",
-        returnUrl: successUrl,
+        returnUrl,
         cancelUrl,
         customId: token,
       });
