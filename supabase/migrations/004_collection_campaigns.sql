@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS collection_items (
   amount_usd DECIMAL(18,2) NOT NULL,
   amount_bss DECIMAL(18,2),
   bcv_rate DECIMAL(18,4),
-  payment_method TEXT CHECK (payment_method IN ('debito_inmediato','transferencia','stripe','pending')),
+  payment_method TEXT CHECK (payment_method IN ('debito_inmediato','transferencia','stripe','paypal','pending')),
   payment_reference TEXT,
   payment_date TIMESTAMPTZ,
   status TEXT DEFAULT 'pending' CHECK (status IN ('pending','sent','viewed','paid','failed','expired','conciliating')),

@@ -10,72 +10,60 @@ import { sendPaymentConfirmationEmail } from "@/lib/notifications/email";
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://api.wuipi.net";
 
-function debugRedirect(url: string, logs: string[]) {
-  // Return an HTML page that shows debug info then auto-redirects
-  // This helps diagnose issues since Vercel logs get truncated
-  const html = `<!DOCTYPE html><html><head>
-    <meta charset="utf-8">
-    <meta http-equiv="refresh" content="3;url=${url}">
-    <title>Procesando pago...</title>
-    <style>body{background:#0a0a1a;color:#fff;font-family:system-ui;padding:40px;text-align:center}
-    pre{background:#111;padding:16px;border-radius:8px;text-align:left;font-size:11px;color:#9ca3af;overflow-x:auto;max-width:600px;margin:16px auto}
-    a{color:#F46800}</style>
-  </head><body>
-    <h2>Procesando tu pago...</h2>
-    <p>Redirigiendo en 3 segundos... <a href="${url}">Click aquí si no redirige</a></p>
-    <pre>${logs.map((l) => l.replace(/</g, "&lt;")).join("\n")}</pre>
-  </body></html>`;
-  return new NextResponse(html, { headers: { "Content-Type": "text/html; charset=utf-8" } });
+function safeRedirect(path: string) {
+  return NextResponse.redirect(new URL(path, APP_URL).toString());
+}
+
+function serializeError(err: unknown): string {
+  if (err instanceof Error) return `${err.message}\n${err.stack || ""}`;
+  if (typeof err === "string") return err;
+  try { return JSON.stringify(err, null, 2); } catch { return String(err); }
 }
 
 export async function GET(request: NextRequest) {
-  const logs: string[] = [];
   const { searchParams } = request.nextUrl;
 
-  // PayPal sends: token={PayPal order ID}, PayerID={payer ID}
-  // We added: collection_token={wpy_xxx} in the return_url
   const paypalOrderId = searchParams.get("token");
   const payerId = searchParams.get("PayerID");
   const collectionToken = searchParams.get("collection_token");
 
-  logs.push(`[1] Params: paypalOrderId=${paypalOrderId}, PayerID=${payerId}, collection_token=${collectionToken}`);
-  logs.push(`[1] Full URL: ${request.nextUrl.toString()}`);
-  logs.push(`[1] APP_URL: ${APP_URL}`);
+  console.log("[PayPal Return] params:", { paypalOrderId, payerId, collectionToken });
 
   if (!paypalOrderId) {
-    logs.push("[ERROR] Missing PayPal order ID");
-    return debugRedirect(`${APP_URL}/pagar/${collectionToken || "error"}?status=failed&reason=no_order_id`, logs);
+    console.error("[PayPal Return] Missing order ID");
+    return safeRedirect(`/pagar/${collectionToken || "error"}?status=failed`);
   }
 
   try {
-    // 1. Capture the payment
-    logs.push(`[2] Capturing order: ${paypalOrderId}`);
+    console.log("[PayPal Return] Capturing order:", paypalOrderId);
     const capture = await capturePayPalOrder(paypalOrderId);
-    logs.push(`[2] Capture result: status=${capture.status}, captureId=${capture.captureId}, customId=${capture.customId}, amount=${capture.amount}`);
+    console.log("[PayPal Return] Capture:", capture.status, "ref:", capture.captureId, "customId:", capture.customId);
 
-    // Use collection_token from our query param, or fallback to customId from PayPal
     const wpy_token = collectionToken || capture.customId;
-    logs.push(`[3] wpy_token resolved: ${wpy_token}`);
 
     if (!wpy_token) {
-      logs.push("[ERROR] No collection token found from params or capture");
-      return debugRedirect(`${APP_URL}/pagar/error?status=failed&reason=no_collection_token`, logs);
+      console.error("[PayPal Return] No collection token");
+      return safeRedirect("/pagar/error?status=failed");
     }
 
     if (capture.status === "COMPLETED") {
-      // 2. Look up the item
       const item = await getItemsByToken(wpy_token);
-      logs.push(`[4] Item lookup: ${item ? `id=${item.id} status=${item.status} name=${item.customer_name}` : "NOT FOUND"}`);
+      console.log("[PayPal Return] Item:", item ? `${item.id} status=${item.status}` : "NOT FOUND");
 
       if (item && item.status !== "paid") {
-        // 3. Mark as paid
-        await markItemPaid(wpy_token, {
-          payment_method: "paypal",
-          payment_reference: capture.captureId,
-        });
-        logs.push(`[5] Marked as paid, ref: ${capture.captureId}`);
+        try {
+          await markItemPaid(wpy_token, {
+            payment_method: "paypal",
+            payment_reference: capture.captureId,
+          });
+          console.log("[PayPal Return] Marked paid OK");
+        } catch (dbErr) {
+          console.error("[PayPal Return] DB update error:", serializeError(dbErr));
+          // Payment was captured by PayPal — redirect to success anyway
+          // The item can be reconciled manually
+        }
 
-        // 4. Send confirmations (fire and forget)
+        // Send confirmations (non-blocking)
         const amount = `$${capture.amount} USD`;
         const concept = item.concept || "Servicio WUIPI";
 
@@ -86,7 +74,7 @@ export async function GET(request: NextRequest) {
             reference: capture.captureId,
             amount,
             concept,
-          }).catch(() => {});
+          }).catch((e) => console.error("[PayPal] WA error:", serializeError(e)));
         }
 
         if (item.customer_email) {
@@ -96,30 +84,21 @@ export async function GET(request: NextRequest) {
             reference: capture.captureId,
             amount,
             concept,
-          }).catch(() => {});
+          }).catch((e) => console.error("[PayPal] Email error:", serializeError(e)));
         }
-        logs.push("[6] Confirmations sent");
-      } else if (item?.status === "paid") {
-        logs.push("[5] Item already paid, skipping");
       }
 
-      // 5. Redirect to payment page with success
-      const successUrl = `${APP_URL}/pagar/${wpy_token}?status=success`;
-      logs.push(`[7] SUCCESS → redirecting to: ${successUrl}`);
-      return debugRedirect(successUrl, logs);
+      return safeRedirect(`/pagar/${wpy_token}?status=success`);
     }
 
-    // Capture returned non-COMPLETED status
-    logs.push(`[ERROR] Capture status not COMPLETED: ${capture.status}`);
-    return debugRedirect(`${APP_URL}/pagar/${wpy_token}?status=failed&reason=capture_${capture.status}`, logs);
+    console.error("[PayPal Return] Capture not COMPLETED:", capture.status);
+    return safeRedirect(`/pagar/${wpy_token}?status=failed`);
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    logs.push(`[EXCEPTION] ${msg}`);
-    return debugRedirect(`${APP_URL}/pagar/${collectionToken || "error"}?status=failed&reason=exception`, logs);
+    console.error("[PayPal Return] EXCEPTION:", serializeError(err));
+    return safeRedirect(`/pagar/${collectionToken || "error"}?status=failed`);
   }
 }
 
-// POST endpoint for PayPal IPN/webhook notifications (optional)
 export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => ({}));
   console.log("[PayPal Webhook POST]", JSON.stringify(body));
