@@ -416,9 +416,9 @@ function PageShell({ children }: { children: React.ReactNode }) {
     <div className="min-h-screen bg-[#0a0a1a]">
       {/* Header */}
       <header className="border-b border-white/5 bg-[#0a0a1a]/80 backdrop-blur-xl sticky top-0 z-50">
-        <div className="max-w-lg mx-auto px-4 py-4 flex items-center justify-between">
+        <div className="max-w-lg mx-auto px-4 py-5 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <img src="/img/wuipi-logo.webp" alt="WUIPI" className="h-10 object-contain" />
+            <img src="/img/wuipi-logo.webp" alt="WUIPI" className="h-16 sm:h-20 object-contain" />
           </div>
           <div className="flex items-center gap-1 text-gray-600 text-[10px]">
             <Shield className="w-3 h-3" />
@@ -435,9 +435,6 @@ function PageShell({ children }: { children: React.ReactNode }) {
         <div className="max-w-lg mx-auto px-4 py-6 text-center">
           <p className="text-gray-600 text-xs">
             WUIPI Telecomunicaciones — wuipi.net
-          </p>
-          <p className="text-gray-700 text-[10px] mt-1">
-            Soporte: soporte@wuipi.net | +58 412-7195425
           </p>
         </div>
       </footer>
