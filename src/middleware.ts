@@ -15,6 +15,8 @@ export async function middleware(request: NextRequest) {
     "/api/cobranzas/pay",       // includes /pay and /pay/confirm
     "/api/cobranzas/wpy_",      // public payment tokens
     "/api/odoo/",               // Odoo integration (read-only)
+    "/portal/",                 // Customer portal (own auth at layout level)
+    "/api/portal/",             // Portal API endpoints
   ];
   const { pathname } = request.nextUrl;
   const isPublic = publicPaths.some((path) => pathname.startsWith(path));
