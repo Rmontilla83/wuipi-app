@@ -416,3 +416,95 @@ export async function getPendingByCustomer(options?: {
     total_due: Math.round(grandTotal * 100) / 100,
   };
 }
+
+// ── Monthly invoice summary ──────────────────────────────────
+
+export interface MonthlyInvoiceSummary {
+  ved: { invoiced: number; collected: number; count: number };
+  usd: { invoiced: number; collected: number; count: number };
+}
+
+/**
+ * Get invoiced/collected totals for a given month, split by currency.
+ * "Collected" = amount_total - amount_residual for posted invoices.
+ */
+export async function getMonthlyInvoiceSummary(
+  year: number,
+  month: number
+): Promise<MonthlyInvoiceSummary> {
+  const startDate = `${year}-${String(month).padStart(2, "0")}-01`;
+  const endMonth = month === 12 ? 1 : month + 1;
+  const endYear = month === 12 ? year + 1 : year;
+  const endDate = `${endYear}-${String(endMonth).padStart(2, "0")}-01`;
+
+  const invoices = await searchRead("account.move", [
+    ["move_type", "=", "out_invoice"],
+    ["state", "=", "posted"],
+    ["invoice_date", ">=", startDate],
+    ["invoice_date", "<", endDate],
+  ], {
+    fields: ["amount_total", "amount_residual", "currency_id"],
+    limit: 5000,
+  });
+
+  const result: MonthlyInvoiceSummary = {
+    ved: { invoiced: 0, collected: 0, count: 0 },
+    usd: { invoiced: 0, collected: 0, count: 0 },
+  };
+
+  for (const inv of invoices) {
+    const isUSD = inv.currency_id?.[0] === 1; // USD id=1, VED id=166
+    const bucket = isUSD ? result.usd : result.ved;
+    bucket.invoiced += inv.amount_total || 0;
+    bucket.collected += (inv.amount_total || 0) - (inv.amount_residual || 0);
+    bucket.count++;
+  }
+
+  // Round
+  result.ved.invoiced = Math.round(result.ved.invoiced * 100) / 100;
+  result.ved.collected = Math.round(result.ved.collected * 100) / 100;
+  result.usd.invoiced = Math.round(result.usd.invoiced * 100) / 100;
+  result.usd.collected = Math.round(result.usd.collected * 100) / 100;
+
+  return result;
+}
+
+// ── Subscription summary ─────────────────────────────────────
+
+export interface SubscriptionSummary {
+  active: number;
+  paused: number;
+  mrr_usd: number;
+}
+
+/**
+ * Get subscription counts and real MRR from sale.order subscriptions.
+ */
+export async function getSubscriptionSummary(): Promise<SubscriptionSummary> {
+  const subs = await searchRead("sale.order", [
+    ["is_subscription", "=", true],
+    ["subscription_state", "in", ["3_progress", "4_paused"]],
+  ], {
+    fields: ["subscription_state", "recurring_monthly"],
+    limit: 5000,
+  });
+
+  let active = 0;
+  let paused = 0;
+  let mrr = 0;
+
+  for (const s of subs) {
+    if (s.subscription_state === "3_progress") {
+      active++;
+      mrr += s.recurring_monthly || 0;
+    } else {
+      paused++;
+    }
+  }
+
+  return {
+    active,
+    paused,
+    mrr_usd: Math.round(mrr * 100) / 100,
+  };
+}

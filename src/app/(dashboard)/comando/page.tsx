@@ -22,20 +22,27 @@ import {
 // ============================================
 type Tab = "financiero" | "soporte" | "infraestructura" | "ventas";
 
+interface AgingBucket { count: number; total: number }
+interface TopDebtor { partner_id: number; name: string; total_due: number; invoice_count: number; oldest_due_date: string; currency: string }
+
 interface FinanceStats {
-  total_clients: number;
-  active_clients: number;
+  invoiced_ved: number;
+  collected_ved: number;
+  invoices_count_ved: number;
+  collection_rate_ved: number;
   invoiced_usd: number;
-  invoiced_ves: number;
   collected_usd: number;
-  collected_ves: number;
-  collection_rate: number;
+  invoices_count_usd: number;
+  collection_rate_usd: number;
   overdue_count: number;
+  overdue_total_ved: number;
   overdue_total_usd: number;
+  active_subscriptions: number;
+  paused_subscriptions: number;
+  mrr_usd: number;
+  aging: { bucket_0_15: AgingBucket; bucket_16_30: AgingBucket; bucket_31_60: AgingBucket; bucket_60_plus: AgingBucket };
+  top_debtors: TopDebtor[];
   exchange_rate: number | null;
-  invoices_this_month: number;
-  invoices_paid: number;
-  pending_payments: number;
 }
 
 interface TicketStats {
@@ -111,11 +118,11 @@ function OverviewCards({ financeStats, infraOverview, ticketStats, ventasStats }
   const modules = [
     {
       label: "Finanzas", icon: "💰",
-      score: financeStats ? (financeStats.invoices_this_month === 0 ? 100 : financeStats.collection_rate) : 0,
+      score: financeStats ? financeStats.collection_rate_ved : 0,
       status: financeStats
-        ? (financeStats.invoices_this_month === 0 ? "operational" as const : financeStats.collection_rate > 85 ? "operational" as const : financeStats.collection_rate > 70 ? "warning" as const : "critical" as const)
+        ? (financeStats.collection_rate_ved > 85 ? "operational" as const : financeStats.collection_rate_ved > 70 ? "warning" as const : "critical" as const)
         : "operational" as const,
-      detail: financeStats ? (financeStats.invoices_this_month === 0 ? "Pendiente conexión con Odoo" : `$${financeStats.invoiced_usd.toLocaleString()} facturado`) : "Cargando...",
+      detail: financeStats ? `Bs ${financeStats.invoiced_ved.toLocaleString()} facturado` : "Cargando...",
     },
     {
       label: "Soporte", icon: "🎧",
@@ -161,66 +168,63 @@ function FinancieroTab({ stats, loading }: { stats: FinanceStats | null; loading
   if (!stats) return <EmptyState msg="No se pudieron cargar los datos financieros" />;
 
   const fmt = (n: number) => n.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fmtBs = (n: number) => `Bs ${fmt(n)}`;
 
-  // Show Odoo pending banner when there's no invoicing data
-  const hasInvoicingData = stats.invoices_this_month > 0 || stats.invoiced_usd > 0 || stats.invoiced_ves > 0;
+  // Aging bar helper
+  const agingBuckets = [
+    { label: "0–15 días", ...stats.aging.bucket_0_15, color: "bg-emerald-500" },
+    { label: "16–30 días", ...stats.aging.bucket_16_30, color: "bg-amber-500" },
+    { label: "31–60 días", ...stats.aging.bucket_31_60, color: "bg-orange-500" },
+    { label: "60+ días", ...stats.aging.bucket_60_plus, color: "bg-red-500" },
+  ];
+  const maxAgingTotal = Math.max(...agingBuckets.map((b) => b.total), 1);
 
   return (
     <div className="space-y-4">
-      {!hasInvoicingData && (
-        <div className="flex items-center gap-3 p-4 bg-amber-500/5 border border-amber-500/20 rounded-xl">
-          <DollarSign size={20} className="text-amber-400 shrink-0" />
-          <div>
-            <p className="text-sm font-medium text-amber-400">Pendiente conexión con Odoo</p>
-            <p className="text-xs text-gray-500 mt-0.5">La facturación detallada se gestionará desde Odoo. Los datos de clientes y cobros se mostrarán aquí una vez conectado.</p>
-          </div>
-        </div>
-      )}
-
       {/* Main KPIs */}
       <div className="grid grid-cols-4 gap-4">
         <KPICard
-          label="Facturado USD" value={`$${fmt(stats.invoiced_usd)}`}
+          label="Facturado Bs" value={fmtBs(stats.invoiced_ved)}
           icon={DollarSign} color="cyan"
-          sub={`${stats.invoices_this_month} facturas este mes`}
+          sub={`${stats.invoices_count_ved} facturas este mes`}
         />
         <KPICard
-          label="Cobrado USD" value={`$${fmt(stats.collected_usd)}`}
+          label="Cobrado Bs" value={fmtBs(stats.collected_ved)}
           icon={CreditCard} color="emerald"
-          sub={`${stats.invoices_paid} pagadas`}
+          sub={`${stats.collection_rate_ved}% cobranza`}
         />
         <KPICard
-          label="Cobranza" value={`${stats.collection_rate.toFixed(1)}%`}
-          icon={BarChart3} color={stats.collection_rate > 80 ? "emerald" : "amber"}
-          sub="Eficiencia de cobro"
+          label="Cobranza VED" value={`${stats.collection_rate_ved}%`}
+          icon={BarChart3} color={stats.collection_rate_ved > 80 ? "emerald" : "amber"}
+          sub="Eficiencia de cobro mensual"
         />
         <KPICard
           label="Morosos" value={stats.overdue_count.toString()}
           icon={AlertTriangle} color="red"
-          sub={`$${fmt(stats.overdue_total_usd)} pendiente`}
+          sub={`${fmtBs(stats.overdue_total_ved)} pendiente`}
         />
       </div>
 
-      {/* Row 2: Revenue breakdown + Exchange rate */}
+      {/* Row 2: Revenue breakdown + Exchange/MRR */}
       <div className="grid grid-cols-3 gap-4">
         <Card className="col-span-2">
           <h3 className="text-base font-bold text-white mb-4">💰 Resumen de Ingresos</h3>
           <div className="grid grid-cols-2 gap-4">
             <div className="p-4 bg-wuipi-bg rounded-xl border border-wuipi-border">
+              <p className="text-xs text-gray-500 mb-1">Facturado en VED</p>
+              <p className="text-2xl font-bold text-emerald-400">{fmtBs(stats.invoiced_ved)}</p>
+              <p className="text-xs text-gray-500 mt-1">Cobrado: {fmtBs(stats.collected_ved)}</p>
+            </div>
+            <div className="p-4 bg-wuipi-bg rounded-xl border border-wuipi-border">
               <p className="text-xs text-gray-500 mb-1">Facturado en USD</p>
               <p className="text-2xl font-bold text-cyan-400">${fmt(stats.invoiced_usd)}</p>
               <p className="text-xs text-gray-500 mt-1">Cobrado: ${fmt(stats.collected_usd)}</p>
             </div>
-            <div className="p-4 bg-wuipi-bg rounded-xl border border-wuipi-border">
-              <p className="text-xs text-gray-500 mb-1">Facturado en VES</p>
-              <p className="text-2xl font-bold text-emerald-400">Bs. {fmt(stats.invoiced_ves)}</p>
-              <p className="text-xs text-gray-500 mt-1">Cobrado: Bs. {fmt(stats.collected_ves)}</p>
-            </div>
           </div>
           <div className="mt-4 grid grid-cols-3 gap-3">
-            <MiniStat label="Clientes activos" value={stats.active_clients.toString()} color="text-white" />
-            <MiniStat label="Total clientes" value={stats.total_clients.toString()} color="text-gray-300" />
-            <MiniStat label="Pagos pendientes" value={stats.pending_payments.toString()} color="text-amber-400" />
+            <MiniStat label="Suscripciones activas" value={stats.active_subscriptions.toString()} color="text-white" />
+            <MiniStat label="Pausadas" value={stats.paused_subscriptions.toString()} color="text-amber-400" />
+            <MiniStat label="Clientes morosos" value={stats.overdue_count.toString()} color="text-red-400" />
           </div>
         </Card>
 
@@ -228,17 +232,83 @@ function FinancieroTab({ stats, loading }: { stats: FinanceStats | null; loading
           <h3 className="text-base font-bold text-white mb-4">💱 Tasa BCV</h3>
           <div className="text-center py-4">
             <p className="text-4xl font-bold text-cyan-400">
-              {stats.exchange_rate ? `Bs. ${stats.exchange_rate.toFixed(2)}` : "—"}
+              {stats.exchange_rate ? `Bs ${stats.exchange_rate.toFixed(2)}` : "—"}
             </p>
             <p className="text-xs text-gray-500 mt-2">por 1 USD</p>
           </div>
           <div className="mt-4 p-3 bg-wuipi-bg rounded-xl border border-wuipi-border">
-            <p className="text-xs text-gray-500">Proyección MRR</p>
+            <p className="text-xs text-gray-500">MRR (Suscripciones)</p>
             <p className="text-lg font-bold text-white">
-              ${(stats.active_clients * 15).toLocaleString()}{" "}
-              <span className="text-xs text-gray-500 font-normal">USD/mes est.</span>
+              ${fmt(stats.mrr_usd)}{" "}
+              <span className="text-xs text-gray-500 font-normal">USD/mes</span>
             </p>
+            <p className="text-xs text-gray-600 mt-1">{stats.active_subscriptions} suscripciones activas</p>
           </div>
+        </Card>
+      </div>
+
+      {/* Row 3: Aging + Top Morosos */}
+      <div className="grid grid-cols-2 gap-4">
+        {/* Aging Chart */}
+        <Card>
+          <h3 className="text-base font-bold text-white mb-4">📊 Antigüedad de Cartera</h3>
+          <div className="space-y-3">
+            {agingBuckets.map((b) => (
+              <div key={b.label}>
+                <div className="flex items-center justify-between text-xs mb-1">
+                  <span className="text-gray-400">{b.label}</span>
+                  <span className="text-gray-300 font-medium">{b.count} clientes — {fmtBs(b.total)}</span>
+                </div>
+                <div className="h-2 bg-wuipi-bg rounded-full overflow-hidden">
+                  <div
+                    className={`h-full rounded-full ${b.color} transition-all`}
+                    style={{ width: `${Math.max((b.total / maxAgingTotal) * 100, b.count > 0 ? 3 : 0)}%` }}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+
+        {/* Top Morosos */}
+        <Card>
+          <h3 className="text-base font-bold text-white mb-4">🔴 Top 10 Morosos</h3>
+          {stats.top_debtors.length === 0 ? (
+            <p className="text-gray-500 text-sm text-center py-8">Sin morosos</p>
+          ) : (
+            <div className="overflow-auto max-h-[280px]">
+              <table className="w-full text-xs">
+                <thead className="sticky top-0 bg-wuipi-card">
+                  <tr className="text-gray-500 border-b border-wuipi-border">
+                    <th className="text-left py-1.5 px-2 font-medium">#</th>
+                    <th className="text-left py-1.5 px-2 font-medium">Cliente</th>
+                    <th className="text-right py-1.5 px-2 font-medium">Fact.</th>
+                    <th className="text-right py-1.5 px-2 font-medium">Saldo</th>
+                    <th className="text-right py-1.5 px-2 font-medium">Días</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {stats.top_debtors.map((d, i) => {
+                    const days = d.oldest_due_date
+                      ? Math.floor((Date.now() - new Date(d.oldest_due_date).getTime()) / 86400000)
+                      : 0;
+                    const dayColor = days > 60 ? "text-red-400" : days > 30 ? "text-orange-400" : "text-gray-400";
+                    return (
+                      <tr key={d.partner_id} className="border-b border-wuipi-border/50">
+                        <td className="py-1.5 px-2 text-gray-600">{i + 1}</td>
+                        <td className="py-1.5 px-2 text-white truncate max-w-[180px]">{d.name}</td>
+                        <td className="py-1.5 px-2 text-right text-gray-400">{d.invoice_count}</td>
+                        <td className="py-1.5 px-2 text-right text-emerald-400 font-medium">
+                          {d.currency === "USD" ? `$${fmt(d.total_due)}` : fmtBs(d.total_due)}
+                        </td>
+                        <td className={`py-1.5 px-2 text-right font-medium ${dayColor}`}>{days}d</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </Card>
       </div>
     </div>
@@ -492,7 +562,11 @@ export default function ComandoPage() {
 
   const loadFinanceStats = useCallback(async () => {
     try {
-      const res = await fetch("/api/facturacion/stats");
+      // Try Odoo first, fall back to Supabase
+      let res = await fetch("/api/odoo/financial-summary");
+      if (!res.ok) {
+        res = await fetch("/api/facturacion/stats");
+      }
       if (res.ok) {
         const data = await res.json();
         setFinanceStats(data);
