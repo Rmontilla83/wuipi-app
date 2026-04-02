@@ -645,15 +645,22 @@ export async function getOdooClients(options?: {
     domain.push(["credit", ">", 0]);
   }
 
-  // Search filter — Odoo "|" OR operators
+  // Search filter — search partners first, then filter by ID
   if (options?.search) {
     const q = options.search;
-    domain.unshift("|", "|", "|", "|");
-    domain.push(["name", "ilike", q]);
-    domain.push(["vat", "ilike", q]);
-    domain.push(["email", "ilike", q]);
-    domain.push(["mobile", "ilike", q]);
-    domain.push(["ref", "ilike", q]);
+    const matchingPartners = await searchRead("res.partner", [
+      "|", "|", "|", "|",
+      ["name", "ilike", q],
+      ["vat", "ilike", q],
+      ["email", "ilike", q],
+      ["mobile", "ilike", q],
+      ["ref", "ilike", q],
+    ], { fields: ["id"], limit: 500 });
+    const pids = matchingPartners.map((p: any) => p.id);
+    if (pids.length === 0) {
+      return { clients: [], total: 0, page, limit: pageSize };
+    }
+    domain.push(["id", "in", pids]);
   }
 
   const [total, rawClients] = await Promise.all([
