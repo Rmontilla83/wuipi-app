@@ -250,6 +250,7 @@ export const collectionUploadRowSchema = z.object({
   subtotal: z.number().optional().nullable(),
   impuesto: z.number().optional().nullable(),
   total: z.number().optional().nullable(),
+  metadata: z.record(z.any()).optional().nullable(),
 });
 
 export const collectionUploadSchema = z.object({

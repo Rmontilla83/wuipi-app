@@ -52,6 +52,8 @@ interface UploadRow {
   subtotal: number;
   impuesto: number;
   total: number;
+  // Metadata stored in collection_items.metadata
+  metadata?: Record<string, any> | null;
 }
 
 const APP_URL = typeof window !== "undefined" ? window.location.origin : "";
@@ -341,6 +343,9 @@ function CreateCampaignView({
   const [saving, setSaving] = useState(false);
   const [duplicates, setDuplicates] = useState<Array<{ cedula_rif?: string; email?: string; campaign_name: string }>>([]);
   const [includeDuplicates, setIncludeDuplicates] = useState(false);
+  const [odooLoading, setOdooLoading] = useState(false);
+  const [odooSearch, setOdooSearch] = useState("");
+  const [odooMinAmount, setOdooMinAmount] = useState(100);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // --- Odoo phone normalizer: "58 412-9441604" → "04129441604" ---
@@ -504,6 +509,94 @@ function CreateCampaignView({
     reader.readAsArrayBuffer(file);
   };
 
+  // --- Odoo Sync handler ---
+  const handleOdooSync = async () => {
+    setOdooLoading(true);
+    setErrors([]);
+    try {
+      const params = new URLSearchParams();
+      if (odooSearch) params.set("search", odooSearch);
+      if (odooMinAmount > 0) params.set("min_amount", String(odooMinAmount));
+
+      const res = await fetch(`/api/odoo/invoices/grouped?${params}`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `Error ${res.status}`);
+      }
+      const data = await res.json();
+
+      if (!data.customers || data.customers.length === 0) {
+        setErrors(["No se encontraron clientes con facturas pendientes en Odoo"]);
+        setOdooLoading(false);
+        return;
+      }
+
+      // Map grouped customers → UploadRow (one row per customer with total balance)
+      const parsed: UploadRow[] = data.customers.map((c: any) => {
+        const invoiceNumbers = c.invoices.map((i: any) => i.invoice_number).join(", ");
+        const conceptParts = c.invoices.length === 1
+          ? `Factura ${c.invoices[0].invoice_number}`
+          : `${c.invoice_count} facturas: ${invoiceNumbers}`;
+
+        return {
+          nombre_cliente: c.customer_name,
+          cedula_rif: normalizeCedula(c.customer_cedula_rif),
+          email: cleanEmail(c.customer_email),
+          telefono: normalizePhone(c.customer_phone),
+          monto_usd: c.total_due,
+          concepto: conceptParts,
+          numero_factura: c.invoices.length === 1 ? c.invoices[0].invoice_number : invoiceNumbers,
+          fecha: c.oldest_due_date || "",
+          subtotal: 0,
+          impuesto: 0,
+          total: c.total_due,
+          metadata: {
+            source: "odoo",
+            odoo_partner_id: c.odoo_partner_id,
+            currency: c.currency,
+            odoo_invoices: c.invoices.map((inv: any) => ({
+              id: inv.id,
+              number: inv.invoice_number,
+              date: inv.invoice_date,
+              due_date: inv.due_date,
+              total: inv.total,
+              amount_due: inv.amount_due,
+              currency: inv.currency,
+              products: inv.products,
+            })),
+          },
+        };
+      });
+
+      setRows(parsed);
+      if (!campaignName) {
+        const month = new Date().toLocaleString("es-VE", { month: "long", year: "numeric" });
+        setCampaignName(`Cobro Odoo — ${month}`);
+      }
+      if (!description) {
+        setDescription(`${data.total_customers} clientes con saldo pendiente sincronizados desde Odoo`);
+      }
+
+      // Check duplicates
+      try {
+        const dupRes = await fetch("/api/cobranzas/duplicates", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ rows: parsed.map((r) => ({ email: r.email, cedula_rif: r.cedula_rif })) }),
+        });
+        const dupJson = await dupRes.json();
+        if (dupJson.duplicates?.length > 0) setDuplicates(dupJson.duplicates);
+      } catch { /* ignore */ }
+
+      setStep("preview");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Error al conectar con Odoo";
+      setErrors([msg]);
+    } finally {
+      setOdooLoading(false);
+    }
+  };
+
   const updateRow = (idx: number, field: keyof UploadRow, value: string | number) => {
     setRows((prev) =>
       prev.map((r, i) => (i === idx ? { ...r, [field]: value } : r))
@@ -564,7 +657,10 @@ function CreateCampaignView({
     }
   };
 
-  const totalUsd = rows.reduce((s, r) => s + (r.monto_usd || 0), 0);
+  const totalAmount = rows.reduce((s, r) => s + (r.monto_usd || 0), 0);
+  const isOdooSync = rows.length > 0 && rows[0].metadata?.source === "odoo";
+  const currency = isOdooSync ? (rows[0].metadata?.currency || "VED") : "USD";
+  const fmtAmount = (n: number) => currency === "USD" ? fmtUSD(n) : `Bs ${n.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
   return (
     <div className="space-y-4">
@@ -607,29 +703,75 @@ function CreateCampaignView({
       </Card>
 
       {step === "upload" && (
-        <Card className="!p-8 text-center border-dashed border-2 border-wuipi-border hover:border-[#F46800]/30 transition-colors">
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".xlsx,.xls,.csv"
-            onChange={handleFileUpload}
-            className="hidden"
-          />
-          <Upload size={40} className="mx-auto mb-3 text-gray-500" />
-          <p className="text-white font-medium mb-1">Arrastra tu archivo Excel aquí</p>
-          <p className="text-gray-500 text-xs mb-4">
-            Compatible con exportación de Odoo 18 (Adeudado en Divisa, Contacto/Celular, etc.)
-            <br />
-            También acepta formato libre: nombre_cliente, cedula_rif, email, telefono, monto_usd
-          </p>
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            className="px-6 py-2 rounded-lg bg-[#03318C] text-white text-sm font-medium hover:bg-[#03318C]/80 transition-colors"
-          >
-            <FileSpreadsheet size={14} className="inline mr-2" />
-            Seleccionar archivo
-          </button>
-        </Card>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Option 1: Odoo Sync */}
+          <Card className="!p-6 border-2 border-wuipi-border hover:border-[#714B67]/50 transition-colors">
+            <div className="text-center mb-4">
+              <div className="w-12 h-12 rounded-xl bg-[#714B67]/20 flex items-center justify-center mx-auto mb-3">
+                <RefreshCw size={24} className={`text-[#714B67] ${odooLoading ? "animate-spin" : ""}`} />
+              </div>
+              <p className="text-white font-medium mb-1">Sincronizar con Odoo</p>
+              <p className="text-gray-500 text-xs">
+                Obtiene facturas pendientes agrupadas por cliente con saldo total
+              </p>
+            </div>
+            <div className="space-y-2 mb-4">
+              <input
+                value={odooSearch}
+                onChange={(e) => setOdooSearch(e.target.value)}
+                placeholder="Filtrar por nombre (opcional)"
+                className="w-full px-3 py-1.5 rounded-lg bg-wuipi-bg border border-wuipi-border text-xs text-white placeholder-gray-600 focus:border-[#714B67]/50 focus:outline-none"
+              />
+              <div className="flex items-center gap-2">
+                <label className="text-xs text-gray-500 whitespace-nowrap">Monto mínimo:</label>
+                <input
+                  type="number"
+                  value={odooMinAmount}
+                  onChange={(e) => setOdooMinAmount(parseFloat(e.target.value) || 0)}
+                  className="w-24 px-2 py-1.5 rounded-lg bg-wuipi-bg border border-wuipi-border text-xs text-white focus:border-[#714B67]/50 focus:outline-none"
+                />
+              </div>
+            </div>
+            <button
+              onClick={handleOdooSync}
+              disabled={odooLoading}
+              className="w-full px-4 py-2.5 rounded-lg bg-[#714B67] text-white text-sm font-medium hover:bg-[#714B67]/80 transition-colors disabled:opacity-50"
+            >
+              {odooLoading ? (
+                <><RefreshCw size={14} className="inline mr-2 animate-spin" />Consultando Odoo...</>
+              ) : (
+                <><Download size={14} className="inline mr-2" />Obtener facturas pendientes</>
+              )}
+            </button>
+          </Card>
+
+          {/* Option 2: Excel Upload */}
+          <Card className="!p-6 border-dashed border-2 border-wuipi-border hover:border-[#F46800]/30 transition-colors">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".xlsx,.xls,.csv"
+              onChange={handleFileUpload}
+              className="hidden"
+            />
+            <div className="text-center mb-4">
+              <div className="w-12 h-12 rounded-xl bg-[#03318C]/20 flex items-center justify-center mx-auto mb-3">
+                <Upload size={24} className="text-[#03318C]" />
+              </div>
+              <p className="text-white font-medium mb-1">Cargar archivo Excel</p>
+              <p className="text-gray-500 text-xs">
+                Compatible con exportación Odoo 18 y formato libre
+              </p>
+            </div>
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="w-full px-4 py-2.5 rounded-lg bg-[#03318C] text-white text-sm font-medium hover:bg-[#03318C]/80 transition-colors"
+            >
+              <FileSpreadsheet size={14} className="inline mr-2" />
+              Seleccionar archivo
+            </button>
+          </Card>
+        </div>
       )}
 
       {step === "preview" && rows.length > 0 && (
@@ -641,13 +783,13 @@ function CreateCampaignView({
               <p className="text-xl font-bold text-white">{rows.length}</p>
             </Card>
             <Card className="!p-3 text-center">
-              <p className="text-xs text-gray-500">Total USD</p>
-              <p className="text-xl font-bold text-emerald-400">{fmtUSD(totalUsd)}</p>
+              <p className="text-xs text-gray-500">Total {currency}</p>
+              <p className="text-xl font-bold text-emerald-400">{fmtAmount(totalAmount)}</p>
             </Card>
             <Card className="!p-3 text-center">
               <p className="text-xs text-gray-500">Promedio</p>
               <p className="text-xl font-bold text-amber-400">
-                {fmtUSD(rows.length > 0 ? totalUsd / rows.length : 0)}
+                {fmtAmount(rows.length > 0 ? totalAmount / rows.length : 0)}
               </p>
             </Card>
           </div>
@@ -688,9 +830,9 @@ function CreateCampaignView({
                     <th className="text-left p-2 font-medium">Cédula/RIF</th>
                     <th className="text-left p-2 font-medium">Teléfono</th>
                     <th className="text-left p-2 font-medium">Email</th>
-                    <th className="text-left p-2 font-medium">Factura</th>
-                    <th className="text-right p-2 font-medium text-gray-600">Total</th>
-                    <th className="text-right p-2 font-medium">Adeudado</th>
+                    <th className="text-left p-2 font-medium">{isOdooSync ? "Facturas" : "Factura"}</th>
+                    <th className="text-right p-2 font-medium text-gray-600">{isOdooSync ? "Nº Fact." : "Total"}</th>
+                    <th className="text-right p-2 font-medium">Saldo</th>
                     <th className="p-2 w-8"></th>
                   </tr>
                 </thead>
@@ -737,7 +879,9 @@ function CreateCampaignView({
                         />
                       </td>
                       <td className="p-2 text-right text-gray-600 text-xs">
-                        {row.total > 0 ? `$${row.total.toFixed(2)}` : "—"}
+                        {isOdooSync
+                          ? (row.metadata?.odoo_invoices?.length || 1)
+                          : row.total > 0 ? `$${row.total.toFixed(2)}` : "—"}
                       </td>
                       <td className="p-2 text-right">
                         <input
@@ -770,10 +914,12 @@ function CreateCampaignView({
               onClick={() => {
                 setStep("upload");
                 setRows([]);
+                setDuplicates([]);
+                setIncludeDuplicates(false);
               }}
               className="flex items-center gap-2 px-4 py-2 rounded-lg border border-wuipi-border text-gray-400 text-sm hover:text-white transition-colors"
             >
-              <RotateCcw size={14} /> Cargar otro archivo
+              <RotateCcw size={14} /> {isOdooSync ? "Volver" : "Cargar otro archivo"}
             </button>
             <button
               onClick={handleSubmit}

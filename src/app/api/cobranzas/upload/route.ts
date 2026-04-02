@@ -34,6 +34,7 @@ export async function POST(request: NextRequest) {
         invoice_number: r.numero_factura || undefined,
         concept: r.concepto || `Cobro — ${campaign_name}`,
         amount_usd: r.monto_usd,
+        metadata: r.metadata || undefined,
       }))
     );
 

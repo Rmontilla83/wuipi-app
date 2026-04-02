@@ -39,6 +39,9 @@ export async function GET(
       item.status = "viewed";
     }
 
+    // Extract safe metadata for public display (invoice details only)
+    const odooInvoices = item.metadata?.odoo_invoices || null;
+
     // Return only safe public fields
     return apiSuccess({
       token: item.payment_token,
@@ -50,6 +53,7 @@ export async function GET(
       payment_method: item.payment_method,
       payment_reference: item.payment_reference,
       paid_at: item.paid_at,
+      ...(odooInvoices ? { odoo_invoices: odooInvoices, currency: item.metadata?.currency } : {}),
     });
   } catch (error) {
     return apiServerError(error);

@@ -261,3 +261,158 @@ export async function getPendingInvoices(options?: {
 
   return { invoices, total };
 }
+
+// ── Grouped by customer ──────────────────────────────────────
+
+export interface OdooInvoiceDetail {
+  id: number;
+  invoice_number: string;
+  invoice_date: string;
+  due_date: string;
+  total: number;
+  amount_due: number;
+  currency: string;
+  payment_state: string;
+  products: string[];
+}
+
+export interface OdooCustomerBalance {
+  odoo_partner_id: number;
+  customer_name: string;
+  customer_email: string;
+  customer_phone: string;
+  customer_cedula_rif: string;
+  invoice_count: number;
+  total_due: number;
+  currency: string;
+  oldest_due_date: string;
+  invoices: OdooInvoiceDetail[];
+}
+
+/**
+ * Fetch pending invoices grouped by customer.
+ * Each customer has a total_due and a list of individual invoices with product details.
+ */
+export async function getPendingByCustomer(options?: {
+  search?: string;
+  minAmount?: number;
+}): Promise<{ customers: OdooCustomerBalance[]; total_customers: number; total_due: number }> {
+  const domain: OdooDomain[] = [
+    ["move_type", "=", "out_invoice"],
+    ["payment_state", "in", ["not_paid", "partial"]],
+    ["state", "=", "posted"],
+    ["amount_residual", ">", 0],
+  ];
+
+  if (options?.search) {
+    const partners = await searchRead("res.partner", [
+      ["name", "ilike", options.search],
+    ], { fields: ["id"], limit: 200 });
+    const pids = partners.map((p: any) => p.id);
+    if (pids.length === 0) {
+      return { customers: [], total_customers: 0, total_due: 0 };
+    }
+    domain.push(["partner_id", "in", pids]);
+  }
+
+  // Fetch all pending invoices (no limit — need full picture for grouping)
+  const rawInvoices = await searchRead("account.move", domain, {
+    fields: [...INVOICE_FIELDS],
+    limit: 2000,
+    order: "partner_id asc, invoice_date_due asc",
+  });
+
+  if (rawInvoices.length === 0) {
+    return { customers: [], total_customers: 0, total_due: 0 };
+  }
+
+  // Get partner details
+  const uniquePartnerIds = Array.from(
+    new Set(rawInvoices.map((inv: any) => inv.partner_id[0]))
+  ) as number[];
+  const partners = await read("res.partner", uniquePartnerIds, [...PARTNER_FIELDS]);
+  const partnerMap = new Map(partners.map((p: any) => [p.id, p]));
+
+  // Get product details from invoice lines
+  const invoiceIds = rawInvoices.map((inv: any) => inv.id);
+  const lines = await searchRead("account.move.line", [
+    ["move_id", "in", invoiceIds],
+    ["display_type", "=", "product"],
+  ], {
+    fields: ["move_id", "product_id", "name"],
+    limit: 5000,
+  });
+
+  // Map invoice_id → product names
+  const productsByInvoice = new Map<number, string[]>();
+  for (const line of lines) {
+    const invId = line.move_id[0];
+    const productName = line.product_id ? line.product_id[1] : (line.name || "");
+    if (!productsByInvoice.has(invId)) productsByInvoice.set(invId, []);
+    productsByInvoice.get(invId)!.push(productName);
+  }
+
+  // Group by partner
+  const grouped = new Map<number, { partner: any; invoices: any[] }>();
+  for (const inv of rawInvoices) {
+    const pid = inv.partner_id[0];
+    if (!grouped.has(pid)) {
+      grouped.set(pid, { partner: partnerMap.get(pid) || {}, invoices: [] });
+    }
+    grouped.get(pid)!.invoices.push(inv);
+  }
+
+  // Build result
+  let grandTotal = 0;
+  const customers: OdooCustomerBalance[] = [];
+
+  for (const [pid, data] of grouped) {
+    const p = data.partner;
+    let customerDue = 0;
+    let oldestDue = "9999-12-31";
+    const currency = data.invoices[0]?.currency_id?.[1] || "VED";
+
+    const invoiceDetails: OdooInvoiceDetail[] = data.invoices.map((inv: any) => {
+      customerDue += inv.amount_residual;
+      if (inv.invoice_date_due && inv.invoice_date_due < oldestDue) {
+        oldestDue = inv.invoice_date_due;
+      }
+      return {
+        id: inv.id,
+        invoice_number: inv.name || "",
+        invoice_date: inv.invoice_date || "",
+        due_date: inv.invoice_date_due || "",
+        total: inv.amount_total || 0,
+        amount_due: inv.amount_residual || 0,
+        currency: inv.currency_id?.[1] || "VED",
+        payment_state: inv.payment_state || "",
+        products: productsByInvoice.get(inv.id) || [],
+      };
+    });
+
+    if (options?.minAmount && customerDue < options.minAmount) continue;
+
+    grandTotal += customerDue;
+    customers.push({
+      odoo_partner_id: pid,
+      customer_name: p.name || data.invoices[0]?.partner_id[1] || "",
+      customer_email: p.email || "",
+      customer_phone: p.mobile || p.phone || "",
+      customer_cedula_rif: p.vat || "",
+      invoice_count: data.invoices.length,
+      total_due: Math.round(customerDue * 100) / 100,
+      currency,
+      oldest_due_date: oldestDue === "9999-12-31" ? "" : oldestDue,
+      invoices: invoiceDetails,
+    });
+  }
+
+  // Sort by total_due descending
+  customers.sort((a, b) => b.total_due - a.total_due);
+
+  return {
+    customers,
+    total_customers: customers.length,
+    total_due: Math.round(grandTotal * 100) / 100,
+  };
+}

@@ -19,6 +19,16 @@ import {
 
 // ---------- Types ----------
 
+interface OdooInvoiceInfo {
+  number: string;
+  date: string;
+  due_date: string;
+  total: number;
+  amount_due: number;
+  currency: string;
+  products: string[];
+}
+
 interface PaymentData {
   token: string;
   customer_name: string;
@@ -29,6 +39,8 @@ interface PaymentData {
   payment_method: string | null;
   payment_reference: string | null;
   paid_at: string | null;
+  odoo_invoices?: OdooInvoiceInfo[] | null;
+  currency?: string | null;
 }
 
 interface BCVData {
@@ -323,20 +335,62 @@ export default function PagarPage() {
           <p className="text-blue-200 text-xs mb-1">Cobro para</p>
           <h2 className="text-white text-xl font-bold mb-4">{data.customer_name}</h2>
 
-          <div className="space-y-2 mb-4">
-            {data.concept && (
-              <div className="flex justify-between items-center">
-                <span className="text-blue-200/70 text-sm">Concepto</span>
-                <span className="text-white text-sm font-medium">{data.concept}</span>
+          {/* Invoice details — show individual invoices if from Odoo */}
+          {data.odoo_invoices && data.odoo_invoices.length > 0 ? (
+            <div className="mb-4">
+              <p className="text-blue-200/60 text-xs mb-2 uppercase tracking-wider">Detalle de facturas</p>
+              <div className="bg-white/5 rounded-xl overflow-hidden">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-white/10 text-blue-200/50">
+                      <th className="text-left py-2 px-3 font-medium">Factura</th>
+                      <th className="text-left py-2 px-3 font-medium">Servicio</th>
+                      <th className="text-right py-2 px-3 font-medium">Pendiente</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.odoo_invoices.map((inv, i) => (
+                      <tr key={i} className="border-b border-white/5 last:border-0">
+                        <td className="py-2 px-3 text-white font-mono">{inv.number}</td>
+                        <td className="py-2 px-3 text-blue-200/80">
+                          {inv.products.length > 0
+                            ? inv.products.map(p => p.replace(/\[.*?\]\s*/, "")).join(", ")
+                            : "—"}
+                        </td>
+                        <td className="py-2 px-3 text-right text-white font-medium">
+                          {inv.amount_due.toLocaleString("es-VE", { minimumFractionDigits: 2 })}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr className="border-t border-white/10">
+                      <td colSpan={2} className="py-2 px-3 text-blue-200/60 font-medium">Total</td>
+                      <td className="py-2 px-3 text-right text-white font-bold">
+                        {data.odoo_invoices.reduce((s, i) => s + i.amount_due, 0).toLocaleString("es-VE", { minimumFractionDigits: 2 })}
+                        <span className="text-blue-200/50 ml-1 font-normal">{data.currency || "VED"}</span>
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
               </div>
-            )}
-            {data.invoice_number && (
-              <div className="flex justify-between items-center">
-                <span className="text-blue-200/70 text-sm">Factura</span>
-                <span className="text-white text-sm font-mono">{data.invoice_number}</span>
-              </div>
-            )}
-          </div>
+            </div>
+          ) : (
+            <div className="space-y-2 mb-4">
+              {data.concept && (
+                <div className="flex justify-between items-center">
+                  <span className="text-blue-200/70 text-sm">Concepto</span>
+                  <span className="text-white text-sm font-medium">{data.concept}</span>
+                </div>
+              )}
+              {data.invoice_number && (
+                <div className="flex justify-between items-center">
+                  <span className="text-blue-200/70 text-sm">Factura</span>
+                  <span className="text-white text-sm font-mono">{data.invoice_number}</span>
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="border-t border-white/10 pt-4">
             <p className="text-blue-200/60 text-xs mb-1">MONTO A PAGAR</p>

@@ -189,6 +189,7 @@ export async function createItems(
     invoice_number?: string;
     concept?: string;
     amount_usd: number;
+    metadata?: Record<string, any>;
   }>
 ): Promise<CollectionItem[]> {
   const sb = createAdminSupabase();
@@ -204,6 +205,7 @@ export async function createItems(
     concept: row.concept || null,
     amount_usd: row.amount_usd,
     status: "pending" as const,
+    ...(row.metadata ? { metadata: row.metadata } : {}),
   }));
 
   const { data, error } = await sb
