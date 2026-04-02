@@ -24,6 +24,8 @@ type Tab = "financiero" | "soporte" | "infraestructura" | "ventas";
 
 interface AgingBucket { count: number; total: number }
 interface TopDebtor { partner_id: number; name: string; total_due: number; invoice_count: number; oldest_due_date: string; currency: string }
+interface PlanInfo { code: string; name: string; active: number; paused: number; total: number }
+interface PlanCategory { category: string; total: number; active: number; paused: number; plans: PlanInfo[] }
 
 interface FinanceStats {
   invoiced_ved: number;
@@ -42,6 +44,10 @@ interface FinanceStats {
   mrr_usd: number;
   aging: { bucket_0_15: AgingBucket; bucket_16_30: AgingBucket; bucket_31_60: AgingBucket; bucket_60_plus: AgingBucket };
   top_debtors: TopDebtor[];
+  plan_distribution: PlanCategory[];
+  total_services: number;
+  active_services: number;
+  paused_services: number;
   exchange_rate: number | null;
 }
 
@@ -122,7 +128,7 @@ function OverviewCards({ financeStats, infraOverview, ticketStats, ventasStats }
       status: financeStats
         ? (financeStats.collection_rate_ved > 85 ? "operational" as const : financeStats.collection_rate_ved > 70 ? "warning" as const : "critical" as const)
         : "operational" as const,
-      detail: financeStats ? `Bs ${financeStats.invoiced_ved.toLocaleString()} facturado` : "Cargando...",
+      detail: financeStats ? `${financeStats.active_services || 0} servicios activos` : "Cargando...",
     },
     {
       label: "Soporte", icon: "🎧",
@@ -221,10 +227,11 @@ function FinancieroTab({ stats, loading }: { stats: FinanceStats | null; loading
               <p className="text-xs text-gray-500 mt-1">Cobrado: ${fmt(stats.collected_usd)}</p>
             </div>
           </div>
-          <div className="mt-4 grid grid-cols-3 gap-3">
-            <MiniStat label="Suscripciones activas" value={stats.active_subscriptions.toString()} color="text-white" />
-            <MiniStat label="Pausadas" value={stats.paused_subscriptions.toString()} color="text-amber-400" />
-            <MiniStat label="Clientes morosos" value={stats.overdue_count.toString()} color="text-red-400" />
+          <div className="mt-4 grid grid-cols-4 gap-3">
+            <MiniStat label="Servicios activos" value={stats.active_services.toString()} color="text-white" />
+            <MiniStat label="Servicios pausados" value={stats.paused_services.toString()} color="text-amber-400" />
+            <MiniStat label="Total servicios" value={stats.total_services.toString()} color="text-gray-300" />
+            <MiniStat label="Morosos" value={stats.overdue_count.toString()} color="text-red-400" />
           </div>
         </Card>
 
@@ -311,6 +318,50 @@ function FinancieroTab({ stats, loading }: { stats: FinanceStats | null; loading
           )}
         </Card>
       </div>
+
+      {/* Row 4: Plan Distribution */}
+      {stats.plan_distribution && stats.plan_distribution.length > 0 && (
+        <Card>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-base font-bold text-white">📡 Distribución de Planes</h3>
+            <span className="text-xs text-gray-500">{stats.total_services} servicios totales — {stats.active_services} activos / {stats.paused_services} pausados</span>
+          </div>
+          <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
+            {stats.plan_distribution.map((cat) => {
+              const maxPlan = Math.max(...cat.plans.map((p) => p.total), 1);
+              return (
+                <div key={cat.category} className="p-3 bg-wuipi-bg rounded-xl border border-wuipi-border">
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="text-sm font-semibold text-white">{cat.category}</span>
+                    <span className="text-xs text-gray-400">
+                      <span className="text-white font-medium">{cat.active}</span>
+                      {cat.paused > 0 && <span className="text-amber-400 ml-1">+{cat.paused} pau</span>}
+                    </span>
+                  </div>
+                  <div className="space-y-1.5">
+                    {cat.plans.slice(0, 8).map((plan) => (
+                      <div key={plan.code} className="flex items-center gap-2">
+                        <span className="text-[10px] text-gray-500 w-[130px] truncate">{plan.name}</span>
+                        <div className="flex-1 h-1.5 bg-wuipi-card rounded-full overflow-hidden">
+                          <div className="h-full rounded-full flex">
+                            <div className="bg-emerald-500 h-full" style={{ width: `${(plan.active / maxPlan) * 100}%` }} />
+                            {plan.paused > 0 && <div className="bg-amber-500 h-full" style={{ width: `${(plan.paused / maxPlan) * 100}%` }} />}
+                          </div>
+                        </div>
+                        <span className="text-[10px] text-gray-400 w-8 text-right">{plan.total}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <div className="flex items-center gap-4 mt-3 pt-3 border-t border-wuipi-border">
+            <span className="flex items-center gap-1.5 text-[10px] text-gray-500"><span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" /> Activos</span>
+            <span className="flex items-center gap-1.5 text-[10px] text-gray-500"><span className="w-2 h-2 rounded-full bg-amber-500 inline-block" /> Pausados</span>
+          </div>
+        </Card>
+      )}
     </div>
   );
 }

@@ -508,3 +508,85 @@ export async function getSubscriptionSummary(): Promise<SubscriptionSummary> {
     mrr_usd: Math.round(mrr * 100) / 100,
   };
 }
+
+// ── Plan distribution ────────────────────────────────────────
+
+export interface PlanCategory {
+  category: string;
+  total: number;
+  active: number;
+  paused: number;
+  plans: Array<{ code: string; name: string; active: number; paused: number; total: number }>;
+}
+
+/**
+ * Get distribution of plans/services across active+paused subscriptions.
+ * Groups by category: Beam, Fibra, Legacy, Dedicado, Business, Addon.
+ */
+export async function getPlanDistribution(): Promise<PlanCategory[]> {
+  // Get subscription lines with product info
+  const lines = await searchRead("sale.order.line", [
+    ["order_id.is_subscription", "=", true],
+    ["order_id.subscription_state", "in", ["3_progress", "4_paused"]],
+    ["product_id", "!=", false],
+  ], {
+    fields: ["product_id", "product_uom_qty", "order_id"],
+    limit: 6000,
+  });
+
+  // Get subscription states for each order
+  const orderIds = Array.from(new Set(lines.map((l: any) => l.order_id[0]))) as number[];
+  const orders = await read("sale.order", orderIds, ["subscription_state"]);
+  const orderState = new Map(orders.map((o: any) => [o.id, o.subscription_state]));
+
+  // Group by product
+  const byProduct = new Map<string, { code: string; name: string; active: number; paused: number; total: number }>();
+
+  for (const l of lines) {
+    const fullName: string = l.product_id[1];
+    const code = fullName.match(/\[([^\]]+)\]/)?.[1] || "";
+    // Skip non-plan items
+    if (!code || code.startsWith("CCC") || code.startsWith("AAA") || code === "DESACTV") continue;
+
+    const shortName = fullName.replace(/\[.*?\]\s*/, "");
+    const state = orderState.get(l.order_id[0]);
+    const qty = l.product_uom_qty || 1;
+
+    if (!byProduct.has(code)) {
+      byProduct.set(code, { code, name: shortName, active: 0, paused: 0, total: 0 });
+    }
+    const entry = byProduct.get(code)!;
+    if (state === "3_progress") entry.active += qty;
+    else entry.paused += qty;
+    entry.total += qty;
+  }
+
+  // Categorize
+  const cats: Record<string, Array<{ code: string; name: string; active: number; paused: number; total: number }>> = {
+    Beam: [], Fibra: [], Legacy: [], Dedicado: [], Business: [], Addon: [],
+  };
+
+  for (const plan of byProduct.values()) {
+    if (plan.code.startsWith("BM") && !plan.code.startsWith("BS")) cats.Beam.push(plan);
+    else if (plan.code.startsWith("FO")) cats.Fibra.push(plan);
+    else if (plan.code.startsWith("LG")) cats.Legacy.push(plan);
+    else if (plan.code.startsWith("DD")) cats.Dedicado.push(plan);
+    else if (plan.code.startsWith("BS")) cats.Business.push(plan);
+    else cats.Addon.push(plan);
+  }
+
+  const result: PlanCategory[] = [];
+  for (const [category, plans] of Object.entries(cats)) {
+    if (plans.length === 0) continue;
+    plans.sort((a, b) => b.total - a.total);
+    result.push({
+      category,
+      total: plans.reduce((s, p) => s + p.total, 0),
+      active: plans.reduce((s, p) => s + p.active, 0),
+      paused: plans.reduce((s, p) => s + p.paused, 0),
+      plans,
+    });
+  }
+  result.sort((a, b) => b.total - a.total);
+  return result;
+}
