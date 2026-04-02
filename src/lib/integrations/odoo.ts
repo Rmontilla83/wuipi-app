@@ -28,19 +28,19 @@ interface JsonRpcResponse {
   error?: { code: number; message: string; data: { message: string } };
 }
 
-async function jsonRpc(url: string, method: string, params: any[]): Promise<any> {
+async function jsonRpc(service: "common" | "object", method: string, args: any[]): Promise<any> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
   try {
-    const res = await fetch(url, {
+    const res = await fetch(`${ODOO_URL}/jsonrpc`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         jsonrpc: "2.0",
         id: Date.now(),
         method: "call",
-        params: { service: getService(url), method, args: params },
+        params: { service, method, args },
       }),
       signal: controller.signal,
     });
@@ -62,12 +62,6 @@ async function jsonRpc(url: string, method: string, params: any[]): Promise<any>
   }
 }
 
-function getService(url: string): string {
-  if (url.includes("/common")) return "common";
-  if (url.includes("/object")) return "object";
-  return "common";
-}
-
 // ── Authentication ───────────────────────────────────────────
 
 export async function authenticate(): Promise<number> {
@@ -76,11 +70,7 @@ export async function authenticate(): Promise<number> {
     return cachedUid;
   }
 
-  const uid = await jsonRpc(
-    `${ODOO_URL}/jsonrpc`,
-    "authenticate",
-    [ODOO_DB, ODOO_USER, ODOO_API_KEY, {}]
-  );
+  const uid = await jsonRpc("common", "authenticate", [ODOO_DB, ODOO_USER, ODOO_API_KEY, {}]);
 
   if (!uid || typeof uid !== "number") {
     throw new Error("Odoo authentication failed — invalid uid");
@@ -114,7 +104,7 @@ export async function searchRead(
   if (options.offset !== undefined) kwargs.offset = options.offset;
   if (options.order) kwargs.order = options.order;
 
-  return jsonRpc(`${ODOO_URL}/jsonrpc`, "execute_kw", [
+  return jsonRpc("object", "execute_kw", [
     ODOO_DB, uid, ODOO_API_KEY,
     model, "search_read",
     [domain],
@@ -127,7 +117,7 @@ export async function searchCount(
   domain: OdooDomain[]
 ): Promise<number> {
   const uid = await authenticate();
-  return jsonRpc(`${ODOO_URL}/jsonrpc`, "execute_kw", [
+  return jsonRpc("object", "execute_kw", [
     ODOO_DB, uid, ODOO_API_KEY,
     model, "search_count",
     [domain],
@@ -144,7 +134,7 @@ export async function read(
   const kwargs: Record<string, any> = {};
   if (fields) kwargs.fields = fields;
 
-  return jsonRpc(`${ODOO_URL}/jsonrpc`, "execute_kw", [
+  return jsonRpc("object", "execute_kw", [
     ODOO_DB, uid, ODOO_API_KEY,
     model, "read",
     [ids],
