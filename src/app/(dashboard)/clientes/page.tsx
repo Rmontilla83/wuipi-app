@@ -1,520 +1,184 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { TopBar } from "@/components/layout/topbar";
 import { Card } from "@/components/ui/card";
 import {
-  Users, Search, Plus, X, Save,
-  Wifi, WifiOff, AlertTriangle, Phone, Mail,
-  Clock, Edit2, Trash2, Power,
-  MapPin, FileText, CreditCard, Server, Upload,
+  Users, Search, RefreshCw, ChevronLeft, ChevronRight, ChevronDown,
 } from "lucide-react";
+import type { OdooClient } from "@/types/odoo";
 
-// ============================================
-// TYPES
-// ============================================
-interface Client {
-  id: string;
-  code: string;
-  legal_name: string;
-  trade_name: string;
-  document_type: string;
-  document_number: string;
-  email: string;
-  phone: string;
-  phone_alt: string;
-  contact_person: string;
-  address: string;
-  city: string;
-  state: string;
-  sector: string;
-  nodo: string;
-  plan_id: string | null;
-  service_status: string;
-  installation_date: string | null;
-  billing_currency: string;
-  billing_day: number;
-  notes: string;
-  created_at: string;
-  // New service fields
-  plan_name: string | null;
-  plan_speed_down: number | null;
-  plan_speed_up: number | null;
-  monthly_rate: number | null;
-  service_ip: string | null;
-  service_mac: string | null;
-  service_node_code: string | null;
-  service_technology: string | null;
-  service_vlan: string | null;
-  service_router: string | null;
-  service_queue_name: string | null;
-  odoo_partner_id: number | null;
-  bequant_subscriber_id: string | null;
-  plans?: { id: string; code: string; name: string; price_usd: number } | null;
-}
+const fmtUSD = (n: number) =>
+  `$${n.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-interface Plan {
-  id: string;
-  code: string;
-  name: string;
-  speed_mbps: number;
-  price_usd: number;
-  is_active: boolean;
-}
-
-interface NetworkNode {
-  id: string;
-  code: string;
-  name: string;
-  location: string | null;
-}
-
-const EMPTY_FORM: Record<string, any> = {
-  legal_name: "",
-  trade_name: "",
-  document_type: "V",
-  document_number: "",
-  email: "",
-  phone: "",
-  phone_alt: "",
-  contact_person: "",
-  address: "",
-  city: "",
-  state: "Anzoátegui",
-  sector: "",
-  nodo: "",
-  plan_id: "",
-  service_status: "active",
-  installation_date: "",
-  billing_currency: "USD",
-  billing_day: 1,
-  notes: "",
-  // Service fields
-  service_ip: "",
-  service_mac: "",
-  service_node_code: "",
-  service_technology: "",
-  service_vlan: "",
-  service_router: "",
-  service_queue_name: "",
-};
-
-const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string; icon: any }> = {
-  active: { label: "Activo", color: "text-emerald-400", bg: "bg-emerald-400/10", icon: Wifi },
-  suspended: { label: "Suspendido", color: "text-red-400", bg: "bg-red-400/10", icon: WifiOff },
-  pending: { label: "Pendiente", color: "text-amber-400", bg: "bg-amber-400/10", icon: Clock },
-  cancelled: { label: "Cancelado", color: "text-gray-500", bg: "bg-gray-500/10", icon: AlertTriangle },
-};
-
-const DOC_TYPES = [
-  { value: "V", label: "V - Cédula" },
-  { value: "J", label: "J - RIF Jurídico" },
-  { value: "E", label: "E - Extranjero" },
-  { value: "G", label: "G - Gobierno" },
-  { value: "P", label: "P - Pasaporte" },
+const STATUS_FILTERS = [
+  { value: "", label: "Todos" },
+  { value: "active", label: "Activos" },
+  { value: "paused", label: "Pausados" },
+  { value: "suspended", label: "Suspendidos" },
+  { value: "debt", label: "Con deuda" },
 ];
 
-const TECH_OPTIONS = [
-  { value: "", label: "Sin especificar" },
-  { value: "fiber", label: "Fibra Óptica" },
-  { value: "wireless", label: "Beamforming" },
-  { value: "terragraph", label: "Terragraph" },
-  { value: "mixed", label: "Mixto" },
-];
+function getClientStatus(c: OdooClient): { label: string; color: string } {
+  if (c.suspend) return { label: "Suspendido", color: "text-red-400 bg-red-400/10" };
+  if (c.subscription_status === "paused") return { label: "Pausado", color: "text-amber-400 bg-amber-400/10" };
+  if (c.subscription_status === "progress") return { label: "Activo", color: "text-emerald-400 bg-emerald-400/10" };
+  if (c.subscription_count === 0) return { label: "Sin servicio", color: "text-gray-400 bg-gray-400/10" };
+  return { label: "Inactivo", color: "text-gray-400 bg-gray-400/10" };
+}
 
-// ============================================
-// MAIN PAGE
-// ============================================
 export default function ClientesPage() {
   const router = useRouter();
-  const [clients, setClients] = useState<Client[]>([]);
-  const [plans, setPlans] = useState<Plan[]>([]);
-  const [nodes, setNodes] = useState<NetworkNode[]>([]);
-  const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [nodoFilter, setNodoFilter] = useState<string>("all");
-  const [loading, setLoading] = useState(true);
+  const [clients, setClients] = useState<OdooClient[]>([]);
   const [total, setTotal] = useState(0);
-  const [stats, setStats] = useState({ total: 0, active: 0, suspended: 0, pending: 0 });
-
-  // Modal state
-  const [showModal, setShowModal] = useState(false);
-  const [editingClient, setEditingClient] = useState<Client | null>(null);
-  const [form, setForm] = useState(EMPTY_FORM);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
-
-  // Delete confirm
-  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
-
-  // Debounce search
-  const searchTimeout = useRef<NodeJS.Timeout | null>(null);
+  const [page, setPage] = useState(1);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
 
   useEffect(() => {
-    if (searchTimeout.current) clearTimeout(searchTimeout.current);
-    searchTimeout.current = setTimeout(() => setDebouncedSearch(search), 400);
-    return () => { if (searchTimeout.current) clearTimeout(searchTimeout.current); };
+    const t = setTimeout(() => setDebouncedSearch(search), 400);
+    return () => clearTimeout(t);
   }, [search]);
 
-  // Fetch plans + nodes on mount
-  useEffect(() => {
-    fetch("/api/facturacion/catalog?type=plans")
-      .then(r => r.json())
-      .then(d => setPlans(d.plans || []))
-      .catch(() => {});
-    fetch("/api/facturacion/network-nodes")
-      .then(r => r.json())
-      .then(d => setNodes(Array.isArray(d) ? d : []))
-      .catch(() => {});
-  }, []);
-
-  // Fetch clients
   const fetchClients = useCallback(async () => {
+    setLoading(true);
     try {
-      setLoading(true);
       const params = new URLSearchParams();
       if (debouncedSearch) params.set("search", debouncedSearch);
-      if (statusFilter !== "all") params.set("status", statusFilter);
-      if (nodoFilter !== "all") params.set("nodo", nodoFilter);
-      const res = await fetch(`/api/facturacion/clients?${params}`);
-      if (res.ok) {
-        const json = await res.json();
-        const data = Array.isArray(json) ? json : (json.data || []);
-        setClients(data);
-        setTotal(json.total || data.length);
-        setStats({
-          total: json.total || data.length,
-          active: data.filter((c: Client) => c.service_status === "active").length,
-          suspended: data.filter((c: Client) => c.service_status === "suspended").length,
-          pending: data.filter((c: Client) => c.service_status === "pending").length,
-        });
-      }
+      if (statusFilter) params.set("status", statusFilter);
+      params.set("page", String(page));
+      params.set("limit", "50");
+
+      const res = await fetch(`/api/odoo/clients?${params}`);
+      if (!res.ok) throw new Error("Error al cargar clientes");
+      const data = await res.json();
+      setClients(data.clients || []);
+      setTotal(data.total || 0);
     } catch (err) {
-      console.error("Error fetching clients:", err);
+      console.error(err);
     } finally {
       setLoading(false);
     }
-  }, [debouncedSearch, statusFilter, nodoFilter]);
+  }, [debouncedSearch, statusFilter, page]);
 
   useEffect(() => { fetchClients(); }, [fetchClients]);
+  useEffect(() => { setPage(1); }, [debouncedSearch, statusFilter]);
 
-  // Open create modal
-  const openCreate = () => {
-    setEditingClient(null);
-    setForm(EMPTY_FORM);
-    setError("");
-    setShowModal(true);
-  };
-
-  // Open edit modal
-  const openEdit = (client: Client) => {
-    setEditingClient(client);
-    setForm({
-      legal_name: client.legal_name || "",
-      trade_name: client.trade_name || "",
-      document_type: client.document_type || "V",
-      document_number: client.document_number || "",
-      email: client.email || "",
-      phone: client.phone || "",
-      phone_alt: client.phone_alt || "",
-      contact_person: client.contact_person || "",
-      address: client.address || "",
-      city: client.city || "",
-      state: client.state || "Anzoátegui",
-      sector: client.sector || "",
-      nodo: client.nodo || "",
-      plan_id: client.plan_id || "",
-      service_status: client.service_status || "active",
-      installation_date: client.installation_date || "",
-      billing_currency: client.billing_currency || "USD",
-      billing_day: client.billing_day || 1,
-      notes: client.notes || "",
-      service_ip: client.service_ip || "",
-      service_mac: client.service_mac || "",
-      service_node_code: client.service_node_code || "",
-      service_technology: client.service_technology || "",
-      service_vlan: client.service_vlan || "",
-      service_router: client.service_router || "",
-      service_queue_name: client.service_queue_name || "",
-    });
-    setError("");
-    setShowModal(true);
-  };
-
-  // Save (create or update)
-  const handleSave = async () => {
-    if (!form.legal_name.trim()) { setError("El nombre es obligatorio"); return; }
-    if (!form.document_number.trim()) { setError("El documento es obligatorio"); return; }
-
-    setSaving(true);
-    setError("");
-    try {
-      const payload = {
-        ...form,
-        plan_id: form.plan_id || null,
-        installation_date: form.installation_date || null,
-        service_ip: form.service_ip || null,
-        service_mac: form.service_mac || null,
-        service_node_code: form.service_node_code || null,
-        service_technology: form.service_technology || null,
-        service_vlan: form.service_vlan || null,
-        service_router: form.service_router || null,
-        service_queue_name: form.service_queue_name || null,
-      };
-
-      const url = editingClient
-        ? `/api/facturacion/clients/${editingClient.id}`
-        : "/api/facturacion/clients";
-
-      const res = await fetch(url, {
-        method: editingClient ? "PUT" : "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || "Error al guardar");
-      }
-
-      setShowModal(false);
-      fetchClients();
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  // Toggle status (active <-> suspended)
-  const toggleStatus = async (client: Client) => {
-    const newStatus = client.service_status === "active" ? "suspended" : "active";
-    try {
-      const res = await fetch(`/api/facturacion/clients/${client.id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ service_status: newStatus }),
-      });
-      if (res.ok) fetchClients();
-    } catch (err) {
-      console.error("Error toggling status:", err);
-    }
-  };
-
-  // Delete (soft)
-  const handleDelete = async (id: string) => {
-    try {
-      const res = await fetch(`/api/facturacion/clients/${id}`, { method: "DELETE" });
-      if (res.ok) {
-        setDeleteConfirm(null);
-        fetchClients();
-      }
-    } catch (err) {
-      console.error("Error deleting client:", err);
-    }
-  };
-
-  // Form field helper
-  const setField = (key: string, value: any) => setForm(prev => ({ ...prev, [key]: value }));
+  const totalPages = Math.ceil(total / 50);
 
   return (
     <>
-      <TopBar title="Clientes" subtitle={`${total} registrados`} icon={<Users size={22} />} />
-      <div className="flex-1 overflow-auto p-6 space-y-4">
+      <TopBar title="Clientes" subtitle={`${total.toLocaleString()} clientes en Odoo`} />
+      <div className="p-4 md:p-6 space-y-4">
 
-        {/* Stats Cards */}
-        <div className="grid grid-cols-4 gap-3">
-          {[
-            { label: "Total", value: stats.total, color: "text-white", bg: "border-wuipi-accent/20" },
-            { label: "Activos", value: stats.active, color: "text-emerald-400", bg: "border-emerald-400/20" },
-            { label: "Suspendidos", value: stats.suspended, color: "text-red-400", bg: "border-red-400/20" },
-            { label: "Pendientes", value: stats.pending, color: "text-amber-400", bg: "border-amber-400/20" },
-          ].map(s => (
-            <Card key={s.label} className={`${s.bg} !p-4`}>
-              <p className="text-xs text-gray-500 mb-1">{s.label}</p>
-              <p className={`text-2xl font-bold ${s.color}`}>{s.value}</p>
-            </Card>
-          ))}
-        </div>
-
-        {/* Search + Filters */}
-        <div className="flex items-center gap-3">
-          <div className="relative flex-1">
-            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Buscar por nombre, cédula, código, IP..."
-              className="w-full bg-wuipi-card border border-wuipi-border rounded-lg pl-10 pr-4 py-2.5 text-sm text-white placeholder:text-gray-600 focus:outline-none focus:border-wuipi-accent/50"
-            />
-          </div>
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="bg-wuipi-card border border-wuipi-border rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none"
-          >
-            <option value="all">Todos</option>
-            <option value="active">Activos</option>
-            <option value="suspended">Suspendidos</option>
-            <option value="pending">Pendientes</option>
-            <option value="cancelled">Cancelados</option>
-          </select>
-          {nodes.length > 0 && (
-            <select
-              value={nodoFilter}
-              onChange={(e) => setNodoFilter(e.target.value)}
-              className="bg-wuipi-card border border-wuipi-border rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none"
-            >
-              <option value="all">Todos los nodos</option>
-              {nodes.map(n => (
-                <option key={n.id} value={n.code}>{n.name}</option>
-              ))}
-            </select>
-          )}
-          <button
-            onClick={() => router.push("/clientes/importar")}
-            className="flex items-center gap-2 border border-wuipi-border text-gray-400 hover:text-white px-4 py-2.5 rounded-lg text-sm font-medium transition-colors shrink-0"
-          >
-            <Upload size={16} /> Importar
-          </button>
-          <button
-            onClick={openCreate}
-            className="flex items-center gap-2 bg-wuipi-accent text-black px-4 py-2.5 rounded-lg text-sm font-semibold hover:bg-wuipi-accent/90 transition-colors shrink-0"
-          >
-            <Plus size={16} /> Nuevo Cliente
-          </button>
-        </div>
-
-        {/* Client List */}
-        <Card className="overflow-hidden">
-          {loading ? (
-            <div className="p-12 text-center text-gray-500">Cargando clientes...</div>
-          ) : clients.length === 0 ? (
-            <div className="p-12 text-center">
-              <Users size={48} className="mx-auto mb-4 text-gray-600" />
-              <h3 className="text-lg font-semibold text-white mb-2">
-                {debouncedSearch || statusFilter !== "all" || nodoFilter !== "all" ? "Sin resultados" : "Sin clientes aún"}
-              </h3>
-              <p className="text-gray-500 text-sm mb-4">
-                {debouncedSearch || statusFilter !== "all" || nodoFilter !== "all"
-                  ? "Intenta con otros filtros de búsqueda."
-                  : "Agrega tu primer cliente para comenzar."}
-              </p>
-              {!debouncedSearch && statusFilter === "all" && nodoFilter === "all" && (
-                <button onClick={openCreate} className="bg-wuipi-accent text-black px-4 py-2 rounded-lg text-sm font-semibold">
-                  <Plus size={16} className="inline mr-1" /> Crear primer cliente
-                </button>
-              )}
+        {/* Filters */}
+        <Card className="!p-3">
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="relative flex-1 min-w-[240px]">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Buscar por nombre, RIF, email, teléfono..."
+                className="w-full pl-9 pr-3 py-2 rounded-lg bg-wuipi-bg border border-wuipi-border text-sm text-white placeholder-gray-600 focus:border-wuipi-accent/50 focus:outline-none"
+              />
             </div>
-          ) : (
+            <div className="relative">
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                className="appearance-none px-3 py-2 pr-8 rounded-lg bg-wuipi-bg border border-wuipi-border text-sm text-white focus:border-wuipi-accent/50 focus:outline-none"
+              >
+                {STATUS_FILTERS.map((f) => (
+                  <option key={f.value} value={f.value}>{f.label}</option>
+                ))}
+              </select>
+              <ChevronDown size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" />
+            </div>
+            <button
+              onClick={fetchClients}
+              disabled={loading}
+              className="p-2 rounded-lg border border-wuipi-border text-gray-400 hover:text-white transition-colors"
+            >
+              <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
+            </button>
+            <span className="text-xs text-gray-500 ml-auto">
+              {total.toLocaleString()} resultado{total !== 1 ? "s" : ""}
+            </span>
+          </div>
+        </Card>
+
+        {/* Table */}
+        {loading ? (
+          <div className="flex items-center justify-center py-16">
+            <RefreshCw size={20} className="animate-spin text-gray-500" />
+            <span className="ml-3 text-gray-500 text-sm">Consultando Odoo...</span>
+          </div>
+        ) : clients.length === 0 ? (
+          <Card className="text-center py-12">
+            <Users size={32} className="mx-auto mb-3 text-gray-600" />
+            <p className="text-gray-400 text-sm">No se encontraron clientes</p>
+          </Card>
+        ) : (
+          <Card className="!p-0 overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-wuipi-border text-gray-500 text-xs uppercase">
-                    <th className="text-left p-3 pl-4">Cliente</th>
-                    <th className="text-left p-3">Plan</th>
-                    <th className="text-left p-3">Nodo</th>
-                    <th className="text-left p-3">IP</th>
-                    <th className="text-left p-3">Contacto</th>
-                    <th className="text-center p-3">Estado</th>
-                    <th className="text-right p-3 pr-4">Acciones</th>
+                <thead className="sticky top-0 bg-wuipi-card z-10">
+                  <tr className="text-gray-500 text-xs border-b border-wuipi-border">
+                    <th className="text-left p-3 font-medium">Cliente</th>
+                    <th className="text-left p-3 font-medium">Contacto</th>
+                    <th className="text-left p-3 font-medium">Ciudad</th>
+                    <th className="text-left p-3 font-medium">Servicios</th>
+                    <th className="text-right p-3 font-medium">MRR</th>
+                    <th className="text-right p-3 font-medium">Saldo</th>
+                    <th className="text-center p-3 font-medium">Estado</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {clients.map(client => {
-                    const status = STATUS_CONFIG[client.service_status] || STATUS_CONFIG.pending;
-                    const StatusIcon = status.icon;
-                    const nodeName = client.service_node_code
-                      ? (nodes.find(n => n.code === client.service_node_code)?.name || client.service_node_code)
-                      : null;
+                  {clients.map((c) => {
+                    const status = getClientStatus(c);
                     return (
-                      <tr key={client.id} onClick={() => router.push(`/clientes/${client.id}`)} className="border-b border-wuipi-border/50 hover:bg-wuipi-card-hover transition-colors cursor-pointer">
-                        <td className="p-3 pl-4">
-                          <div>
-                            <p className="text-white font-medium">{client.legal_name}</p>
-                            <p className="text-gray-500 text-xs">
-                              {client.code} • {client.document_type}-{client.document_number}
-                            </p>
-                          </div>
+                      <tr
+                        key={c.id}
+                        onClick={() => router.push(`/clientes/${c.id}`)}
+                        className="border-b border-wuipi-border/50 hover:bg-wuipi-card-hover cursor-pointer transition-colors"
+                      >
+                        <td className="p-3">
+                          <p className="text-white text-xs font-medium">{c.name}</p>
+                          <p className="text-gray-500 text-[10px] font-mono">
+                            {c.identification_type ? `${c.identification_type} ` : ""}{c.vat}
+                          </p>
                         </td>
                         <td className="p-3">
-                          {client.plan_name || client.plans ? (
-                            <div>
-                              <span className="text-gray-300 text-xs">{client.plan_name || client.plans?.name}</span>
-                              {(client.monthly_rate || client.plans?.price_usd) && (
-                                <span className="text-gray-600 text-xs ml-1">${client.monthly_rate || client.plans?.price_usd}</span>
-                              )}
-                            </div>
-                          ) : (
-                            <span className="text-gray-600 text-xs">Sin plan</span>
-                          )}
+                          <p className="text-gray-300 text-xs">{c.mobile || c.phone || "—"}</p>
+                          <p className="text-gray-600 text-[10px] truncate max-w-[160px]">{c.email || ""}</p>
                         </td>
+                        <td className="p-3 text-gray-400 text-xs">{c.city}{c.state ? `, ${c.state}` : ""}</td>
                         <td className="p-3">
-                          {nodeName ? (
-                            <span className="text-gray-300 text-xs flex items-center gap-1">
-                              <Server size={11} className="text-gray-500" /> {nodeName}
+                          <p className="text-white text-xs">{c.subscription_count} suscripción{c.subscription_count !== 1 ? "es" : ""}</p>
+                          <p className="text-gray-600 text-[10px] truncate max-w-[180px]">
+                            {c.main_plans.length > 0 ? c.main_plans.slice(0, 3).join(", ") : "—"}
+                          </p>
+                        </td>
+                        <td className="p-3 text-right text-cyan-400 text-xs font-medium">
+                          {c.mrr_usd > 0 ? fmtUSD(c.mrr_usd) : "—"}
+                        </td>
+                        <td className="p-3 text-right">
+                          {c.credit > 0 ? (
+                            <span className="text-red-400 text-xs font-medium">
+                              {c.credit.toLocaleString("es-VE", { minimumFractionDigits: 2 })}
                             </span>
                           ) : (
-                            <span className="text-gray-600 text-xs">—</span>
+                            <span className="text-gray-600 text-xs">0.00</span>
                           )}
-                        </td>
-                        <td className="p-3">
-                          {client.service_ip ? (
-                            <span className="font-mono text-xs text-cyan-400/80">{client.service_ip}</span>
-                          ) : (
-                            <span className="text-gray-600 text-xs">—</span>
-                          )}
-                        </td>
-                        <td className="p-3">
-                          <div className="flex flex-col gap-0.5">
-                            {client.phone && (
-                              <span className="flex items-center gap-1 text-gray-500 text-xs">
-                                <Phone size={11} /> {client.phone}
-                              </span>
-                            )}
-                            {client.email && (
-                              <span className="flex items-center gap-1 text-gray-500 text-xs">
-                                <Mail size={11} /> {client.email}
-                              </span>
-                            )}
-                          </div>
                         </td>
                         <td className="p-3 text-center">
-                          <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${status.color} ${status.bg}`}>
-                            <StatusIcon size={12} /> {status.label}
+                          <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-medium ${status.color}`}>
+                            {status.label}
                           </span>
-                        </td>
-                        <td className="p-3 pr-4">
-                          <div className="flex items-center justify-end gap-1" onClick={e => e.stopPropagation()}>
-                            <button
-                              onClick={() => toggleStatus(client)}
-                              title={client.service_status === "active" ? "Suspender" : "Activar"}
-                              className={`p-1.5 rounded-lg transition-colors ${
-                                client.service_status === "active"
-                                  ? "text-gray-500 hover:text-red-400 hover:bg-red-400/10"
-                                  : "text-gray-500 hover:text-emerald-400 hover:bg-emerald-400/10"
-                              }`}
-                            >
-                              <Power size={14} />
-                            </button>
-                            <button
-                              onClick={() => openEdit(client)}
-                              title="Editar"
-                              className="p-1.5 rounded-lg text-gray-500 hover:text-wuipi-accent hover:bg-wuipi-accent/10 transition-colors"
-                            >
-                              <Edit2 size={14} />
-                            </button>
-                            <button
-                              onClick={() => setDeleteConfirm(client.id)}
-                              title="Eliminar"
-                              className="p-1.5 rounded-lg text-gray-500 hover:text-red-400 hover:bg-red-400/10 transition-colors"
-                            >
-                              <Trash2 size={14} />
-                            </button>
-                          </div>
                         </td>
                       </tr>
                     );
@@ -522,271 +186,34 @@ export default function ClientesPage() {
                 </tbody>
               </table>
             </div>
-          )}
-        </Card>
-      </div>
+          </Card>
+        )}
 
-      {/* ============================================ */}
-      {/* CREATE / EDIT MODAL */}
-      {/* ============================================ */}
-      {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-          <div className="bg-wuipi-sidebar border border-wuipi-border rounded-2xl w-full max-w-2xl max-h-[90vh] flex flex-col">
-            {/* Header */}
-            <div className="flex items-center justify-between p-5 border-b border-wuipi-border shrink-0">
-              <h2 className="text-lg font-bold text-white">
-                {editingClient ? `Editar: ${editingClient.legal_name}` : "Nuevo Cliente"}
-              </h2>
-              <button onClick={() => setShowModal(false)} className="text-gray-500 hover:text-white">
-                <X size={20} />
-              </button>
-            </div>
-
-            {/* Body - Scrollable */}
-            <div className="flex-1 overflow-y-auto p-5 space-y-5">
-              {error && (
-                <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-sm">
-                  {error}
-                </div>
-              )}
-
-              {/* Identity */}
-              <fieldset>
-                <legend className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3 flex items-center gap-2">
-                  <FileText size={12} /> Identificación
-                </legend>
-                <div className="grid grid-cols-2 gap-3">
-                  <FormInput label="Razón Social *" value={form.legal_name} onChange={v => setField("legal_name", v)} placeholder="Nombre completo o empresa" />
-                  <FormInput label="Nombre Comercial" value={form.trade_name} onChange={v => setField("trade_name", v)} placeholder="Nombre corto (opcional)" />
-                  <div className="grid grid-cols-3 gap-2 col-span-2">
-                    <FormSelect label="Tipo Doc" value={form.document_type} onChange={v => setField("document_type", v)} options={DOC_TYPES} />
-                    <div className="col-span-2">
-                      <FormInput label="Nro Documento *" value={form.document_number} onChange={v => setField("document_number", v)} placeholder="12345678 o J-12345678-0" />
-                    </div>
-                  </div>
-                </div>
-              </fieldset>
-
-              {/* Contact */}
-              <fieldset>
-                <legend className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3 flex items-center gap-2">
-                  <Phone size={12} /> Contacto
-                </legend>
-                <div className="grid grid-cols-2 gap-3">
-                  <FormInput label="Email" type="email" value={form.email} onChange={v => setField("email", v)} placeholder="correo@ejemplo.com" />
-                  <FormInput label="Teléfono" value={form.phone} onChange={v => setField("phone", v)} placeholder="+58 412-1234567" />
-                  <FormInput label="Teléfono Alt." value={form.phone_alt} onChange={v => setField("phone_alt", v)} placeholder="Opcional" />
-                  <FormInput label="Persona Contacto" value={form.contact_person} onChange={v => setField("contact_person", v)} placeholder="Nombre del contacto" />
-                </div>
-              </fieldset>
-
-              {/* Address */}
-              <fieldset>
-                <legend className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3 flex items-center gap-2">
-                  <MapPin size={12} /> Ubicación
-                </legend>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="col-span-2">
-                    <FormInput label="Dirección" value={form.address} onChange={v => setField("address", v)} placeholder="Dirección completa" />
-                  </div>
-                  <FormInput label="Ciudad" value={form.city} onChange={v => setField("city", v)} placeholder="Lechería, Barcelona..." />
-                  <FormInput label="Estado" value={form.state} onChange={v => setField("state", v)} placeholder="Anzoátegui" />
-                  <FormInput label="Sector / Urbanización" value={form.sector} onChange={v => setField("sector", v)} placeholder="Sector o urbanización" />
-                  <FormInput label="Nodo (texto libre)" value={form.nodo} onChange={v => setField("nodo", v)} placeholder="Lechería-Norte, etc." />
-                </div>
-              </fieldset>
-
-              {/* Service */}
-              <fieldset>
-                <legend className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3 flex items-center gap-2">
-                  <Wifi size={12} /> Servicio
-                </legend>
-                <div className="grid grid-cols-2 gap-3">
-                  <FormSelect
-                    label="Plan"
-                    value={form.plan_id}
-                    onChange={v => setField("plan_id", v)}
-                    options={[
-                      { value: "", label: "Sin plan asignado" },
-                      ...plans.map(p => ({ value: p.id, label: `${p.name} — $${p.price_usd}/mes` })),
-                    ]}
-                  />
-                  <FormSelect
-                    label="Estado del servicio"
-                    value={form.service_status}
-                    onChange={v => setField("service_status", v)}
-                    options={[
-                      { value: "active", label: "Activo" },
-                      { value: "suspended", label: "Suspendido" },
-                      { value: "pending", label: "Pendiente instalación" },
-                      { value: "cancelled", label: "Cancelado" },
-                    ]}
-                  />
-                  <FormInput label="Fecha de Instalación" type="date" value={form.installation_date} onChange={v => setField("installation_date", v)} />
-                </div>
-              </fieldset>
-
-              {/* Technical / Datos Técnicos */}
-              <fieldset>
-                <legend className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3 flex items-center gap-2">
-                  <Server size={12} /> Datos Técnicos
-                </legend>
-                <div className="grid grid-cols-2 gap-3">
-                  <FormSelect
-                    label="Nodo de red"
-                    value={form.service_node_code}
-                    onChange={v => setField("service_node_code", v)}
-                    options={[
-                      { value: "", label: "Sin asignar" },
-                      ...nodes.map(n => ({ value: n.code, label: n.name })),
-                    ]}
-                  />
-                  <FormSelect
-                    label="Tecnología"
-                    value={form.service_technology}
-                    onChange={v => setField("service_technology", v)}
-                    options={TECH_OPTIONS}
-                  />
-                  <FormInput label="IP de servicio" value={form.service_ip} onChange={v => setField("service_ip", v)} placeholder="10.0.0.1" />
-                  <FormInput label="MAC Address" value={form.service_mac} onChange={v => setField("service_mac", v)} placeholder="AA:BB:CC:DD:EE:FF" />
-                  <FormInput label="VLAN" value={form.service_vlan} onChange={v => setField("service_vlan", v)} placeholder="100" />
-                  <FormInput label="Router / CPE" value={form.service_router} onChange={v => setField("service_router", v)} placeholder="Modelo o serial" />
-                  <div className="col-span-2">
-                    <FormInput label="Queue Name (MikroTik)" value={form.service_queue_name} onChange={v => setField("service_queue_name", v)} placeholder="queue-cliente-xxx" />
-                  </div>
-                </div>
-              </fieldset>
-
-              {/* Billing */}
-              <fieldset>
-                <legend className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3 flex items-center gap-2">
-                  <CreditCard size={12} /> Facturación
-                </legend>
-                <div className="grid grid-cols-2 gap-3">
-                  <FormSelect
-                    label="Moneda de facturación"
-                    value={form.billing_currency}
-                    onChange={v => setField("billing_currency", v)}
-                    options={[
-                      { value: "USD", label: "USD — Dólares" },
-                      { value: "VES", label: "VES — Bolívares" },
-                    ]}
-                  />
-                  <div>
-                    <label className="block text-xs text-gray-500 mb-1.5">Día de facturación</label>
-                    <input
-                      type="number"
-                      min={1}
-                      max={28}
-                      value={form.billing_day}
-                      onChange={e => setField("billing_day", parseInt(e.target.value) || 1)}
-                      className="w-full bg-wuipi-bg border border-wuipi-border rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-wuipi-accent/50"
-                    />
-                  </div>
-                </div>
-              </fieldset>
-
-              {/* Notes */}
-              <fieldset>
-                <legend className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Notas</legend>
-                <textarea
-                  value={form.notes}
-                  onChange={e => setField("notes", e.target.value)}
-                  rows={3}
-                  placeholder="Notas internas sobre el cliente..."
-                  className="w-full bg-wuipi-bg border border-wuipi-border rounded-lg px-3 py-2 text-sm text-white placeholder:text-gray-600 focus:outline-none focus:border-wuipi-accent/50 resize-none"
-                />
-              </fieldset>
-            </div>
-
-            {/* Footer */}
-            <div className="flex items-center justify-between p-5 border-t border-wuipi-border shrink-0">
-              <button onClick={() => setShowModal(false)} className="px-4 py-2 text-sm text-gray-400 hover:text-white transition-colors">
-                Cancelar
-              </button>
-              <button
-                onClick={handleSave}
-                disabled={saving}
-                className="flex items-center gap-2 bg-wuipi-accent text-black px-5 py-2.5 rounded-lg text-sm font-semibold hover:bg-wuipi-accent/90 transition-colors disabled:opacity-50"
-              >
-                <Save size={16} />
-                {saving ? "Guardando..." : editingClient ? "Guardar Cambios" : "Crear Cliente"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ============================================ */}
-      {/* DELETE CONFIRMATION */}
-      {/* ============================================ */}
-      {deleteConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-          <div className="bg-wuipi-sidebar border border-wuipi-border rounded-2xl p-6 max-w-sm w-full">
-            <div className="w-12 h-12 rounded-xl bg-red-500/10 flex items-center justify-center mx-auto mb-4">
-              <Trash2 size={24} className="text-red-400" />
-            </div>
-            <h3 className="text-lg font-bold text-white text-center mb-2">¿Eliminar cliente?</h3>
-            <p className="text-sm text-gray-400 text-center mb-6">
-              El cliente será marcado como eliminado. Esta acción se puede revertir desde la base de datos.
+        {/* Pagination */}
+        {totalPages > 1 && (
+          <div className="flex items-center justify-between">
+            <p className="text-xs text-gray-500">
+              Página {page} de {totalPages} ({total.toLocaleString()} clientes)
             </p>
-            <div className="flex gap-3">
+            <div className="flex items-center gap-2">
               <button
-                onClick={() => setDeleteConfirm(null)}
-                className="flex-1 px-4 py-2.5 border border-wuipi-border rounded-lg text-sm text-gray-400 hover:text-white transition-colors"
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page === 1}
+                className="p-2 rounded-lg border border-wuipi-border text-gray-400 hover:text-white disabled:opacity-30 transition-colors"
               >
-                Cancelar
+                <ChevronLeft size={14} />
               </button>
               <button
-                onClick={() => handleDelete(deleteConfirm)}
-                className="flex-1 px-4 py-2.5 bg-red-500/10 border border-red-500/20 rounded-lg text-sm text-red-400 font-semibold hover:bg-red-500/20 transition-colors"
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={page === totalPages}
+                className="p-2 rounded-lg border border-wuipi-border text-gray-400 hover:text-white disabled:opacity-30 transition-colors"
               >
-                Sí, eliminar
+                <ChevronRight size={14} />
               </button>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </>
-  );
-}
-
-// ============================================
-// FORM COMPONENTS
-// ============================================
-function FormInput({ label, value, onChange, placeholder, type = "text" }: {
-  label: string; value: string; onChange: (v: string) => void; placeholder?: string; type?: string;
-}) {
-  return (
-    <div>
-      <label className="block text-xs text-gray-500 mb-1.5">{label}</label>
-      <input
-        type={type}
-        value={value}
-        onChange={e => onChange(e.target.value)}
-        placeholder={placeholder}
-        className="w-full bg-wuipi-bg border border-wuipi-border rounded-lg px-3 py-2 text-sm text-white placeholder:text-gray-600 focus:outline-none focus:border-wuipi-accent/50"
-      />
-    </div>
-  );
-}
-
-function FormSelect({ label, value, onChange, options }: {
-  label: string; value: string; onChange: (v: string) => void;
-  options: { value: string; label: string }[];
-}) {
-  return (
-    <div>
-      <label className="block text-xs text-gray-500 mb-1.5">{label}</label>
-      <select
-        value={value}
-        onChange={e => onChange(e.target.value)}
-        className="w-full bg-wuipi-bg border border-wuipi-border rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-wuipi-accent/50"
-      >
-        {options.map(o => (
-          <option key={o.value} value={o.value}>{o.label}</option>
-        ))}
-      </select>
-    </div>
   );
 }

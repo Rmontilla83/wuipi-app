@@ -83,7 +83,7 @@ export async function authenticate(): Promise<number> {
 
 // ── CRUD via execute_kw ──────────────────────────────────────
 
-type OdooDomain = Array<string | number | boolean | string[] | number[]>;
+type OdooDomain = Array<string | number | boolean | string[] | number[]> | string; // string for "|", "&" operators
 
 interface SearchReadOptions {
   fields?: string[];
@@ -589,4 +589,320 @@ export async function getPlanDistribution(): Promise<PlanCategory[]> {
   }
   result.sort((a, b) => b.total - a.total);
   return result;
+}
+
+// ── Client list & detail (Fase 3) ───────────────────────────
+
+import type {
+  OdooClient, OdooClientDetail, OdooSubscription,
+  OdooSubscriptionLine, OdooPayment,
+} from "@/types/odoo";
+
+const CLIENT_LIST_FIELDS = [
+  "name", "vat", "email", "mobile", "phone", "city", "state_id",
+  "l10n_latam_identification_type_id", "is_company",
+  "subscription_count", "subscription_status", "suspend",
+  "credit", "total_invoiced", "unpaid_invoices_count",
+] as const;
+
+const CLIENT_DETAIL_FIELDS = [
+  ...CLIENT_LIST_FIELDS,
+  "ref", "company_type", "function", "street", "street2",
+  "country_id", "zip", "municipality_id", "parish_id",
+  "partner_latitude", "partner_longitude",
+  "l10n_ve_responsibility_type_id", "property_product_pricelist",
+  "debit", "total_due", "total_overdue", "days_sales_outstanding",
+  "trust", "followup_status", "not_suspend",
+  "sale_order_count", "ticket_count",
+  "category_id", "comment", "active",
+] as const;
+
+/**
+ * List customers with pagination and filters. Returns summary data per client
+ * plus their main plan names and MRR from subscriptions.
+ */
+export async function getOdooClients(options?: {
+  search?: string;
+  status?: string;  // "active" | "paused" | "suspended" | "debt"
+  page?: number;
+  limit?: number;
+}): Promise<{ clients: OdooClient[]; total: number; page: number; limit: number }> {
+  const pageSize = Math.min(options?.limit || 50, 100);
+  const page = Math.max(options?.page || 1, 1);
+  const offset = (page - 1) * pageSize;
+
+  const domain: OdooDomain[] = [["customer_rank", ">", 0]];
+
+  // Status filter
+  if (options?.status === "active") {
+    domain.push(["subscription_status", "=", "progress"]);
+    domain.push(["suspend", "=", false]);
+  } else if (options?.status === "paused") {
+    domain.push(["subscription_status", "=", "paused"]);
+  } else if (options?.status === "suspended") {
+    domain.push(["suspend", "=", true]);
+  } else if (options?.status === "debt") {
+    domain.push(["credit", ">", 0]);
+  }
+
+  // Search filter — Odoo "|" OR operators
+  if (options?.search) {
+    const q = options.search;
+    domain.unshift("|", "|", "|", "|");
+    domain.push(["name", "ilike", q]);
+    domain.push(["vat", "ilike", q]);
+    domain.push(["email", "ilike", q]);
+    domain.push(["mobile", "ilike", q]);
+    domain.push(["ref", "ilike", q]);
+  }
+
+  const [total, rawClients] = await Promise.all([
+    searchCount("res.partner", domain),
+    searchRead("res.partner", domain, {
+      fields: [...CLIENT_LIST_FIELDS],
+      limit: pageSize,
+      offset,
+      order: "name asc",
+    }),
+  ]);
+
+  // Get subscriptions for these clients to extract main plans and MRR
+  const partnerIds = rawClients.map((c: any) => c.id);
+  const subsByPartner = new Map<number, { plans: string[]; mrr: number }>();
+
+  if (partnerIds.length > 0) {
+    const subs = await searchRead("sale.order", [
+      ["partner_id", "in", partnerIds],
+      ["is_subscription", "=", true],
+      ["subscription_state", "in", ["3_progress", "4_paused"]],
+    ], {
+      fields: ["partner_id", "recurring_monthly", "order_line"],
+      limit: 5000,
+    });
+
+    // Get all order line IDs
+    const allLineIds: number[] = [];
+    for (const s of subs) {
+      if (s.order_line) allLineIds.push(...s.order_line);
+    }
+
+    // Get product names from lines
+    const lineProducts = new Map<number, string>();
+    if (allLineIds.length > 0) {
+      const lines = await searchRead("sale.order.line", [
+        ["id", "in", allLineIds],
+        ["product_id", "!=", false],
+      ], {
+        fields: ["id", "product_id"],
+        limit: 10000,
+      });
+      for (const l of lines) {
+        const name = l.product_id?.[1]?.replace(/\[.*?\]\s*/, "") || "";
+        if (name) lineProducts.set(l.id, name);
+      }
+    }
+
+    // Group by partner
+    for (const s of subs) {
+      const pid = s.partner_id[0];
+      if (!subsByPartner.has(pid)) subsByPartner.set(pid, { plans: [], mrr: 0 });
+      const entry = subsByPartner.get(pid)!;
+      entry.mrr += s.recurring_monthly || 0;
+      for (const lineId of (s.order_line || [])) {
+        const productName = lineProducts.get(lineId);
+        if (productName && !entry.plans.includes(productName)) {
+          entry.plans.push(productName);
+        }
+      }
+    }
+  }
+
+  const clients: OdooClient[] = rawClients.map((c: any) => {
+    const subData = subsByPartner.get(c.id);
+    return {
+      id: c.id,
+      name: c.name || "",
+      vat: c.vat || "",
+      identification_type: c.l10n_latam_identification_type_id?.[1] || "",
+      is_company: c.is_company || false,
+      email: c.email || "",
+      mobile: c.mobile || "",
+      phone: c.phone || "",
+      city: c.city || "",
+      state: c.state_id?.[1]?.replace(" (VE)", "") || "",
+      subscription_count: c.subscription_count || 0,
+      subscription_status: c.subscription_status || "",
+      suspend: c.suspend || false,
+      credit: c.credit || 0,
+      total_invoiced: c.total_invoiced || 0,
+      unpaid_invoices_count: c.unpaid_invoices_count || 0,
+      main_plans: subData?.plans || [],
+      mrr_usd: Math.round((subData?.mrr || 0) * 100) / 100,
+    };
+  });
+
+  return { clients, total, page, limit: pageSize };
+}
+
+/**
+ * Full client profile with subscriptions, invoices, and payments.
+ */
+export async function getOdooClientDetail(partnerId: number): Promise<OdooClientDetail> {
+  // All queries in parallel
+  const [rawPartner, rawSubs, rawInvoices, rawPayments, rawTags] = await Promise.all([
+    // 1. Partner full data
+    read("res.partner", [partnerId], [...CLIENT_DETAIL_FIELDS]),
+    // 2. Subscriptions
+    searchRead("sale.order", [
+      ["partner_id", "=", partnerId],
+      ["is_subscription", "=", true],
+    ], {
+      fields: ["name", "subscription_state", "start_date", "next_invoice_date",
+               "recurring_monthly", "amount_total", "currency_id", "order_line"],
+      limit: 50,
+      order: "subscription_state asc, start_date desc",
+    }),
+    // 3. Recent invoices
+    searchRead("account.move", [
+      ["partner_id", "=", partnerId],
+      ["move_type", "=", "out_invoice"],
+      ["state", "=", "posted"],
+    ], {
+      fields: ["name", "invoice_date", "invoice_date_due", "amount_total",
+               "amount_residual", "currency_id", "payment_state"],
+      limit: 20,
+      order: "invoice_date desc",
+    }),
+    // 4. Recent payments
+    searchRead("account.payment", [
+      ["partner_id", "=", partnerId],
+      ["payment_type", "=", "inbound"],
+      ["state", "=", "posted"],
+    ], {
+      fields: ["date", "amount", "currency_id", "journal_id"],
+      limit: 20,
+      order: "date desc",
+    }),
+    // 5. Tags
+    searchRead("res.partner.category", [
+      ["partner_ids", "in", [partnerId]],
+    ], { fields: ["name"], limit: 20 }),
+  ]);
+
+  const p = rawPartner[0];
+  if (!p) throw new Error("Cliente no encontrado en Odoo");
+
+  // Get subscription lines
+  const allLineIds: number[] = [];
+  for (const s of rawSubs) {
+    if (s.order_line) allLineIds.push(...s.order_line);
+  }
+
+  const linesMap = new Map<number, OdooSubscriptionLine>();
+  if (allLineIds.length > 0) {
+    const rawLines = await searchRead("sale.order.line", [
+      ["id", "in", allLineIds],
+    ], {
+      fields: ["id", "product_id", "name", "product_uom_qty", "price_unit",
+               "price_subtotal", "discount"],
+      limit: 500,
+    });
+    for (const l of rawLines) {
+      const fullName: string = l.product_id?.[1] || l.name || "";
+      linesMap.set(l.id, {
+        product_code: fullName.match(/\[([^\]]+)\]/)?.[1] || "",
+        product_name: fullName.replace(/\[.*?\]\s*/, ""),
+        quantity: l.product_uom_qty || 1,
+        price_unit: l.price_unit || 0,
+        price_subtotal: l.price_subtotal || 0,
+        discount: l.discount || 0,
+      });
+    }
+  }
+
+  // Map subscriptions
+  const subscriptions: OdooSubscription[] = rawSubs
+    .filter((s: any) => s.subscription_state) // skip non-active
+    .map((s: any) => ({
+      id: s.id,
+      name: s.name || "",
+      state: s.subscription_state || "",
+      start_date: s.start_date || "",
+      next_invoice_date: s.next_invoice_date || "",
+      recurring_monthly: s.recurring_monthly || 0,
+      amount_total: s.amount_total || 0,
+      currency: s.currency_id?.[1] || "USD",
+      lines: (s.order_line || [])
+        .map((id: number) => linesMap.get(id))
+        .filter(Boolean) as OdooSubscriptionLine[],
+    }));
+
+  // Map invoices
+  const invoices: OdooInvoiceDetail[] = rawInvoices.map((inv: any) => ({
+    id: inv.id,
+    invoice_number: inv.name || "",
+    invoice_date: inv.invoice_date || "",
+    due_date: inv.invoice_date_due || "",
+    total: inv.amount_total || 0,
+    amount_due: inv.amount_residual || 0,
+    currency: inv.currency_id?.[1] || "VED",
+    payment_state: inv.payment_state || "",
+    products: [],
+  }));
+
+  // Map payments
+  const payments: OdooPayment[] = rawPayments.map((pay: any) => ({
+    id: pay.id,
+    date: pay.date || "",
+    amount: pay.amount || 0,
+    currency: pay.currency_id?.[1] || "VED",
+    journal: pay.journal_id?.[1] || "",
+  }));
+
+  return {
+    id: p.id,
+    name: p.name || "",
+    vat: p.vat || "",
+    ref: p.ref || "",
+    identification_type: p.l10n_latam_identification_type_id?.[1] || "",
+    responsibility_type: p.l10n_ve_responsibility_type_id?.[1] || "",
+    is_company: p.is_company || false,
+    company_type: p.company_type || "",
+    email: p.email || "",
+    mobile: p.mobile || "",
+    phone: p.phone || "",
+    function: p.function || "",
+    street: p.street || "",
+    street2: p.street2 || "",
+    city: p.city || "",
+    state: p.state_id?.[1]?.replace(" (VE)", "") || "",
+    state_id: p.state_id?.[0] || 0,
+    country: p.country_id?.[1] || "",
+    zip: p.zip || "",
+    municipality: p.municipality_id?.[1] || "",
+    parish: p.parish_id?.[1] || "",
+    latitude: p.partner_latitude || 0,
+    longitude: p.partner_longitude || 0,
+    credit: p.credit || 0,
+    debit: p.debit || 0,
+    total_invoiced: p.total_invoiced || 0,
+    total_due: p.total_due || 0,
+    total_overdue: p.total_overdue || 0,
+    days_sales_outstanding: p.days_sales_outstanding || 0,
+    trust: p.trust || "",
+    followup_status: p.followup_status || "",
+    pricelist: p.property_product_pricelist?.[1] || "",
+    subscription_count: p.subscription_count || 0,
+    subscription_status: p.subscription_status || "",
+    suspend: p.suspend || false,
+    not_suspend: p.not_suspend || false,
+    sale_order_count: p.sale_order_count || 0,
+    unpaid_invoices_count: p.unpaid_invoices_count || 0,
+    ticket_count: p.ticket_count || 0,
+    tags: rawTags.map((t: any) => t.name),
+    notes: (typeof p.comment === "string" ? p.comment : "") || "",
+    subscriptions,
+    invoices,
+    payments,
+  };
 }

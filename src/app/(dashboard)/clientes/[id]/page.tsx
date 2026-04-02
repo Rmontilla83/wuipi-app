@@ -5,1088 +5,464 @@ import { useParams, useRouter } from "next/navigation";
 import { TopBar } from "@/components/layout/topbar";
 import { Card } from "@/components/ui/card";
 import {
-  ArrowLeft, Users, Wifi, WifiOff, Power, Edit2,
-  FileText, CreditCard, Headphones, Radio,
-  Phone, Mail, MapPin, Calendar, DollarSign,
-  Clock, AlertTriangle, CheckCircle,
-  RefreshCw, Receipt, TrendingUp, Server,
-  User, Hash, Globe, Zap, ExternalLink,
-  ShoppingBag, Activity,
+  ChevronLeft, RefreshCw, Mail, Phone, MapPin, Building2,
+  CreditCard, FileText, Receipt, Clock, Tag, Globe,
+  AlertTriangle, CheckCircle2, Pause, Ban,
 } from "lucide-react";
+import type { OdooClientDetail, OdooSubscription, OdooInvoiceDetail, OdooPayment } from "@/types/odoo";
 
-/* ========== TYPES ========== */
-interface Plan {
-  id: string; code: string; name: string; price_usd: number;
-  speed_down: number; speed_up: number; technology: string;
-}
-interface Invoice {
-  id: string; invoice_number: string; issue_date: string; due_date: string;
-  currency: string; total: number; amount_paid: number; balance_due: number; status: string;
-}
-interface Payment {
-  id: string; payment_number: string; payment_date: string; amount: number;
-  currency: string; status: string; reference_number: string;
-  payment_methods?: { name: string } | null;
-}
-interface BillingSummary {
-  total_invoiced: number; total_paid: number; total_overdue: number;
-  balance: number; invoice_count: number; payment_count: number;
-}
-interface NetworkNode {
-  id: string; code: string; name: string; location: string | null;
-  type: string | null; technology: string | null; is_active: boolean;
-}
-interface Ticket {
-  id: string; ticket_number: string; subject: string; priority: string;
-  status: string; created_at: string; resolved_at: string | null; assigned_to: string | null;
-}
-interface Lead {
-  id: string; code: string; name: string; stage: string;
-  product_id: string | null; salesperson_id: string | null;
-  source: string; value: number;
-  created_at: string; won_at: string | null; lost_at: string | null;
-  crm_products?: { name: string } | null;
-  crm_salespeople?: { full_name: string } | null;
-}
-interface InfraHost {
-  hostid: string; host: string; name: string; status: number;
-  type: string; site: string;
-  latency_ms: number | null; packet_loss: number | null;
-  uptime_days: number | null;
-}
-interface ClientDetail {
-  id: string; code: string; legal_name: string; trade_name: string;
-  document_type: string; document_number: string;
-  email: string; phone: string; phone_alt: string; contact_person: string;
-  address: string; city: string; state: string; sector: string; nodo: string;
-  plan_id: string | null; service_status: string; installation_date: string | null;
-  billing_currency: string; billing_day: number; credit_balance: number;
-  notes: string; kommo_contact_id: number | null;
-  created_at: string; updated_at: string;
-  // New service fields
-  plan_name: string | null; plan_type: string | null;
-  plan_speed_down: number | null; plan_speed_up: number | null;
-  monthly_rate: number | null;
-  contract_start: string | null; contract_end: string | null;
-  service_ip: string | null; service_mac: string | null;
-  service_node_code: string | null; service_technology: string | null;
-  service_vlan: string | null; service_router: string | null;
-  service_queue_name: string | null;
-  odoo_partner_id: number | null; bequant_subscriber_id: string | null;
-  // Nested
-  plans?: Plan | null;
-  invoices: Invoice[];
-  payments: Payment[];
-  billing_summary: BillingSummary;
-  network_node?: NetworkNode | null;
-  tickets: Ticket[];
-  ticket_count: number;
-  leads: Lead[];
+type Tab = "suscripciones" | "facturacion" | "informacion" | "soporte";
+
+const fmtUSD = (n: number) => `$${n.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const fmtBs = (n: number) => `Bs ${n.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const fmtAmount = (n: number, currency: string) => currency === "USD" ? fmtUSD(n) : fmtBs(n);
+
+function SubStateBadge({ state }: { state: string }) {
+  const cfg: Record<string, { label: string; color: string }> = {
+    "3_progress": { label: "Activa", color: "text-emerald-400 bg-emerald-400/10" },
+    "4_paused": { label: "Pausada", color: "text-amber-400 bg-amber-400/10" },
+  };
+  const c = cfg[state] || { label: state, color: "text-gray-400 bg-gray-400/10" };
+  return <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-medium ${c.color}`}>{c.label}</span>;
 }
 
-type Tab = "resumen" | "finanzas" | "soporte" | "ventas" | "infraestructura" | "qoe";
-
-const TABS: { id: Tab; label: string; icon: typeof User }[] = [
-  { id: "resumen", label: "Resumen", icon: User },
-  { id: "finanzas", label: "Finanzas", icon: CreditCard },
-  { id: "soporte", label: "Soporte", icon: Headphones },
-  { id: "ventas", label: "Ventas", icon: TrendingUp },
-  { id: "infraestructura", label: "Infraestructura", icon: Radio },
-  { id: "qoe", label: "QoE", icon: Activity },
-];
-
-const STATUS_MAP: Record<string, { label: string; color: string; bg: string; icon: typeof Wifi; bar: string }> = {
-  active:    { label: "Activo",     color: "text-emerald-400", bg: "bg-emerald-400/10", icon: Wifi,          bar: "#34d399" },
-  suspended: { label: "Suspendido", color: "text-red-400",     bg: "bg-red-400/10",     icon: WifiOff,       bar: "#f87171" },
-  pending:   { label: "Pendiente",  color: "text-amber-400",   bg: "bg-amber-400/10",   icon: Clock,         bar: "#fbbf24" },
-  cancelled: { label: "Cancelado",  color: "text-gray-500",    bg: "bg-gray-500/10",    icon: AlertTriangle, bar: "#6b7280" },
-};
-
-const INV_STATUS: Record<string, { label: string; cls: string }> = {
-  draft:     { label: "Borrador",  cls: "text-gray-400 bg-gray-400/10" },
-  sent:      { label: "Enviada",   cls: "text-blue-400 bg-blue-400/10" },
-  paid:      { label: "Pagada",    cls: "text-emerald-400 bg-emerald-400/10" },
-  partial:   { label: "Parcial",   cls: "text-amber-400 bg-amber-400/10" },
-  overdue:   { label: "Vencida",   cls: "text-red-400 bg-red-400/10" },
-  cancelled: { label: "Anulada",   cls: "text-gray-500 bg-gray-500/10" },
-};
-
-const PAY_STATUS: Record<string, { label: string; cls: string }> = {
-  confirmed: { label: "Confirmado", cls: "text-emerald-400 bg-emerald-400/10" },
-  pending:   { label: "Pendiente",  cls: "text-amber-400 bg-amber-400/10" },
-  rejected:  { label: "Rechazado",  cls: "text-red-400 bg-red-400/10" },
-};
-
-const TICKET_STATUS: Record<string, { label: string; cls: string }> = {
-  new:             { label: "Nuevo",       cls: "text-blue-400 bg-blue-400/10" },
-  assigned:        { label: "Asignado",    cls: "text-cyan-400 bg-cyan-400/10" },
-  in_progress:     { label: "En progreso", cls: "text-amber-400 bg-amber-400/10" },
-  waiting_client:  { label: "Espera cliente", cls: "text-violet-400 bg-violet-400/10" },
-  resolved:        { label: "Resuelto",    cls: "text-emerald-400 bg-emerald-400/10" },
-  closed:          { label: "Cerrado",     cls: "text-gray-500 bg-gray-500/10" },
-};
-
-const PRIORITY_CONFIG: Record<string, { label: string; cls: string }> = {
-  critical: { label: "Crítico",  cls: "text-red-400 bg-red-400/10" },
-  high:     { label: "Alto",     cls: "text-orange-400 bg-orange-400/10" },
-  medium:   { label: "Medio",    cls: "text-amber-400 bg-amber-400/10" },
-  low:      { label: "Bajo",     cls: "text-gray-400 bg-gray-400/10" },
-};
-
-const STAGE_LABELS: Record<string, { label: string; cls: string }> = {
-  incoming:               { label: "Entrante",      cls: "text-blue-400 bg-blue-400/10" },
-  contacto_inicial:       { label: "Contacto",      cls: "text-cyan-400 bg-cyan-400/10" },
-  info_enviada:           { label: "Info enviada",   cls: "text-violet-400 bg-violet-400/10" },
-  en_instalacion:         { label: "Instalación",    cls: "text-amber-400 bg-amber-400/10" },
-  prueba_actualizacion:   { label: "Prueba/Upgrade", cls: "text-indigo-400 bg-indigo-400/10" },
-  retirado_reactivacion:  { label: "Reactivación",   cls: "text-orange-400 bg-orange-400/10" },
-  ganado:                 { label: "Ganado",          cls: "text-emerald-400 bg-emerald-400/10" },
-  no_concretado:          { label: "No concretado",  cls: "text-red-400 bg-red-400/10" },
-  no_factible:            { label: "No factible",    cls: "text-gray-500 bg-gray-500/10" },
-  no_clasificado:         { label: "Sin clasificar", cls: "text-gray-400 bg-gray-400/10" },
-};
-
-const TECH_LABELS: Record<string, string> = {
-  fiber: "Fibra Óptica", wireless: "Beamforming", terragraph: "Terragraph", copper: "Cobre", mixed: "Mixto",
-};
-
-/* ========== HELPERS ========== */
-const fmt = (n: number) => n.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const fmtDate = (d: string | null) => d ? new Date(d).toLocaleDateString("es-VE") : "—";
-
-function daysSince(d: string | null): string {
-  if (!d) return "—";
-  const diff = Math.floor((Date.now() - new Date(d).getTime()) / 86400000);
-  if (diff < 30) return `${diff} días`;
-  if (diff < 365) return `${Math.floor(diff / 30)} meses`;
-  return `${(diff / 365).toFixed(1)} años`;
+function PaymentStateBadge({ state }: { state: string }) {
+  const cfg: Record<string, { label: string; color: string }> = {
+    paid: { label: "Pagado", color: "text-emerald-400 bg-emerald-400/10" },
+    in_payment: { label: "En pago", color: "text-blue-400 bg-blue-400/10" },
+    not_paid: { label: "Pendiente", color: "text-red-400 bg-red-400/10" },
+    partial: { label: "Parcial", color: "text-amber-400 bg-amber-400/10" },
+    reversed: { label: "Reversado", color: "text-gray-400 bg-gray-400/10" },
+  };
+  const c = cfg[state] || { label: state, color: "text-gray-400 bg-gray-400/10" };
+  return <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-medium ${c.color}`}>{c.label}</span>;
 }
 
-/* ========== MAIN PAGE ========== */
-export default function ClientDetailPage() {
+function InfoRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+  if (!value || value === "0" || value === "false") return null;
+  return (
+    <div className="flex justify-between items-center py-1.5 border-b border-wuipi-border/30 last:border-0">
+      <span className="text-xs text-gray-500">{label}</span>
+      <span className={`text-xs text-white ${mono ? "font-mono" : ""}`}>{value}</span>
+    </div>
+  );
+}
+
+export default function ClienteDetailPage() {
   const params = useParams();
   const router = useRouter();
-  const clientId = params.id as string;
+  const partnerId = params.id as string;
 
-  const [client, setClient] = useState<ClientDetail | null>(null);
+  const [data, setData] = useState<OdooClientDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [activeTab, setActiveTab] = useState<Tab>("resumen");
-  const [toggling, setToggling] = useState(false);
+  const [tab, setTab] = useState<Tab>("suscripciones");
 
-  const fetchClient = useCallback(async () => {
+  const fetchDetail = useCallback(async () => {
+    setLoading(true);
+    setError("");
     try {
-      setLoading(true);
-      const res = await fetch(`/api/facturacion/clients/${clientId}?detail=true`);
-      if (!res.ok) throw new Error("Cliente no encontrado");
-      const data = await res.json();
-      data.invoices = data.invoices || [];
-      data.payments = data.payments || [];
-      data.billing_summary = data.billing_summary || {
-        total_invoiced: 0, total_paid: 0, total_overdue: 0,
-        balance: 0, invoice_count: 0, payment_count: 0,
-      };
-      data.tickets = data.tickets || [];
-      data.ticket_count = data.ticket_count || 0;
-      data.leads = data.leads || [];
-      setClient(data);
-    } catch (err: any) {
-      setError(err.message);
+      const res = await fetch(`/api/odoo/clients/${partnerId}`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `Error ${res.status}`);
+      }
+      setData(await res.json());
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Error al cargar cliente");
     } finally {
       setLoading(false);
     }
-  }, [clientId]);
+  }, [partnerId]);
 
-  useEffect(() => { fetchClient(); }, [fetchClient]);
+  useEffect(() => { fetchDetail(); }, [fetchDetail]);
 
-  const toggleStatus = async () => {
-    if (!client || toggling) return;
-    const newStatus = client.service_status === "active" ? "suspended" : "active";
-    setToggling(true);
-    try {
-      const res = await fetch(`/api/facturacion/clients/${clientId}`, {
-        method: "PUT", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ service_status: newStatus }),
-      });
-      if (res.ok) fetchClient();
-    } finally { setToggling(false); }
-  };
-
-  /* Loading / Error states */
-  if (loading) return (
-    <>
-      <TopBar title="Cliente" icon={<Users size={22} />} />
-      <div className="flex-1 flex items-center justify-center"><RefreshCw className="animate-spin text-gray-500" size={24} /></div>
-    </>
-  );
-
-  if (error || !client) return (
-    <>
-      <TopBar title="Cliente" icon={<Users size={22} />} />
-      <div className="flex-1 flex flex-col items-center justify-center text-gray-500">
-        <AlertTriangle size={48} className="mb-4" />
-        <p className="text-lg mb-4">{error || "Cliente no encontrado"}</p>
-        <button onClick={() => router.push("/clientes")} className="text-wuipi-accent hover:underline text-sm">← Volver a clientes</button>
-      </div>
-    </>
-  );
-
-  const st = STATUS_MAP[client.service_status] || STATUS_MAP.pending;
-  const StIcon = st.icon;
-
-  // Resolve display speed: prefer denormalized fields, fall back to plans join
-  const speedDown = client.plan_speed_down || client.plans?.speed_down;
-  const speedUp = client.plan_speed_up || client.plans?.speed_up;
-  const displayPlan = client.plan_name || client.plans?.name;
-  const displayTech = client.service_technology || client.plans?.technology;
-
-  return (
-    <>
-      <TopBar
-        title={client.legal_name}
-        subtitle={client.code}
-        icon={<Users size={22} />}
-        actions={
-          <button onClick={() => router.push("/clientes")} className="flex items-center gap-2 px-3 py-2 rounded-lg border border-wuipi-border text-gray-400 hover:text-white text-sm transition-colors">
-            <ArrowLeft size={14} /> Volver
-          </button>
-        }
-      />
-
-      <div className="flex-1 overflow-auto p-6 space-y-4">
-        {/* HEADER CARD */}
-        <Card className="!p-0 overflow-hidden">
-          <div className="h-1" style={{ background: st.bar }} />
-          <div className="p-5">
-            <div className="flex items-start justify-between flex-wrap gap-4">
-              <div className="flex items-center gap-4">
-                <div className={`w-14 h-14 rounded-xl ${st.bg} border border-white/5 flex items-center justify-center`}>
-                  <StIcon size={24} className={st.color} />
-                </div>
-                <div>
-                  <h2 className="text-xl font-bold text-white">{client.legal_name}</h2>
-                  <p className="text-gray-500 text-sm">
-                    {client.code} • {client.document_type}-{client.document_number}
-                    {client.trade_name && <span className="ml-2 text-gray-600">({client.trade_name})</span>}
-                  </p>
-                  <div className="flex items-center gap-3 mt-2 flex-wrap">
-                    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${st.color} ${st.bg}`}>
-                      <StIcon size={12} /> {st.label}
-                    </span>
-                    {client.service_node_code && (
-                      <span className="text-xs text-gray-400 bg-wuipi-bg px-2.5 py-1 rounded-full flex items-center gap-1">
-                        <Server size={11} /> {client.network_node?.name || client.service_node_code}
-                      </span>
-                    )}
-                    {client.service_ip && (
-                      <span className="text-xs font-mono text-cyan-400/80 bg-wuipi-bg px-2.5 py-1 rounded-full">
-                        {client.service_ip}
-                      </span>
-                    )}
-                    {displayTech && (
-                      <span className="text-xs text-gray-400 bg-wuipi-bg px-2.5 py-1 rounded-full">
-                        {TECH_LABELS[displayTech] || displayTech}
-                      </span>
-                    )}
-                    <span className="text-xs text-gray-500">Cliente desde {fmtDate(client.created_at)}</span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <button onClick={toggleStatus} disabled={toggling}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border transition-colors disabled:opacity-50 ${
-                    client.service_status === "active"
-                      ? "border-red-500/20 text-red-400 hover:bg-red-500/10"
-                      : "border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/10"
-                  }`}>
-                  <Power size={14} />
-                  {toggling ? "..." : client.service_status === "active" ? "Suspender" : "Activar"}
-                </button>
-                <button onClick={() => router.push(`/clientes?edit=${client.id}`)}
-                  className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border border-wuipi-border text-gray-400 hover:text-white hover:bg-wuipi-card-hover transition-colors">
-                  <Edit2 size={14} /> Editar
-                </button>
-              </div>
-            </div>
-
-            {/* Quick Stats */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-5">
-              <QStat icon={Receipt} label="Facturas" value={`${client.billing_summary?.invoice_count || 0}`} color="text-cyan-400" />
-              <QStat icon={Headphones} label="Tickets" value={`${client.ticket_count}`} color="text-violet-400" />
-              <QStat icon={Zap} label="Plan / Velocidad" value={displayPlan ? `${displayPlan}${speedDown ? ` ${speedDown}/${speedUp}` : ""}` : "Sin plan"} color="text-emerald-400" />
-              <QStat icon={Calendar} label="Antigüedad" value={daysSince(client.created_at)} color="text-amber-400" />
-            </div>
-          </div>
-        </Card>
-
-        {/* TABS */}
-        <div className="flex items-center gap-2 overflow-x-auto pb-1">
-          {TABS.map(tab => {
-            const active = tab.id === activeTab;
-            const Icon = tab.icon;
-            return (
-              <button key={tab.id} onClick={() => setActiveTab(tab.id)}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all border whitespace-nowrap ${
-                  active ? "bg-wuipi-accent/10 text-wuipi-accent border-wuipi-accent/20" : "text-gray-500 hover:text-gray-300 border-transparent hover:bg-wuipi-card-hover"
-                }`}>
-                <Icon size={16} /> {tab.label}
-              </button>
-            );
-          })}
-        </div>
-
-        {/* TAB CONTENT */}
-        {activeTab === "resumen" && <TabResumen client={client} />}
-        {activeTab === "finanzas" && <TabFinanzas client={client} />}
-        {activeTab === "soporte" && <TabSoporte client={client} />}
-        {activeTab === "ventas" && <TabVentas client={client} />}
-        {activeTab === "infraestructura" && <TabInfraestructura client={client} />}
-        {activeTab === "qoe" && <TabQoE client={client} />}
-      </div>
-    </>
-  );
-}
-
-/* ========== QUICK STAT ========== */
-function QStat({ icon: Icon, label, value, color }: { icon: typeof DollarSign; label: string; value: string; color: string }) {
-  return (
-    <div className="flex items-center gap-3 p-3 bg-wuipi-bg rounded-xl border border-wuipi-border">
-      <Icon size={16} className={color} />
-      <div className="min-w-0">
-        <p className="text-xs text-gray-500">{label}</p>
-        <p className={`text-sm font-bold ${color} truncate`}>{value}</p>
-      </div>
-    </div>
-  );
-}
-
-/* ========== INFO ROW ========== */
-function IRow({ icon: Icon, label, value }: { icon: typeof Mail; label: string; value: string | null | undefined }) {
-  return (
-    <div className="flex items-start gap-3">
-      <Icon size={14} className="text-gray-600 mt-0.5 shrink-0" />
-      <div>
-        <p className="text-xs text-gray-500">{label}</p>
-        <p className="text-sm text-gray-200">{value || "—"}</p>
-      </div>
-    </div>
-  );
-}
-
-/* ========== TAB 1: RESUMEN ========== */
-function TabResumen({ client }: { client: ClientDetail }) {
-  const speedDown = client.plan_speed_down || client.plans?.speed_down;
-  const speedUp = client.plan_speed_up || client.plans?.speed_up;
-  const displayPlan = client.plan_name || client.plans?.name;
-  const displayTech = client.service_technology || client.plans?.technology;
-
-  return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {/* Contacto */}
-        <Card>
-          <h3 className="text-sm font-semibold text-gray-400 mb-4 flex items-center gap-2"><Phone size={14} /> Contacto</h3>
-          <div className="space-y-3">
-            <IRow icon={Mail} label="Email" value={client.email} />
-            <IRow icon={Phone} label="Teléfono" value={client.phone} />
-            {client.phone_alt && <IRow icon={Phone} label="Tel. Alternativo" value={client.phone_alt} />}
-            {client.contact_person && <IRow icon={User} label="Persona de contacto" value={client.contact_person} />}
-          </div>
-        </Card>
-
-        {/* Ubicación */}
-        <Card>
-          <h3 className="text-sm font-semibold text-gray-400 mb-4 flex items-center gap-2"><MapPin size={14} /> Ubicación</h3>
-          <div className="space-y-3">
-            {client.address && <IRow icon={MapPin} label="Dirección" value={client.address} />}
-            <IRow icon={Globe} label="Ciudad / Estado" value={`${client.city || "—"}, ${client.state || "—"}`} />
-            <IRow icon={Hash} label="Sector" value={client.sector} />
-            <IRow icon={Radio} label="Nodo" value={client.nodo || "Sin asignar"} />
-          </div>
-        </Card>
-
-        {/* Datos del Servicio */}
-        <Card>
-          <h3 className="text-sm font-semibold text-gray-400 mb-4 flex items-center gap-2"><Server size={14} /> Datos del Servicio</h3>
-          <div className="space-y-3">
-            <IRow icon={Globe} label="IP de servicio" value={client.service_ip} />
-            <IRow icon={Hash} label="MAC Address" value={client.service_mac} />
-            <IRow icon={Server} label="Nodo de red" value={client.network_node ? `${client.network_node.name} (${client.service_node_code})` : (client.service_node_code || "Sin asignar")} />
-            <IRow icon={Hash} label="VLAN" value={client.service_vlan} />
-            <IRow icon={Radio} label="Router / CPE" value={client.service_router} />
-            <IRow icon={Zap} label="Tecnología" value={displayTech ? (TECH_LABELS[displayTech] || displayTech) : null} />
-            <IRow icon={Hash} label="Queue Name" value={client.service_queue_name} />
-          </div>
-        </Card>
-
-        {/* Plan */}
-        <Card>
-          <h3 className="text-sm font-semibold text-gray-400 mb-4 flex items-center gap-2"><Wifi size={14} /> Plan</h3>
-          <div className="space-y-3">
-            <IRow icon={Zap} label="Plan" value={displayPlan || "Sin plan"} />
-            {speedDown && <IRow icon={Activity} label="Velocidad" value={`${speedDown}/${speedUp || "?"} Mbps`} />}
-            <IRow icon={DollarSign} label="Tarifa mensual" value={client.monthly_rate ? `$${fmt(client.monthly_rate)}` : (client.plans?.price_usd ? `$${fmt(client.plans.price_usd)}` : null)} />
-            <IRow icon={Calendar} label="Inicio contrato" value={fmtDate(client.contract_start)} />
-            <IRow icon={Calendar} label="Fin contrato" value={fmtDate(client.contract_end)} />
-            <IRow icon={Calendar} label="Instalación" value={fmtDate(client.installation_date)} />
-          </div>
-        </Card>
-      </div>
-
-      {/* Bottom row: Notes + External IDs */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {client.notes && (
-          <Card>
-            <h3 className="text-sm font-semibold text-gray-400 mb-3 flex items-center gap-2"><FileText size={14} /> Notas</h3>
-            <p className="text-sm text-gray-300 whitespace-pre-wrap">{client.notes}</p>
-          </Card>
-        )}
-
-        {(client.odoo_partner_id || client.bequant_subscriber_id || client.kommo_contact_id) && (
-          <Card>
-            <h3 className="text-sm font-semibold text-gray-400 mb-3 flex items-center gap-2"><ExternalLink size={14} /> IDs Externos</h3>
-            <div className="space-y-3">
-              {client.odoo_partner_id && <IRow icon={Hash} label="Odoo Partner ID" value={client.odoo_partner_id.toString()} />}
-              {client.bequant_subscriber_id && <IRow icon={Hash} label="Bequant Subscriber" value={client.bequant_subscriber_id} />}
-              {client.kommo_contact_id && <IRow icon={Hash} label="Kommo Contact ID" value={client.kommo_contact_id.toString()} />}
-            </div>
-          </Card>
-        )}
-      </div>
-    </div>
-  );
-}
-
-/* ========== TAB 2: FINANZAS ========== */
-function TabFinanzas({ client }: { client: ClientDetail }) {
-  const bs = client.billing_summary || { total_invoiced: 0, total_paid: 0, total_overdue: 0, balance: 0, invoice_count: 0, payment_count: 0 };
-  const collRate = bs.total_invoiced > 0 ? ((bs.total_paid / bs.total_invoiced) * 100) : 0;
-  const invoices = client.invoices || [];
-  const payments = client.payments || [];
-
-  return (
-    <div className="space-y-4">
-      {/* Odoo Banner */}
-      {client.odoo_partner_id ? (
-        <div className="flex items-center gap-3 p-3 bg-emerald-500/5 border border-emerald-500/20 rounded-xl">
-          <CheckCircle size={16} className="text-emerald-400 shrink-0" />
-          <p className="text-sm text-emerald-400">
-            Conectado con Odoo — Partner ID: <span className="font-mono">{client.odoo_partner_id}</span>
-          </p>
-        </div>
-      ) : (
-        <div className="flex items-center gap-3 p-3 bg-amber-500/5 border border-amber-500/20 rounded-xl">
-          <AlertTriangle size={16} className="text-amber-400 shrink-0" />
-          <p className="text-sm text-amber-400">Sin conexión con Odoo — La facturación detallada se gestiona desde Odoo</p>
-        </div>
-      )}
-
-      {/* Summary */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <Card className="!p-4 text-center">
-          <p className="text-xs text-gray-500 mb-1">Facturas</p>
-          <p className="text-2xl font-bold text-white">{bs.invoice_count}</p>
-        </Card>
-        <Card className="!p-4 text-center">
-          <p className="text-xs text-gray-500 mb-1">Pagos</p>
-          <p className="text-2xl font-bold text-white">{bs.payment_count}</p>
-        </Card>
-        <Card className="!p-4 text-center">
-          <p className="text-xs text-gray-500 mb-1">Tasa de cobro</p>
-          <p className={`text-2xl font-bold ${collRate >= 80 ? "text-emerald-400" : collRate >= 50 ? "text-amber-400" : "text-red-400"}`}>{collRate.toFixed(0)}%</p>
-        </Card>
-        <Card className="!p-4 text-center">
-          <p className="text-xs text-gray-500 mb-1">Saldo a favor</p>
-          <p className="text-2xl font-bold text-cyan-400">${fmt(Number(client.credit_balance || 0))}</p>
-        </Card>
-      </div>
-
-      {/* Invoices Table */}
-      <Card>
-        <h3 className="text-sm font-semibold text-gray-400 mb-4 flex items-center gap-2"><Receipt size={14} /> Facturas recientes</h3>
-        {invoices.length === 0 ? (
-          <p className="text-sm text-gray-600 text-center py-6">Sin facturas registradas</p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-gray-500 text-xs border-b border-wuipi-border">
-                  <th className="text-left pb-2 font-medium">Nº</th>
-                  <th className="text-left pb-2 font-medium">Fecha</th>
-                  <th className="text-left pb-2 font-medium">Vence</th>
-                  <th className="text-right pb-2 font-medium">Total</th>
-                  <th className="text-right pb-2 font-medium">Pagado</th>
-                  <th className="text-right pb-2 font-medium">Pendiente</th>
-                  <th className="text-center pb-2 font-medium">Estado</th>
-                </tr>
-              </thead>
-              <tbody>
-                {invoices.map(inv => {
-                  const is = INV_STATUS[inv.status] || { label: inv.status, cls: "text-gray-400 bg-gray-400/10" };
-                  return (
-                    <tr key={inv.id} className="border-b border-wuipi-border/50 hover:bg-wuipi-card-hover transition-colors">
-                      <td className="py-2.5 font-mono text-gray-300">{inv.invoice_number}</td>
-                      <td className="py-2.5 text-gray-400">{fmtDate(inv.issue_date)}</td>
-                      <td className="py-2.5 text-gray-400">{fmtDate(inv.due_date)}</td>
-                      <td className="py-2.5 text-right text-gray-200 font-medium">{inv.currency} {fmt(Number(inv.total))}</td>
-                      <td className="py-2.5 text-right text-emerald-400">{fmt(Number(inv.amount_paid))}</td>
-                      <td className="py-2.5 text-right text-amber-400">{fmt(Number(inv.balance_due))}</td>
-                      <td className="py-2.5 text-center">
-                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${is.cls}`}>{is.label}</span>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Card>
-
-      {/* Payments Table */}
-      <Card>
-        <h3 className="text-sm font-semibold text-gray-400 mb-4 flex items-center gap-2"><CreditCard size={14} /> Pagos recientes</h3>
-        {payments.length === 0 ? (
-          <p className="text-sm text-gray-600 text-center py-6">Sin pagos registrados</p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-gray-500 text-xs border-b border-wuipi-border">
-                  <th className="text-left pb-2 font-medium">Nº</th>
-                  <th className="text-left pb-2 font-medium">Fecha</th>
-                  <th className="text-left pb-2 font-medium">Método</th>
-                  <th className="text-left pb-2 font-medium">Referencia</th>
-                  <th className="text-right pb-2 font-medium">Monto</th>
-                  <th className="text-center pb-2 font-medium">Estado</th>
-                </tr>
-              </thead>
-              <tbody>
-                {payments.map(pay => {
-                  const ps = PAY_STATUS[pay.status] || { label: pay.status, cls: "text-gray-400 bg-gray-400/10" };
-                  return (
-                    <tr key={pay.id} className="border-b border-wuipi-border/50 hover:bg-wuipi-card-hover transition-colors">
-                      <td className="py-2.5 font-mono text-gray-300">{pay.payment_number}</td>
-                      <td className="py-2.5 text-gray-400">{fmtDate(pay.payment_date)}</td>
-                      <td className="py-2.5 text-gray-400">{pay.payment_methods?.name || "—"}</td>
-                      <td className="py-2.5 text-gray-400 font-mono text-xs">{pay.reference_number || "—"}</td>
-                      <td className="py-2.5 text-right text-emerald-400 font-medium">{pay.currency} {fmt(Number(pay.amount))}</td>
-                      <td className="py-2.5 text-center">
-                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${ps.cls}`}>{ps.label}</span>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Card>
-    </div>
-  );
-}
-
-/* ========== TAB 3: SOPORTE ========== */
-function TabSoporte({ client }: { client: ClientDetail }) {
-  const router = useRouter();
-  const tickets = client.tickets || [];
-  const total = client.ticket_count || tickets.length;
-  const open = tickets.filter(t => t.status === "new" || t.status === "assigned").length;
-  const inProgress = tickets.filter(t => t.status === "in_progress" || t.status === "waiting_client").length;
-  const resolved = tickets.filter(t => t.status === "resolved" || t.status === "closed").length;
-
-  return (
-    <div className="space-y-4">
-      {/* Stats row */}
-      <div className="grid grid-cols-4 gap-3">
-        <Card className="!p-4 text-center">
-          <p className="text-xs text-gray-500 mb-1">Total</p>
-          <p className="text-2xl font-bold text-white">{total}</p>
-        </Card>
-        <Card className="!p-4 text-center">
-          <p className="text-xs text-gray-500 mb-1">Abiertos</p>
-          <p className="text-2xl font-bold text-amber-400">{open}</p>
-        </Card>
-        <Card className="!p-4 text-center">
-          <p className="text-xs text-gray-500 mb-1">En progreso</p>
-          <p className="text-2xl font-bold text-cyan-400">{inProgress}</p>
-        </Card>
-        <Card className="!p-4 text-center">
-          <p className="text-xs text-gray-500 mb-1">Resueltos</p>
-          <p className="text-2xl font-bold text-emerald-400">{resolved}</p>
-        </Card>
-      </div>
-
-      {/* Tickets table */}
-      <Card>
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-sm font-semibold text-gray-400 flex items-center gap-2"><Headphones size={14} /> Tickets</h3>
-          <button
-            onClick={() => router.push("/soporte")}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-wuipi-accent/10 text-wuipi-accent border border-wuipi-accent/20 hover:bg-wuipi-accent/20 transition-colors"
-          >
-            Crear Ticket
-          </button>
-        </div>
-
-        {tickets.length === 0 ? (
-          <div className="text-center py-10">
-            <Headphones size={36} className="mx-auto mb-3 text-gray-600" />
-            <p className="text-sm text-gray-500 mb-1">Sin tickets registrados</p>
-            <p className="text-xs text-gray-600">Los tickets se crean desde el módulo de Soporte</p>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-gray-500 text-xs border-b border-wuipi-border">
-                  <th className="text-left pb-2 font-medium">Nº</th>
-                  <th className="text-left pb-2 font-medium">Asunto</th>
-                  <th className="text-center pb-2 font-medium">Prioridad</th>
-                  <th className="text-center pb-2 font-medium">Estado</th>
-                  <th className="text-left pb-2 font-medium">Fecha</th>
-                </tr>
-              </thead>
-              <tbody>
-                {tickets.map(t => {
-                  const ts = TICKET_STATUS[t.status] || { label: t.status, cls: "text-gray-400 bg-gray-400/10" };
-                  const pr = PRIORITY_CONFIG[t.priority] || { label: t.priority, cls: "text-gray-400 bg-gray-400/10" };
-                  return (
-                    <tr key={t.id} onClick={() => router.push(`/soporte/${t.id}`)} className="border-b border-wuipi-border/50 hover:bg-wuipi-card-hover transition-colors cursor-pointer">
-                      <td className="py-2.5 font-mono text-gray-300">{t.ticket_number}</td>
-                      <td className="py-2.5 text-gray-200">{t.subject}</td>
-                      <td className="py-2.5 text-center">
-                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${pr.cls}`}>{pr.label}</span>
-                      </td>
-                      <td className="py-2.5 text-center">
-                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${ts.cls}`}>{ts.label}</span>
-                      </td>
-                      <td className="py-2.5 text-gray-400">{fmtDate(t.created_at)}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Card>
-    </div>
-  );
-}
-
-/* ========== TAB 4: VENTAS ========== */
-function TabVentas({ client }: { client: ClientDetail }) {
-  const leads = client.leads || [];
-
-  return (
-    <div className="space-y-4">
-      <Card>
-        <h3 className="text-sm font-semibold text-gray-400 mb-4 flex items-center gap-2"><ShoppingBag size={14} /> Historial de Leads</h3>
-
-        {leads.length === 0 ? (
-          <div className="text-center py-10">
-            <TrendingUp size={36} className="mx-auto mb-3 text-gray-600" />
-            <p className="text-sm text-gray-500 mb-1">Cliente ingresado directamente</p>
-            <p className="text-xs text-gray-600">No hay leads de CRM Ventas vinculados a este cliente</p>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {leads.map(lead => {
-              const stg = STAGE_LABELS[lead.stage] || { label: lead.stage, cls: "text-gray-400 bg-gray-400/10" };
-              return (
-                <div key={lead.id} className="p-4 bg-wuipi-bg rounded-xl border border-wuipi-border">
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono text-xs text-gray-400">{lead.code}</span>
-                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${stg.cls}`}>{stg.label}</span>
-                    </div>
-                    <span className="text-xs text-gray-500">{fmtDate(lead.created_at)}</span>
-                  </div>
-                  <div className="flex items-center gap-4 text-xs text-gray-400 flex-wrap">
-                    {lead.crm_products?.name && (
-                      <span className="flex items-center gap-1"><Zap size={11} /> {lead.crm_products.name}</span>
-                    )}
-                    {lead.crm_salespeople?.full_name && (
-                      <span className="flex items-center gap-1"><User size={11} /> {lead.crm_salespeople.full_name}</span>
-                    )}
-                    {lead.value > 0 && (
-                      <span className="flex items-center gap-1"><DollarSign size={11} /> ${fmt(lead.value)}</span>
-                    )}
-                    {lead.won_at && (
-                      <span className="text-emerald-400">Ganado: {fmtDate(lead.won_at)}</span>
-                    )}
-                    {lead.lost_at && (
-                      <span className="text-red-400">Perdido: {fmtDate(lead.lost_at)}</span>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </Card>
-    </div>
-  );
-}
-
-/* ========== TAB 5: INFRAESTRUCTURA ========== */
-function TabInfraestructura({ client }: { client: ClientDetail }) {
-  const [infraHost, setInfraHost] = useState<InfraHost | null>(null);
-  const [infraLoading, setInfraLoading] = useState(false);
-  const [infraChecked, setInfraChecked] = useState(false);
-
-  useEffect(() => {
-    if (!client.service_ip) {
-      setInfraChecked(true);
-      return;
-    }
-    setInfraLoading(true);
-    fetch("/api/infraestructura/hosts")
-      .then(r => r.json())
-      .then((hosts: InfraHost[]) => {
-        const match = hosts.find(h => h.host === client.service_ip || h.name?.includes(client.service_ip!));
-        setInfraHost(match || null);
-      })
-      .catch(() => {})
-      .finally(() => {
-        setInfraLoading(false);
-        setInfraChecked(true);
-      });
-  }, [client.service_ip]);
-
-  if (!client.service_ip) {
+  if (loading) {
     return (
-      <Card>
-        <div className="text-center py-10">
-          <Radio size={36} className="mx-auto mb-3 text-gray-600" />
-          <p className="text-sm text-gray-500 mb-1">Sin IP de servicio asignada</p>
-          <p className="text-xs text-gray-600">Asigna una IP de servicio al cliente para vincular con el monitoreo de red</p>
-        </div>
-      </Card>
-    );
-  }
-
-  if (infraLoading || !infraChecked) {
-    return (
-      <Card>
-        <div className="flex items-center justify-center py-12">
+      <>
+        <TopBar title="Cliente" />
+        <div className="flex items-center justify-center py-24">
           <RefreshCw size={20} className="animate-spin text-gray-500" />
-          <span className="ml-2 text-gray-500 text-sm">Buscando equipo en monitoreo...</span>
+          <span className="ml-3 text-gray-500 text-sm">Cargando perfil desde Odoo...</span>
         </div>
-      </Card>
+      </>
     );
   }
 
-  if (!infraHost) {
+  if (error || !data) {
     return (
-      <Card>
-        <div className="text-center py-10">
-          <Radio size={36} className="mx-auto mb-3 text-gray-600" />
-          <p className="text-sm text-gray-500 mb-1">Sin equipo monitoreado asociado</p>
-          <p className="text-xs text-gray-600">
-            IP <span className="font-mono text-cyan-400/80">{client.service_ip}</span> no encontrada en el sistema de monitoreo (Zabbix)
-          </p>
+      <>
+        <TopBar title="Cliente" />
+        <div className="p-6">
+          <Card className="!p-8 text-center">
+            <AlertTriangle size={32} className="mx-auto mb-3 text-red-400" />
+            <p className="text-red-400 text-sm">{error || "Cliente no encontrado"}</p>
+            <button onClick={() => router.push("/clientes")} className="mt-4 text-xs text-gray-400 hover:text-white underline">
+              Volver a clientes
+            </button>
+          </Card>
         </div>
-      </Card>
+      </>
     );
   }
 
-  const isUp = infraHost.status === 1;
+  const statusLabel = data.suspend ? "Suspendido" : data.subscription_status === "paused" ? "Pausado" : data.subscription_status === "progress" ? "Activo" : "Sin servicio";
+  const statusColor = data.suspend ? "text-red-400" : data.subscription_status === "paused" ? "text-amber-400" : data.subscription_status === "progress" ? "text-emerald-400" : "text-gray-400";
+  const totalMRR = data.subscriptions.filter(s => s.state === "3_progress").reduce((s, sub) => s + sub.recurring_monthly, 0);
+
+  const tabs: { id: Tab; label: string }[] = [
+    { id: "suscripciones", label: `Suscripciones (${data.subscriptions.length})` },
+    { id: "facturacion", label: `Facturación (${data.invoices.length})` },
+    { id: "informacion", label: "Información" },
+    { id: "soporte", label: "Soporte" },
+  ];
 
   return (
-    <div className="space-y-4">
-      <Card>
-        <h3 className="text-sm font-semibold text-gray-400 mb-4 flex items-center gap-2"><Radio size={14} /> Monitoreo del Equipo</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="space-y-3">
-            <div className="flex items-center gap-2 mb-3">
-              <span className={`w-3 h-3 rounded-full ${isUp ? "bg-emerald-400" : "bg-red-400"} animate-pulse`} />
-              <span className={`text-sm font-semibold ${isUp ? "text-emerald-400" : "text-red-400"}`}>
-                {isUp ? "En línea" : "Fuera de línea"}
+    <>
+      <TopBar title={data.name} />
+      <div className="p-4 md:p-6 space-y-4">
+
+        {/* Back + Header */}
+        <div className="flex items-start gap-4">
+          <button onClick={() => router.push("/clientes")} className="p-2 rounded-lg border border-wuipi-border text-gray-400 hover:text-white mt-1">
+            <ChevronLeft size={16} />
+          </button>
+          <div className="flex-1">
+            <div className="flex items-center gap-3 mb-1">
+              <h2 className="text-xl font-bold text-white">{data.name}</h2>
+              <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium ${statusColor} ${statusColor.replace("text-", "bg-")}/10`}>
+                {statusLabel}
               </span>
             </div>
-            <IRow icon={Server} label="Host" value={infraHost.name || infraHost.host} />
-            <IRow icon={Hash} label="Tipo" value={infraHost.type || "—"} />
-            <IRow icon={MapPin} label="Sitio" value={infraHost.site || "—"} />
+            <p className="text-sm text-gray-500">
+              {data.identification_type} {data.vat}
+              {data.responsibility_type && <> — {data.responsibility_type}</>}
+            </p>
           </div>
-          <div className="space-y-3">
-            <IRow icon={Activity} label="Latencia" value={infraHost.latency_ms != null ? `${infraHost.latency_ms.toFixed(1)} ms` : "—"} />
-            <IRow icon={AlertTriangle} label="Pérdida de paquetes" value={infraHost.packet_loss != null ? `${infraHost.packet_loss.toFixed(1)}%` : "—"} />
-            <IRow icon={Clock} label="Uptime" value={infraHost.uptime_days != null ? `${infraHost.uptime_days.toFixed(1)} días` : "—"} />
-          </div>
+          <button onClick={fetchDetail} className="p-2 rounded-lg border border-wuipi-border text-gray-400 hover:text-white">
+            <RefreshCw size={16} />
+          </button>
         </div>
-      </Card>
-    </div>
-  );
-}
 
-/* ========== TAB 6: QoE (Bequant) ========== */
-interface BequantMetricsData {
-  bandwidth: { uplink: number; downlink: number };
-  latency: number;
-  retransmissions: number;
-  congestion: number;
-  trafficAtMaxSpeed: number;
-  volume: { uplink: number; downlink: number };
-}
-interface BequantDPIData {
-  apps: Array<{ name: string; percentage: number; bytes: number }>;
-}
-interface QoEScoreData {
-  score: number;
-  level: "excellent" | "acceptable" | "degraded";
-  factors: { speedVsPlan: number; latency: number; retransmissions: number; congestion: number };
-}
-interface BequantResponseData {
-  connected: boolean;
-  message?: string;
-  subscriber?: { ip: string; policyName: string; groupName: string };
-  metrics?: BequantMetricsData;
-  dpi?: BequantDPIData;
-  qoe?: QoEScoreData;
-}
-
-const QOE_COLORS: Record<string, { color: string; bg: string; emoji: string; label: string }> = {
-  excellent: { color: "text-emerald-400", bg: "bg-emerald-400/10", emoji: "🟢", label: "Excelente" },
-  acceptable: { color: "text-amber-400", bg: "bg-amber-400/10", emoji: "🟡", label: "Aceptable" },
-  degraded: { color: "text-red-400", bg: "bg-red-400/10", emoji: "🔴", label: "Degradado" },
-};
-
-function TabQoE({ client }: { client: ClientDetail }) {
-  const [data, setData] = useState<BequantResponseData | null>(null);
-  const [qoeLoading, setQoeLoading] = useState(false);
-  const [period, setPeriod] = useState<"24h" | "7d" | "30d">("24h");
-  const [checked, setChecked] = useState(false);
-
-  const planSpeed = client.plan_speed_down || client.plans?.speed_down;
-
-  useEffect(() => {
-    if (!client.service_ip) {
-      setChecked(true);
-      return;
-    }
-    setQoeLoading(true);
-    const params = new URLSearchParams({ period });
-    if (planSpeed) params.set("planSpeed", planSpeed.toString());
-    fetch(`/api/bequant/${client.service_ip}?${params}`)
-      .then(r => r.json())
-      .then(setData)
-      .catch(() => setData({ connected: false, message: "Error de conexión" }))
-      .finally(() => { setQoeLoading(false); setChecked(true); });
-  }, [client.service_ip, period, planSpeed]);
-
-  if (!client.service_ip) {
-    return (
-      <Card>
-        <div className="text-center py-10">
-          <Activity size={36} className="mx-auto mb-3 text-gray-600" />
-          <p className="text-sm text-gray-500 mb-1">Sin IP de servicio asignada</p>
-          <p className="text-xs text-gray-600">Asigna una IP para consultar métricas de QoE</p>
+        {/* Quick stats */}
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+          <Card className="!p-3 text-center">
+            <p className="text-[10px] text-gray-500 uppercase">MRR</p>
+            <p className="text-lg font-bold text-cyan-400">{fmtUSD(totalMRR)}</p>
+          </Card>
+          <Card className="!p-3 text-center">
+            <p className="text-[10px] text-gray-500 uppercase">Servicios</p>
+            <p className="text-lg font-bold text-white">{data.subscription_count}</p>
+          </Card>
+          <Card className="!p-3 text-center">
+            <p className="text-[10px] text-gray-500 uppercase">Total facturado</p>
+            <p className="text-lg font-bold text-gray-300">{fmtBs(data.total_invoiced)}</p>
+          </Card>
+          <Card className="!p-3 text-center">
+            <p className="text-[10px] text-gray-500 uppercase">Por cobrar</p>
+            <p className={`text-lg font-bold ${data.credit > 0 ? "text-red-400" : "text-emerald-400"}`}>
+              {fmtBs(data.credit)}
+            </p>
+          </Card>
+          <Card className="!p-3 text-center">
+            <p className="text-[10px] text-gray-500 uppercase">DSO</p>
+            <p className="text-lg font-bold text-amber-400">{data.days_sales_outstanding}d</p>
+          </Card>
         </div>
-      </Card>
-    );
-  }
 
-  if (qoeLoading || !checked) {
-    return (
-      <Card>
-        <div className="flex items-center justify-center py-12">
-          <RefreshCw size={20} className="animate-spin text-gray-500" />
-          <span className="ml-2 text-gray-500 text-sm">Consultando Bequant...</span>
-        </div>
-      </Card>
-    );
-  }
-
-  if (!data || !data.connected) {
-    return (
-      <Card>
-        <div className="text-center py-10">
-          <Activity size={36} className="mx-auto mb-3 text-gray-600" />
-          <p className="text-sm text-gray-500 mb-1">QoE — Pendiente conexión con Bequant</p>
-          <p className="text-xs text-gray-600">
-            {data?.message || "Las métricas de calidad de experiencia estarán disponibles una vez configurado Bequant"}
-          </p>
-        </div>
-      </Card>
-    );
-  }
-
-  // Connected but subscriber not found
-  if (!data.metrics) {
-    return (
-      <Card>
-        <div className="text-center py-10">
-          <Activity size={36} className="mx-auto mb-3 text-gray-600" />
-          <p className="text-sm text-gray-500 mb-1">{data.message || "Suscriptor no encontrado"}</p>
-          <p className="text-xs text-gray-600">
-            IP <span className="font-mono text-cyan-400/80">{client.service_ip}</span> no registrada en Bequant
-          </p>
-        </div>
-      </Card>
-    );
-  }
-
-  const m = data.metrics;
-  const qoe = data.qoe;
-  const dpi = data.dpi;
-  const qoeStyle = qoe ? QOE_COLORS[qoe.level] : QOE_COLORS.acceptable;
-  const fmtBytes = (b: number) => {
-    if (b >= 1e9) return `${(b / 1e9).toFixed(1)} GB`;
-    if (b >= 1e6) return `${(b / 1e6).toFixed(1)} MB`;
-    return `${(b / 1e3).toFixed(0)} KB`;
-  };
-  const fmtSpeed = (bps: number) => {
-    if (bps >= 1e6) return `${(bps / 1e6).toFixed(1)} Mbps`;
-    if (bps >= 1e3) return `${(bps / 1e3).toFixed(0)} Kbps`;
-    return `${bps} bps`;
-  };
-
-  return (
-    <div className="space-y-4">
-      {/* Period selector */}
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-gray-400 flex items-center gap-2"><Activity size={14} /> Calidad de Experiencia (QoE)</h3>
-        <div className="flex items-center gap-1 bg-wuipi-bg rounded-lg border border-wuipi-border p-0.5">
-          {(["24h", "7d", "30d"] as const).map(p => (
+        {/* Tabs */}
+        <div className="flex items-center gap-1 border-b border-wuipi-border">
+          {tabs.map((t) => (
             <button
-              key={p}
-              onClick={() => setPeriod(p)}
-              className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                period === p ? "bg-wuipi-accent/10 text-wuipi-accent" : "text-gray-500 hover:text-gray-300"
+              key={t.id}
+              onClick={() => setTab(t.id)}
+              className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
+                tab === t.id
+                  ? "border-wuipi-accent text-wuipi-accent"
+                  : "border-transparent text-gray-500 hover:text-gray-300"
               }`}
             >
-              {p === "24h" ? "24 horas" : p === "7d" ? "7 días" : "30 días"}
+              {t.label}
             </button>
           ))}
         </div>
+
+        {/* Tab content */}
+        {tab === "suscripciones" && <SubscripcionesTab subscriptions={data.subscriptions} />}
+        {tab === "facturacion" && <FacturacionTab data={data} />}
+        {tab === "informacion" && <InformacionTab data={data} />}
+        {tab === "soporte" && <SoporteTab vat={data.vat} name={data.name} />}
+      </div>
+    </>
+  );
+}
+
+// ── Tab: Suscripciones ──────────────────────────────────
+
+function SubscripcionesTab({ subscriptions }: { subscriptions: OdooSubscription[] }) {
+  if (subscriptions.length === 0) {
+    return (
+      <Card className="text-center py-12">
+        <Ban size={32} className="mx-auto mb-3 text-gray-600" />
+        <p className="text-gray-400 text-sm">No tiene suscripciones</p>
+      </Card>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {subscriptions.map((sub) => (
+        <Card key={sub.id} className="!p-4">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-3">
+              <span className="text-white font-mono text-sm font-bold">{sub.name}</span>
+              <SubStateBadge state={sub.state} />
+            </div>
+            <div className="text-right">
+              <p className="text-cyan-400 font-bold text-sm">{fmtUSD(sub.recurring_monthly)}<span className="text-gray-500 font-normal text-xs">/mes</span></p>
+              <p className="text-[10px] text-gray-500">{sub.currency}</p>
+            </div>
+          </div>
+
+          {/* Lines */}
+          <div className="bg-wuipi-bg rounded-lg border border-wuipi-border overflow-hidden">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-gray-500 border-b border-wuipi-border">
+                  <th className="text-left p-2 font-medium">Producto/Plan</th>
+                  <th className="text-left p-2 font-medium">Código</th>
+                  <th className="text-right p-2 font-medium">Precio</th>
+                  <th className="text-right p-2 font-medium">Cant.</th>
+                  <th className="text-right p-2 font-medium">Subtotal</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sub.lines.map((line, i) => (
+                  <tr key={i} className="border-b border-wuipi-border/30 last:border-0">
+                    <td className="p-2 text-white">{line.product_name}</td>
+                    <td className="p-2 text-gray-500 font-mono">{line.product_code}</td>
+                    <td className="p-2 text-right text-gray-300">{fmtUSD(line.price_unit)}</td>
+                    <td className="p-2 text-right text-gray-400">{line.quantity}</td>
+                    <td className="p-2 text-right text-emerald-400 font-medium">{fmtUSD(line.price_subtotal)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="flex items-center gap-4 mt-3 text-[10px] text-gray-500">
+            <span>Inicio: {sub.start_date || "—"}</span>
+            <span>Próxima factura: {sub.next_invoice_date || "—"}</span>
+            <span>Total con IVA: {fmtUSD(sub.amount_total)}</span>
+          </div>
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+// ── Tab: Facturación ────────────────────────────────────
+
+function FacturacionTab({ data }: { data: OdooClientDetail }) {
+  return (
+    <div className="space-y-4">
+      {/* KPIs */}
+      <div className="grid grid-cols-4 gap-3">
+        <Card className="!p-3 text-center">
+          <p className="text-[10px] text-gray-500">Total facturado</p>
+          <p className="text-sm font-bold text-white">{fmtBs(data.total_invoiced)}</p>
+        </Card>
+        <Card className="!p-3 text-center">
+          <p className="text-[10px] text-gray-500">Por cobrar</p>
+          <p className="text-sm font-bold text-red-400">{fmtBs(data.credit)}</p>
+        </Card>
+        <Card className="!p-3 text-center">
+          <p className="text-[10px] text-gray-500">Vencido</p>
+          <p className="text-sm font-bold text-orange-400">{fmtBs(data.total_overdue)}</p>
+        </Card>
+        <Card className="!p-3 text-center">
+          <p className="text-[10px] text-gray-500">DSO</p>
+          <p className="text-sm font-bold text-amber-400">{data.days_sales_outstanding} días</p>
+        </Card>
       </div>
 
-      {/* QoE Score + Speed */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {qoe && (
-          <Card className="text-center">
-            <p className="text-xs text-gray-500 mb-3">Score QoE</p>
-            <div className={`text-6xl font-bold mb-2 ${qoeStyle.color}`}>{qoe.score}</div>
-            <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium ${qoeStyle.color} ${qoeStyle.bg}`}>
-              {qoeStyle.emoji} {qoeStyle.label}
-            </span>
-          </Card>
+      {/* Invoices */}
+      <Card>
+        <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
+          <FileText size={14} /> Facturas recientes
+        </h3>
+        {data.invoices.length === 0 ? (
+          <p className="text-gray-500 text-xs text-center py-6">Sin facturas</p>
+        ) : (
+          <div className="overflow-auto max-h-[300px]">
+            <table className="w-full text-xs">
+              <thead className="sticky top-0 bg-wuipi-card">
+                <tr className="text-gray-500 border-b border-wuipi-border">
+                  <th className="text-left p-2 font-medium">Factura</th>
+                  <th className="text-left p-2 font-medium">Fecha</th>
+                  <th className="text-left p-2 font-medium">Vencimiento</th>
+                  <th className="text-right p-2 font-medium">Total</th>
+                  <th className="text-right p-2 font-medium">Pendiente</th>
+                  <th className="text-center p-2 font-medium">Estado</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.invoices.map((inv) => (
+                  <tr key={inv.id} className="border-b border-wuipi-border/30">
+                    <td className="p-2 text-white font-mono">{inv.invoice_number}</td>
+                    <td className="p-2 text-gray-400">{inv.invoice_date}</td>
+                    <td className="p-2 text-gray-400">{inv.due_date}</td>
+                    <td className="p-2 text-right text-gray-300">{fmtAmount(inv.total, inv.currency)}</td>
+                    <td className="p-2 text-right font-medium">
+                      {inv.amount_due > 0 ? (
+                        <span className="text-red-400">{fmtAmount(inv.amount_due, inv.currency)}</span>
+                      ) : (
+                        <span className="text-emerald-400">0.00</span>
+                      )}
+                    </td>
+                    <td className="p-2 text-center"><PaymentStateBadge state={inv.payment_state} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
+      </Card>
 
-        <Card>
-          <p className="text-xs text-gray-500 mb-3">Velocidad Real vs Contratada</p>
-          <div className="space-y-3">
-            <div>
-              <div className="flex justify-between text-xs mb-1">
-                <span className="text-gray-400">Descarga</span>
-                <span className="text-cyan-400">{fmtSpeed(m.bandwidth.downlink)}</span>
-              </div>
-              <div className="h-3 bg-wuipi-bg rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-cyan-500/60 rounded-full transition-all"
-                  style={{ width: `${planSpeed ? Math.min(100, (m.bandwidth.downlink / 1e6 / planSpeed) * 100) : 50}%` }}
-                />
-              </div>
-              {planSpeed && <p className="text-xs text-gray-600 mt-0.5 text-right">de {planSpeed} Mbps</p>}
-            </div>
-            <div>
-              <div className="flex justify-between text-xs mb-1">
-                <span className="text-gray-400">Subida</span>
-                <span className="text-violet-400">{fmtSpeed(m.bandwidth.uplink)}</span>
-              </div>
-              <div className="h-3 bg-wuipi-bg rounded-full overflow-hidden">
-                <div className="h-full bg-violet-500/60 rounded-full" style={{ width: `${Math.min(100, m.trafficAtMaxSpeed)}%` }} />
-              </div>
-            </div>
+      {/* Payments */}
+      <Card>
+        <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
+          <Receipt size={14} /> Pagos recientes
+        </h3>
+        {data.payments.length === 0 ? (
+          <p className="text-gray-500 text-xs text-center py-6">Sin pagos registrados</p>
+        ) : (
+          <div className="overflow-auto max-h-[250px]">
+            <table className="w-full text-xs">
+              <thead className="sticky top-0 bg-wuipi-card">
+                <tr className="text-gray-500 border-b border-wuipi-border">
+                  <th className="text-left p-2 font-medium">Fecha</th>
+                  <th className="text-right p-2 font-medium">Monto</th>
+                  <th className="text-left p-2 font-medium">Moneda</th>
+                  <th className="text-left p-2 font-medium">Banco/Método</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.payments.map((pay) => (
+                  <tr key={pay.id} className="border-b border-wuipi-border/30">
+                    <td className="p-2 text-gray-400">{pay.date}</td>
+                    <td className="p-2 text-right text-emerald-400 font-medium">{fmtAmount(pay.amount, pay.currency)}</td>
+                    <td className="p-2 text-gray-400">{pay.currency}</td>
+                    <td className="p-2 text-gray-300">{pay.journal}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-        </Card>
+        )}
+      </Card>
+    </div>
+  );
+}
 
-        <Card>
-          <p className="text-xs text-gray-500 mb-3">Métricas de Red</p>
-          <div className="space-y-3">
-            <IRow icon={Activity} label="Latencia" value={`${m.latency.toFixed(1)} ms`} />
-            <IRow icon={AlertTriangle} label="Retransmisiones TCP" value={`${m.retransmissions.toFixed(1)}%`} />
-            <IRow icon={Zap} label="Congestión" value={`${m.congestion.toFixed(1)}%`} />
-          </div>
-        </Card>
-      </div>
+// ── Tab: Información ────────────────────────────────────
 
-      {/* Volume + QoE Factors */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <Card>
-          <h3 className="text-sm font-semibold text-gray-400 mb-4">Consumo de datos</h3>
-          <div className="grid grid-cols-2 gap-4">
-            <div className="p-4 bg-wuipi-bg rounded-xl border border-wuipi-border text-center">
-              <p className="text-xs text-gray-500 mb-1">Descarga</p>
-              <p className="text-2xl font-bold text-cyan-400">{fmtBytes(m.volume.downlink)}</p>
-            </div>
-            <div className="p-4 bg-wuipi-bg rounded-xl border border-wuipi-border text-center">
-              <p className="text-xs text-gray-500 mb-1">Subida</p>
-              <p className="text-2xl font-bold text-violet-400">{fmtBytes(m.volume.uplink)}</p>
-            </div>
-          </div>
-        </Card>
+function InformacionTab({ data }: { data: OdooClientDetail }) {
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      {/* Datos fiscales */}
+      <Card>
+        <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
+          <Building2 size={14} /> Datos Fiscales
+        </h3>
+        <div className="space-y-0">
+          <InfoRow label="RIF/Cédula" value={`${data.identification_type} ${data.vat}`} mono />
+          <InfoRow label="Tipo" value={data.is_company ? "Persona Jurídica" : "Persona Natural"} />
+          <InfoRow label="Responsabilidad SENIAT" value={data.responsibility_type} />
+          <InfoRow label="Lista de precios" value={data.pricelist} />
+          <InfoRow label="Referencia" value={data.ref} mono />
+          <InfoRow label="Cargo" value={data.function} />
+        </div>
+      </Card>
 
-        {qoe && (
-          <Card>
-            <h3 className="text-sm font-semibold text-gray-400 mb-4">Factores QoE</h3>
-            <div className="space-y-3">
-              {[
-                { label: "Velocidad vs Plan", value: qoe.factors.speedVsPlan, color: "bg-cyan-500" },
-                { label: "Latencia", value: qoe.factors.latency, color: "bg-emerald-500" },
-                { label: "Retransmisiones", value: qoe.factors.retransmissions, color: "bg-amber-500" },
-                { label: "Congestión", value: qoe.factors.congestion, color: "bg-violet-500" },
-              ].map(f => (
-                <div key={f.label}>
-                  <div className="flex justify-between text-xs mb-1">
-                    <span className="text-gray-400">{f.label}</span>
-                    <span className="text-gray-300">{f.value}%</span>
-                  </div>
-                  <div className="h-2 bg-wuipi-bg rounded-full overflow-hidden">
-                    <div className={`h-full ${f.color}/60 rounded-full`} style={{ width: `${f.value}%` }} />
-                  </div>
-                </div>
+      {/* Dirección */}
+      <Card>
+        <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
+          <MapPin size={14} /> Dirección
+        </h3>
+        <div className="space-y-0">
+          <InfoRow label="Calle" value={data.street} />
+          {data.street2 && data.street2 !== "0" && <InfoRow label="Calle 2" value={data.street2} />}
+          <InfoRow label="Ciudad" value={data.city} />
+          <InfoRow label="Estado" value={data.state} />
+          <InfoRow label="Municipio" value={data.municipality} />
+          <InfoRow label="Parroquia" value={data.parish} />
+          <InfoRow label="ZIP" value={data.zip} mono />
+          <InfoRow label="País" value={data.country} />
+          {(data.latitude !== 0 || data.longitude !== 0) && (
+            <InfoRow label="Coordenadas" value={`${data.latitude}, ${data.longitude}`} mono />
+          )}
+        </div>
+      </Card>
+
+      {/* Contacto */}
+      <Card>
+        <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
+          <Phone size={14} /> Contacto
+        </h3>
+        <div className="space-y-0">
+          <InfoRow label="Email" value={data.email} />
+          <InfoRow label="Celular" value={data.mobile} />
+          <InfoRow label="Teléfono" value={data.phone} />
+        </div>
+      </Card>
+
+      {/* Cobranza y seguimiento */}
+      <Card>
+        <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
+          <CreditCard size={14} /> Seguimiento
+        </h3>
+        <div className="space-y-0">
+          <InfoRow label="Nivel de confianza" value={data.trust === "normal" ? "Normal" : data.trust === "good" ? "Bueno" : data.trust} />
+          <InfoRow label="Estado de seguimiento" value={data.followup_status === "no_action_needed" ? "Sin acción requerida" : data.followup_status} />
+          <InfoRow label="Suspender" value={data.suspend ? "Sí" : "No"} />
+          <InfoRow label="No suspender" value={data.not_suspend ? "Sí (protegido)" : "No"} />
+          <InfoRow label="DSO" value={`${data.days_sales_outstanding} días`} />
+        </div>
+      </Card>
+
+      {/* Tags y notas */}
+      {(data.tags.length > 0 || data.notes) && (
+        <Card className="md:col-span-2">
+          <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
+            <Tag size={14} /> Tags y Notas
+          </h3>
+          {data.tags.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mb-3">
+              {data.tags.map((t) => (
+                <span key={t} className="px-2 py-0.5 rounded-full text-[10px] bg-wuipi-accent/10 text-wuipi-accent border border-wuipi-accent/20">{t}</span>
               ))}
             </div>
-          </Card>
-        )}
-      </div>
-
-      {/* DPI */}
-      {dpi && dpi.apps.length > 0 && (
-        <Card>
-          <h3 className="text-sm font-semibold text-gray-400 mb-4">Top Aplicaciones (DPI)</h3>
-          <div className="space-y-2">
-            {dpi.apps.slice(0, 10).map(app => (
-              <div key={app.name} className="flex items-center gap-3">
-                <span className="text-sm text-gray-300 w-32 truncate">{app.name}</span>
-                <div className="flex-1 h-6 bg-wuipi-bg rounded-lg overflow-hidden flex items-center">
-                  <div
-                    className="h-full bg-wuipi-accent/20 rounded-lg flex items-center px-2"
-                    style={{ width: `${Math.max(app.percentage, 5)}%` }}
-                  >
-                    <span className="text-xs font-medium text-wuipi-accent">{app.percentage.toFixed(1)}%</span>
-                  </div>
-                </div>
-                <span className="text-xs text-gray-500 w-16 text-right">{fmtBytes(app.bytes)}</span>
-              </div>
-            ))}
-          </div>
-        </Card>
-      )}
-
-      {data.subscriber && (
-        <Card>
-          <h3 className="text-sm font-semibold text-gray-400 mb-3">Suscriptor Bequant</h3>
-          <div className="grid grid-cols-3 gap-3">
-            <IRow icon={Globe} label="IP" value={data.subscriber.ip} />
-            <IRow icon={Zap} label="Política" value={data.subscriber.policyName} />
-            <IRow icon={Hash} label="Grupo" value={data.subscriber.groupName} />
-          </div>
+          )}
+          {data.notes && (
+            <div className="text-xs text-gray-400 bg-wuipi-bg rounded-lg p-3 border border-wuipi-border" dangerouslySetInnerHTML={{ __html: data.notes }} />
+          )}
         </Card>
       )}
     </div>
+  );
+}
+
+// ── Tab: Soporte ────────────────────────────────────────
+
+function SoporteTab({ vat, name }: { vat: string; name: string }) {
+  return (
+    <Card className="text-center py-12">
+      <Globe size={32} className="mx-auto mb-3 text-gray-600" />
+      <p className="text-gray-400 text-sm mb-2">Tickets de soporte para {name}</p>
+      <p className="text-gray-600 text-xs">
+        Los tickets se vincularán automáticamente por cédula/RIF ({vat}) en futuras versiones.
+      </p>
+    </Card>
   );
 }
