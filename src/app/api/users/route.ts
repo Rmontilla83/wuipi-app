@@ -27,9 +27,12 @@ export async function GET() {
     }
 
     const sb = createAdminSupabase();
+    // Exclude portal clients — they have profiles from the auth trigger
+    // but are not dashboard users
     const { data, error } = await sb
       .from("profiles")
       .select("id, email, full_name, role, phone, department, is_active, last_login_at, created_at")
+      .neq("role", "cliente")
       .order("created_at", { ascending: false });
     if (error) throw error;
 

@@ -68,6 +68,16 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
+  // Block portal clients from accessing the dashboard
+  // Clients authenticated via Magic Link have role "cliente" in app_metadata
+  const role = session?.user?.app_metadata?.role;
+  const isDashboardRoute = !pathname.startsWith("/portal") && !pathname.startsWith("/api/portal") && !pathname.startsWith("/login");
+  if (role === "cliente" && isDashboardRoute) {
+    const url = request.nextUrl.clone();
+    url.pathname = "/portal/inicio";
+    return NextResponse.redirect(url);
+  }
+
   return response;
 }
 

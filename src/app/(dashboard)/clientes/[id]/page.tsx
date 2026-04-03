@@ -7,7 +7,7 @@ import { Card } from "@/components/ui/card";
 import {
   ChevronLeft, RefreshCw, Mail, Phone, MapPin, Building2,
   CreditCard, FileText, Receipt, Clock, Tag, Globe,
-  AlertTriangle, CheckCircle2, Pause, Ban,
+  AlertTriangle, CheckCircle2, Pause, Ban, Eye,
 } from "lucide-react";
 import type { OdooClientDetail, OdooSubscription, OdooInvoiceDetail, OdooPayment } from "@/types/odoo";
 
@@ -140,9 +140,19 @@ export default function ClienteDetailPage() {
               {data.responsibility_type && <> — {data.responsibility_type}</>}
             </p>
           </div>
-          <button onClick={fetchDetail} className="p-2 rounded-lg border border-wuipi-border text-gray-400 hover:text-white">
-            <RefreshCw size={16} />
-          </button>
+          <div className="flex items-center gap-2">
+            <a
+              href={`/portal/preview/${data.id}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-violet-500/30 bg-violet-500/10 text-violet-400 text-xs font-medium hover:bg-violet-500/20 transition-colors"
+            >
+              <Eye size={14} /> Ver portal
+            </a>
+            <button onClick={fetchDetail} className="p-2 rounded-lg border border-wuipi-border text-gray-400 hover:text-white">
+              <RefreshCw size={16} />
+            </button>
+          </div>
         </div>
 
         {/* Quick stats */}
