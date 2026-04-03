@@ -20,8 +20,9 @@ interface TopBarProps {
 export function TopBar({ title, subtitle, icon, actions }: TopBarProps) {
   const [time, setTime] = useState(new Date());
   const [services, setServices] = useState<ServiceStats | null>(null);
+  const [aiStatus, setAiStatus] = useState<{ ai: boolean; gemini: boolean; claude: boolean } | null>(null);
 
-  const fetchServices = useCallback(() => {
+  const fetchData = useCallback(() => {
     fetch("/api/odoo/financial-summary")
       .then((r) => r.ok ? r.json() : null)
       .then((d) => {
@@ -34,13 +35,18 @@ export function TopBar({ title, subtitle, icon, actions }: TopBarProps) {
         }
       })
       .catch(() => {});
+
+    fetch("/api/health")
+      .then((r) => r.json())
+      .then((d) => { if (d.services) setAiStatus(d.services); })
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
     const timer = setInterval(() => setTime(new Date()), 1000);
-    fetchServices();
+    fetchData();
     return () => clearInterval(timer);
-  }, [fetchServices]);
+  }, [fetchData]);
 
   return (
     <header className="h-16 px-7 flex items-center justify-between border-b border-wuipi-border bg-wuipi-sidebar shrink-0">
@@ -66,11 +72,26 @@ export function TopBar({ title, subtitle, icon, actions }: TopBarProps) {
         )}
 
         {/* AI Status */}
-        <div className="flex items-center gap-2 px-3 py-1.5 bg-wuipi-purple/5 rounded-lg border border-wuipi-purple/20">
-          <span className="w-2 h-2 rounded-full bg-wuipi-purple shadow-[0_0_6px] shadow-wuipi-purple glow-dot" />
-          <Brain size={14} className="text-wuipi-purple" />
-          <span className="text-xs font-semibold text-wuipi-purple">IA Activa</span>
-        </div>
+        {aiStatus && (
+          <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border ${
+            aiStatus.ai
+              ? "bg-wuipi-purple/5 border-wuipi-purple/20"
+              : "bg-red-500/5 border-red-500/20"
+          }`}>
+            <span className={`w-2 h-2 rounded-full ${
+              aiStatus.ai ? "bg-wuipi-purple shadow-[0_0_6px] shadow-wuipi-purple" : "bg-red-400"
+            }`} />
+            <Brain size={14} className={aiStatus.ai ? "text-wuipi-purple" : "text-red-400"} />
+            <span className={`text-xs font-semibold ${aiStatus.ai ? "text-wuipi-purple" : "text-red-400"}`}>
+              {aiStatus.ai ? "IA Activa" : "IA Inactiva"}
+            </span>
+            {aiStatus.ai && (
+              <span className="text-[10px] text-gray-500">
+                {[aiStatus.gemini && "Gemini", aiStatus.claude && "Claude"].filter(Boolean).join(" + ")}
+              </span>
+            )}
+          </div>
+        )}
 
         {/* Clock */}
         <span className="text-sm text-gray-500 tabular-nums font-mono">
