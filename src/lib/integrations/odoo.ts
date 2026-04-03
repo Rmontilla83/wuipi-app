@@ -797,7 +797,9 @@ export async function getOdooClients(options?: {
   const page = Math.max(options?.page || 1, 1);
   const offset = (page - 1) * pageSize;
 
-  const domain: OdooDomain[] = [["customer_rank", ">", 0]];
+  // Include clients with customer_rank OR active subscriptions
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const domain: any[] = ["|", ["customer_rank", ">", 0], ["subscription_count", ">", 0]];
 
   // Status filter
   if (options?.status === "active") {
