@@ -111,7 +111,7 @@ export default function ClienteDetailPage() {
   const totalMRR = data.subscriptions.filter(s => s.state === "3_progress").reduce((s, sub) => s + sub.recurring_monthly, 0);
 
   const tabs: { id: Tab; label: string }[] = [
-    { id: "suscripciones", label: `Suscripciones (${data.subscriptions.length})` },
+    { id: "suscripciones", label: `Servicios (${data.subscriptions.reduce((s, sub) => s + sub.lines.length, 0)})` },
     { id: "facturacion", label: `Facturación (${data.invoices.length})` },
     { id: "informacion", label: "Información" },
     { id: "soporte", label: "Soporte" },
@@ -225,7 +225,7 @@ function SubscripcionesTab({ subscriptions }: { subscriptions: OdooSubscription[
           </div>
 
           {/* Lines */}
-          <div className="bg-wuipi-bg rounded-lg border border-wuipi-border overflow-hidden">
+          <div className="bg-wuipi-bg rounded-lg border border-wuipi-border overflow-auto max-h-[320px]">
             <table className="w-full text-xs">
               <thead>
                 <tr className="text-gray-500 border-b border-wuipi-border">

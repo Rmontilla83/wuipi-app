@@ -843,7 +843,7 @@ export async function getOdooClients(options?: {
 
   // Get subscriptions for these clients to extract main plans and MRR
   const partnerIds = rawClients.map((c: any) => c.id);
-  const subsByPartner = new Map<number, { plans: string[]; mrr: number }>();
+  const subsByPartner = new Map<number, { plans: string[]; mrr: number; serviceCount: number }>();
 
   if (partnerIds.length > 0) {
     const subs = await searchRead("sale.order", [
@@ -880,9 +880,10 @@ export async function getOdooClients(options?: {
     // Group by partner
     for (const s of subs) {
       const pid = s.partner_id[0];
-      if (!subsByPartner.has(pid)) subsByPartner.set(pid, { plans: [], mrr: 0 });
+      if (!subsByPartner.has(pid)) subsByPartner.set(pid, { plans: [], mrr: 0, serviceCount: 0 });
       const entry = subsByPartner.get(pid)!;
       entry.mrr += s.recurring_monthly || 0;
+      entry.serviceCount += (s.order_line || []).length;
       for (const lineId of (s.order_line || [])) {
         const productName = lineProducts.get(lineId);
         if (productName && !entry.plans.includes(productName)) {
@@ -911,6 +912,7 @@ export async function getOdooClients(options?: {
       credit: c.credit || 0,
       total_invoiced: c.total_invoiced || 0,
       unpaid_invoices_count: c.unpaid_invoices_count || 0,
+      service_count: subData?.serviceCount || 0,
       main_plans: subData?.plans || [],
       mrr_usd: Math.round((subData?.mrr || 0) * 100) / 100,
     };

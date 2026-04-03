@@ -54,6 +54,7 @@ export interface OdooClient {
   total_invoiced: number;
   unpaid_invoices_count: number;
   // Computed from subscriptions
+  service_count: number;    // total subscription lines (actual services)
   main_plans: string[];     // e.g. ["Fibra 300", "Beam 100"]
   mrr_usd: number;
 }

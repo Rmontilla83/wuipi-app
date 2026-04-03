@@ -158,7 +158,7 @@ export default function ClientesPage() {
                         </td>
                         <td className="p-3 text-gray-400 text-xs">{c.city}{c.state ? `, ${c.state}` : ""}</td>
                         <td className="p-3">
-                          <p className="text-white text-xs">{c.subscription_count} suscripción{c.subscription_count !== 1 ? "es" : ""}</p>
+                          <p className="text-white text-xs">{c.service_count} servicio{c.service_count !== 1 ? "s" : ""}</p>
                           <p className="text-gray-600 text-[10px] truncate max-w-[180px]">
                             {c.main_plans.length > 0 ? c.main_plans.slice(0, 3).join(", ") : "—"}
                           </p>
