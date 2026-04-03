@@ -32,7 +32,7 @@ interface MonthlyHistoryEntry {
   month: string;
   label: string;
   drafted_usd: number;
-  posted_usd: number;
+  collected_usd: number;
   effectiveness: number;
 }
 
@@ -345,10 +345,11 @@ function FinancieroTab({ stats, loading }: { stats: FinanceStats | null; loading
         {/* History Chart */}
         {stats.monthly_history && stats.monthly_history.length > 0 && (
           <Card>
-            <h3 className="text-base font-bold text-white mb-4">Historico Mensual (USD equiv.)</h3>
-            <div className="h-[240px]">
+            <h3 className="text-base font-bold text-white mb-1">Efectividad de Cobranza</h3>
+            <p className="text-xs text-gray-500 mb-4">Meta (borradores) vs Ingreso real (diarios bancarios) en USD equiv.</p>
+            <div className="h-[220px]">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={stats.monthly_history} barCategoryGap="25%">
+                <BarChart data={stats.monthly_history} barCategoryGap="20%">
                   <XAxis dataKey="label" tick={{ fill: "#9ca3af", fontSize: 11 }} axisLine={false} tickLine={false} />
                   <YAxis tick={{ fill: "#6b7280", fontSize: 10 }} axisLine={false} tickLine={false} width={55} tickFormatter={(v) => `$${fmtShort(v)}`} />
                   <Tooltip
@@ -356,28 +357,28 @@ function FinancieroTab({ stats, loading }: { stats: FinanceStats | null; loading
                     labelStyle={{ color: "#fff", fontWeight: 600, marginBottom: 4 }}
                     formatter={(value: number, name: string) => [
                       fmtUsd(value),
-                      name === "drafted_usd" ? "Generado (Borradores)" : "Cobrado (Confirmado)",
+                      name === "drafted_usd" ? "Meta (Borradores)" : "Cobrado (Diarios)",
                     ]}
                   />
-                  <Bar dataKey="drafted_usd" name="Generado" fill="#f59e0b" fillOpacity={0.7} radius={[4, 4, 0, 0]} barSize={18} />
-                  <Bar dataKey="posted_usd" name="Cobrado" fill="#10b981" radius={[4, 4, 0, 0]} barSize={18} />
+                  <Bar dataKey="drafted_usd" name="Meta" fill="#10b981" radius={[4, 4, 0, 0]} barSize={20} />
+                  <Bar dataKey="collected_usd" name="Cobrado" fill="#06b6d4" radius={[4, 4, 0, 0]} barSize={20} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
             <div className="flex items-center gap-4 mt-2 pt-2 border-t border-wuipi-border">
-              <span className="flex items-center gap-1.5 text-[10px] text-gray-500"><span className="w-2.5 h-2.5 rounded bg-amber-500/70 inline-block" /> Generado (Borradores)</span>
-              <span className="flex items-center gap-1.5 text-[10px] text-gray-500"><span className="w-2.5 h-2.5 rounded bg-emerald-500 inline-block" /> Cobrado (Confirmado)</span>
+              <span className="flex items-center gap-1.5 text-[10px] text-gray-500"><span className="w-2.5 h-2.5 rounded bg-emerald-500 inline-block" /> Meta (Borradores)</span>
+              <span className="flex items-center gap-1.5 text-[10px] text-gray-500"><span className="w-2.5 h-2.5 rounded bg-cyan-500 inline-block" /> Cobrado (Diarios)</span>
             </div>
             <div className="grid grid-cols-6 gap-1 mt-2">
               {stats.monthly_history.map((m) => (
                 <div key={m.month} className="text-center py-1.5 bg-wuipi-bg rounded">
                   <p className="text-[9px] text-gray-600">{m.label.split(" ")[0]}</p>
-                  <p className="text-[10px] font-semibold text-amber-400">${fmtShort(m.drafted_usd)}</p>
-                  <p className="text-[10px] font-semibold text-emerald-400">${fmtShort(m.posted_usd)}</p>
+                  <p className={`text-sm font-bold ${m.effectiveness >= 100 ? "text-emerald-400" : m.effectiveness >= 80 ? "text-cyan-400" : m.effectiveness > 0 ? "text-amber-400" : "text-gray-600"}`}>
+                    {m.effectiveness > 0 ? `${m.effectiveness}%` : "—"}
+                  </p>
                 </div>
               ))}
             </div>
-            <p className="text-[10px] text-gray-600 mt-1">VED convertido a USD con tasa BCV actual</p>
           </Card>
         )}
 
