@@ -5,6 +5,13 @@ const nextConfig = {
   experimental: {
     serverComponentsExternalPackages: ["@anthropic-ai/sdk", "@google/generative-ai"],
   },
+  redirects: async () => [
+    {
+      source: "/portal",
+      destination: "/portal/inicio",
+      permanent: false,
+    },
+  ],
   headers: async () => [
     {
       source: "/(.*)",
