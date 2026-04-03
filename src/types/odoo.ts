@@ -73,6 +73,8 @@ export interface OdooClient {
   unpaid_invoices_count: number;
   // Computed from subscriptions
   service_count: number;    // total subscription lines (actual services)
+  services_active: number;
+  services_suspended: number;
   main_plans: string[];     // e.g. ["Fibra 300", "Beam 100"]
   mrr_usd: number;
 }
@@ -84,6 +86,7 @@ export interface OdooSubscriptionLine {
   price_unit: number;
   price_subtotal: number;
   discount: number;
+  service_state: string; // progress, suspended, draft, closed
 }
 
 export interface OdooSubscription {

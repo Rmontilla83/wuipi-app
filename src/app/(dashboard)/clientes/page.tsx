@@ -20,13 +20,22 @@ const STATUS_FILTERS = [
   { value: "debt", label: "Con deuda" },
 ];
 
-function getClientStatus(c: OdooClient): { label: string; color: string } {
-  // Priority: subscription state is the source of truth for service status
-  // The "suspend" field in Odoo is unreliable (most clients have suspend=true)
-  if (c.subscription_status === "progress") return { label: "Activo", color: "text-emerald-400 bg-emerald-400/10" };
-  if (c.subscription_status === "paused" || c.subscription_status === "suspended") return { label: "Pausado", color: "text-amber-400 bg-amber-400/10" };
-  if (c.subscription_count > 0) return { label: "Inactivo", color: "text-orange-400 bg-orange-400/10" };
-  return { label: "Sin servicio", color: "text-gray-400 bg-gray-400/10" };
+function ServiceStatusBadge({ c }: { c: OdooClient }) {
+  if (c.service_count === 0) {
+    return <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-medium text-gray-400 bg-gray-400/10">Sin servicio</span>;
+  }
+  if (c.services_suspended === 0) {
+    return <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-medium text-emerald-400 bg-emerald-400/10">{c.services_active} activo{c.services_active !== 1 ? "s" : ""}</span>;
+  }
+  if (c.services_active === 0) {
+    return <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-medium text-red-400 bg-red-400/10">{c.services_suspended} suspendido{c.services_suspended !== 1 ? "s" : ""}</span>;
+  }
+  return (
+    <div className="flex flex-col gap-0.5">
+      <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-medium text-emerald-400 bg-emerald-400/10">{c.services_active} activo{c.services_active !== 1 ? "s" : ""}</span>
+      <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-medium text-red-400 bg-red-400/10">{c.services_suspended} susp.</span>
+    </div>
+  );
 }
 
 export default function ClientesPage() {
@@ -139,9 +148,7 @@ export default function ClientesPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {clients.map((c) => {
-                    const status = getClientStatus(c);
-                    return (
+                  {clients.map((c) => (
                       <tr
                         key={c.id}
                         onClick={() => router.push(`/clientes/${c.id}`)}
@@ -177,13 +184,10 @@ export default function ClientesPage() {
                           )}
                         </td>
                         <td className="p-3 text-center">
-                          <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-medium ${status.color}`}>
-                            {status.label}
-                          </span>
+                          <ServiceStatusBadge c={c} />
                         </td>
                       </tr>
-                    );
-                  })}
+                    ))}
                 </tbody>
               </table>
             </div>

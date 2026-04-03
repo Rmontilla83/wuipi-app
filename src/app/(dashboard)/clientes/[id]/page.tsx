@@ -106,10 +106,12 @@ export default function ClienteDetailPage() {
     );
   }
 
-  const statusLabel = data.subscription_status === "progress" ? "Activo" : data.subscription_status === "paused" || data.subscription_status === "suspended" ? "Pausado" : data.subscription_count > 0 ? "Inactivo" : "Sin servicio";
-  const statusColor = data.subscription_status === "progress" ? "text-emerald-400" : data.subscription_status === "paused" || data.subscription_status === "suspended" ? "text-amber-400" : data.subscription_count > 0 ? "text-orange-400" : "text-gray-400";
   const totalMRR = data.subscriptions.filter(s => s.state === "3_progress").reduce((s, sub) => s + sub.recurring_monthly, 0);
   const totalServices = data.subscriptions.reduce((s, sub) => s + sub.lines.length, 0);
+  const svcActive = data.subscriptions.reduce((s, sub) => s + sub.lines.filter(l => l.service_state === "progress").length, 0);
+  const svcSuspended = data.subscriptions.reduce((s, sub) => s + sub.lines.filter(l => l.service_state === "suspended").length, 0);
+  const statusLabel = totalServices === 0 ? "Sin servicio" : svcSuspended === 0 ? `${svcActive} activo${svcActive !== 1 ? "s" : ""}` : svcActive === 0 ? `${svcSuspended} suspendido${svcSuspended !== 1 ? "s" : ""}` : `${svcActive} activo${svcActive !== 1 ? "s" : ""} / ${svcSuspended} susp.`;
+  const statusColor = totalServices === 0 ? "text-gray-400" : svcSuspended === 0 ? "text-emerald-400" : svcActive === 0 ? "text-red-400" : "text-amber-400";
 
   const tabs: { id: Tab; label: string }[] = [
     { id: "suscripciones", label: `Servicios (${data.subscriptions.reduce((s, sub) => s + sub.lines.length, 0)})` },
@@ -251,16 +253,26 @@ function SubscripcionesTab({ subscriptions }: { subscriptions: OdooSubscription[
                   <th className="text-right p-2 font-medium">Precio</th>
                   <th className="text-right p-2 font-medium">Cant.</th>
                   <th className="text-right p-2 font-medium">Subtotal</th>
+                  <th className="text-center p-2 font-medium">Estado</th>
                 </tr>
               </thead>
               <tbody>
                 {sub.lines.map((line, i) => (
-                  <tr key={i} className="border-b border-wuipi-border/30 last:border-0">
+                  <tr key={i} className={`border-b border-wuipi-border/30 last:border-0 ${line.service_state === "suspended" ? "opacity-60" : ""}`}>
                     <td className="p-2 text-white">{line.product_name}</td>
                     <td className="p-2 text-gray-500 font-mono">{line.product_code}</td>
                     <td className="p-2 text-right text-gray-300">{fmtUSD(line.price_unit)}</td>
                     <td className="p-2 text-right text-gray-400">{line.quantity}</td>
                     <td className="p-2 text-right text-emerald-400 font-medium">{fmtUSD(line.price_subtotal)}</td>
+                    <td className="p-2 text-center">
+                      <span className={`inline-flex px-1.5 py-0.5 rounded-full text-[9px] font-medium ${
+                        line.service_state === "progress" ? "text-emerald-400 bg-emerald-400/10" :
+                        line.service_state === "suspended" ? "text-red-400 bg-red-400/10" :
+                        "text-gray-400 bg-gray-400/10"
+                      }`}>
+                        {line.service_state === "progress" ? "Activo" : line.service_state === "suspended" ? "Suspendido" : line.service_state || "—"}
+                      </span>
+                    </td>
                   </tr>
                 ))}
               </tbody>

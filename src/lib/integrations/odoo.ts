@@ -850,7 +850,7 @@ export async function getOdooClients(options?: {
 
   // Get subscriptions for these clients to extract main plans and MRR
   const partnerIds = rawClients.map((c: any) => c.id);
-  const subsByPartner = new Map<number, { plans: string[]; mrr: number; serviceCount: number }>();
+  const subsByPartner = new Map<number, { plans: string[]; mrr: number; serviceCount: number; servicesActive: number; servicesSuspended: number }>();
 
   if (partnerIds.length > 0) {
     const subs = await searchRead("sale.order", [
@@ -868,33 +868,35 @@ export async function getOdooClients(options?: {
       if (s.order_line) allLineIds.push(...s.order_line);
     }
 
-    // Get product names from lines
-    const lineProducts = new Map<number, string>();
+    // Get product names and service_state from lines
+    const lineData = new Map<number, { name: string; state: string }>();
     if (allLineIds.length > 0) {
       const lines = await searchRead("sale.order.line", [
         ["id", "in", allLineIds],
         ["product_id", "!=", false],
       ], {
-        fields: ["id", "product_id"],
+        fields: ["id", "product_id", "service_state"],
         limit: 10000,
       });
       for (const l of lines) {
         const name = l.product_id?.[1]?.replace(/\[.*?\]\s*/, "") || "";
-        if (name) lineProducts.set(l.id, name);
+        if (name) lineData.set(l.id, { name, state: l.service_state || "" });
       }
     }
 
     // Group by partner
     for (const s of subs) {
       const pid = s.partner_id[0];
-      if (!subsByPartner.has(pid)) subsByPartner.set(pid, { plans: [], mrr: 0, serviceCount: 0 });
+      if (!subsByPartner.has(pid)) subsByPartner.set(pid, { plans: [], mrr: 0, serviceCount: 0, servicesActive: 0, servicesSuspended: 0 });
       const entry = subsByPartner.get(pid)!;
       entry.mrr += s.recurring_monthly || 0;
-      entry.serviceCount += (s.order_line || []).length;
       for (const lineId of (s.order_line || [])) {
-        const productName = lineProducts.get(lineId);
-        if (productName && !entry.plans.includes(productName)) {
-          entry.plans.push(productName);
+        const ld = lineData.get(lineId);
+        if (ld) {
+          entry.serviceCount++;
+          if (ld.state === "progress") entry.servicesActive++;
+          else if (ld.state === "suspended") entry.servicesSuspended++;
+          if (!entry.plans.includes(ld.name)) entry.plans.push(ld.name);
         }
       }
     }
@@ -920,6 +922,8 @@ export async function getOdooClients(options?: {
       total_invoiced: c.total_invoiced || 0,
       unpaid_invoices_count: c.unpaid_invoices_count || 0,
       service_count: subData?.serviceCount || 0,
+      services_active: subData?.servicesActive || 0,
+      services_suspended: subData?.servicesSuspended || 0,
       main_plans: subData?.plans || [],
       mrr_usd: Math.round((subData?.mrr || 0) * 100) / 100,
     };
@@ -1001,7 +1005,7 @@ export async function getOdooClientDetail(partnerId: number): Promise<OdooClient
       ["id", "in", allLineIds],
     ], {
       fields: ["id", "product_id", "name", "product_uom_qty", "price_unit",
-               "price_subtotal", "discount"],
+               "price_subtotal", "discount", "service_state"],
       limit: 500,
     });
     for (const l of rawLines) {
@@ -1013,6 +1017,7 @@ export async function getOdooClientDetail(partnerId: number): Promise<OdooClient
         price_unit: l.price_unit || 0,
         price_subtotal: l.price_subtotal || 0,
         discount: l.discount || 0,
+        service_state: l.service_state || "",
       });
     }
   }
