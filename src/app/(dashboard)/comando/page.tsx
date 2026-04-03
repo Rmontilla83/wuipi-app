@@ -188,6 +188,105 @@ function OverviewCards({ financeStats, infraOverview, ticketStats, ventasStats }
 // ============================================
 // TAB: FINANCIERO
 // ============================================
+function BankDistribution() {
+  const [data, setData] = useState<JournalPayment[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [selectedMonth, setSelectedMonth] = useState(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  });
+
+  // Build last 6 months options
+  const monthOptions = (() => {
+    const opts: Array<{ value: string; label: string }> = [];
+    const monthNames = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
+    const now = new Date();
+    for (let i = 0; i < 6; i++) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const y = d.getFullYear();
+      const m = d.getMonth() + 1;
+      opts.push({
+        value: `${y}-${String(m).padStart(2, "0")}`,
+        label: `${monthNames[m - 1]} ${y}`,
+      });
+    }
+    return opts;
+  })();
+
+  const fetchData = useCallback(async (month: string) => {
+    setLoading(true);
+    try {
+      const [y, m] = month.split("-");
+      const res = await fetch(`/api/odoo/payments-by-journal?year=${y}&month=${m}`);
+      if (res.ok) {
+        const d = await res.json();
+        setData(d.data || []);
+      }
+    } catch { /* ignore */ }
+    finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { fetchData(selectedMonth); }, [selectedMonth, fetchData]);
+
+  const fmt = (n: number) => n.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fmtUsd = (n: number) => `$${fmt(n)}`;
+  const fmtBs = (n: number) => `Bs ${fmt(n)}`;
+
+  const maxTotal = Math.max(...data.map(j => j.total), 1);
+  const grandTotal = data.reduce((s, j) => s + j.total, 0);
+  const colors = ["bg-emerald-500", "bg-cyan-500", "bg-violet-500", "bg-amber-500", "bg-rose-500", "bg-blue-500", "bg-orange-500"];
+
+  return (
+    <Card>
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-base font-bold text-white">Distribucion de Cobros por Banco</h3>
+        <select
+          value={selectedMonth}
+          onChange={(e) => setSelectedMonth(e.target.value)}
+          className="bg-wuipi-bg border border-wuipi-border rounded-lg px-2 py-1 text-xs text-gray-300 outline-none focus:border-wuipi-accent"
+        >
+          {monthOptions.map((o) => (
+            <option key={o.value} value={o.value}>{o.label}</option>
+          ))}
+        </select>
+      </div>
+      {loading ? (
+        <div className="flex justify-center py-8"><RefreshCw size={16} className="animate-spin text-gray-500" /></div>
+      ) : data.length === 0 ? (
+        <p className="text-sm text-gray-500 text-center py-8">Sin movimientos este mes</p>
+      ) : (
+        <div className="space-y-3">
+          {data.map((j, i) => {
+            const pct = grandTotal > 0 ? Math.round((j.total / grandTotal) * 100) : 0;
+            const isUsd = j.currency === "USD" || j.currency === "EUR" || j.journal_name.includes("USD");
+            return (
+              <div key={j.journal_id}>
+                <div className="flex items-center justify-between text-xs mb-1">
+                  <span className="text-gray-300 font-medium truncate max-w-[200px]">{j.journal_name}</span>
+                  <span className="text-gray-400">
+                    {j.count} mov. — {isUsd ? fmtUsd(j.total) : fmtBs(j.total)}{" "}
+                    <span className="text-gray-600">({pct}%)</span>
+                  </span>
+                </div>
+                <div className="h-2.5 bg-wuipi-bg rounded-full overflow-hidden">
+                  <div
+                    className={`h-full rounded-full ${colors[i % colors.length]} transition-all`}
+                    style={{ width: `${Math.max((j.total / maxTotal) * 100, 2)}%` }}
+                  />
+                </div>
+              </div>
+            );
+          })}
+          <div className="pt-2 border-t border-wuipi-border flex items-center justify-between text-xs">
+            <span className="text-gray-500">Total: {data.reduce((s, j) => s + j.count, 0)} movimientos</span>
+            <span className="text-white font-semibold">{fmtBs(grandTotal)}</span>
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+}
+
 function FinancieroTab({ stats, loading }: { stats: FinanceStats | null; loading: boolean }) {
   if (loading) return <LoadingPlaceholder />;
   if (!stats) return <EmptyState msg="No se pudieron cargar los datos financieros" />;
@@ -382,49 +481,7 @@ function FinancieroTab({ stats, loading }: { stats: FinanceStats | null; loading
           </Card>
         )}
 
-        {/* Payment Distribution by Journal */}
-        {stats.payments_by_journal && stats.payments_by_journal.length > 0 && (
-          <Card>
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-base font-bold text-white">Distribucion de Cobros por Banco</h3>
-              <span className="text-xs text-gray-500">Mes actual</span>
-            </div>
-            {(() => {
-              const maxTotal = Math.max(...stats.payments_by_journal!.map(j => j.total), 1);
-              const grandTotal = stats.payments_by_journal!.reduce((s, j) => s + j.total, 0);
-              const colors = ["bg-emerald-500", "bg-cyan-500", "bg-violet-500", "bg-amber-500", "bg-rose-500", "bg-blue-500", "bg-orange-500"];
-              return (
-                <div className="space-y-3">
-                  {stats.payments_by_journal!.map((j, i) => {
-                    const pct = grandTotal > 0 ? Math.round((j.total / grandTotal) * 100) : 0;
-                    const isUsd = j.currency === "USD" || j.currency === "EUR" || j.journal_name.includes("USD");
-                    return (
-                      <div key={j.journal_id}>
-                        <div className="flex items-center justify-between text-xs mb-1">
-                          <span className="text-gray-300 font-medium truncate max-w-[200px]">{j.journal_name}</span>
-                          <span className="text-gray-400">
-                            {j.count} mov. — {isUsd ? fmtUsd(j.total) : fmtBs(j.total)}{" "}
-                            <span className="text-gray-600">({pct}%)</span>
-                          </span>
-                        </div>
-                        <div className="h-2.5 bg-wuipi-bg rounded-full overflow-hidden">
-                          <div
-                            className={`h-full rounded-full ${colors[i % colors.length]} transition-all`}
-                            style={{ width: `${Math.max((j.total / maxTotal) * 100, 2)}%` }}
-                          />
-                        </div>
-                      </div>
-                    );
-                  })}
-                  <div className="pt-2 border-t border-wuipi-border flex items-center justify-between text-xs">
-                    <span className="text-gray-500">Total: {stats.payments_by_journal!.reduce((s, j) => s + j.count, 0)} movimientos</span>
-                    <span className="text-white font-semibold">{fmtBs(grandTotal)}</span>
-                  </div>
-                </div>
-              );
-            })()}
-          </Card>
-        )}
+        <BankDistribution />
       </div>
 
       {/* Row 5: Plan Distribution */}
