@@ -30,12 +30,17 @@ export async function GET(request: NextRequest) {
 
       if (partners.length > 0) {
         // Store partner_id in app_metadata (not user_metadata — user_metadata is editable by end users)
+        // IMPORTANT: merge with existing app_metadata to preserve the user's dashboard role
+        // (e.g., an admin who is also an Odoo client should keep role "admin")
         const admin = createAdminSupabase();
+        const existingMeta = data.user.app_metadata || {};
         await admin.auth.admin.updateUserById(data.user.id, {
           app_metadata: {
+            ...existingMeta,
             odoo_partner_id: partners[0].id,
             customer_name: partners[0].name,
-            role: "cliente",
+            // Only set role to "cliente" if user doesn't already have a dashboard role
+            role: existingMeta.role || "cliente",
           },
         });
       }
