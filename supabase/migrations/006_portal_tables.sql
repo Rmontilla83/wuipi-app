@@ -25,13 +25,13 @@ ALTER TABLE portal_tickets ENABLE ROW LEVEL SECURITY;
 -- Customers can see their own tickets
 CREATE POLICY "portal_tickets_select_own" ON portal_tickets
   FOR SELECT USING (
-    odoo_partner_id = COALESCE((auth.jwt() -> 'user_metadata' ->> 'odoo_partner_id')::int, -1)
+    odoo_partner_id = COALESCE((auth.jwt() -> 'app_metadata' ->> 'odoo_partner_id')::int, -1)
   );
 
 -- Customers can create tickets
 CREATE POLICY "portal_tickets_insert_own" ON portal_tickets
   FOR INSERT WITH CHECK (
-    odoo_partner_id = COALESCE((auth.jwt() -> 'user_metadata' ->> 'odoo_partner_id')::int, -1)
+    odoo_partner_id = COALESCE((auth.jwt() -> 'app_metadata' ->> 'odoo_partner_id')::int, -1)
   );
 
 -- Admin/service role full access
@@ -70,13 +70,13 @@ ALTER TABLE portal_plan_requests ENABLE ROW LEVEL SECURITY;
 -- Customers can see their own requests
 CREATE POLICY "portal_plan_requests_select_own" ON portal_plan_requests
   FOR SELECT USING (
-    odoo_partner_id = COALESCE((auth.jwt() -> 'user_metadata' ->> 'odoo_partner_id')::int, -1)
+    odoo_partner_id = COALESCE((auth.jwt() -> 'app_metadata' ->> 'odoo_partner_id')::int, -1)
   );
 
 -- Customers can create requests
 CREATE POLICY "portal_plan_requests_insert_own" ON portal_plan_requests
   FOR INSERT WITH CHECK (
-    odoo_partner_id = COALESCE((auth.jwt() -> 'user_metadata' ->> 'odoo_partner_id')::int, -1)
+    odoo_partner_id = COALESCE((auth.jwt() -> 'app_metadata' ->> 'odoo_partner_id')::int, -1)
   );
 
 -- Admin/ventas full access

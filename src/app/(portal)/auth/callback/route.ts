@@ -29,10 +29,10 @@ export async function GET(request: NextRequest) {
       ], { fields: ["id", "name"], limit: 1 });
 
       if (partners.length > 0) {
-        // Store partner_id in user metadata
+        // Store partner_id in app_metadata (not user_metadata — user_metadata is editable by end users)
         const admin = createAdminSupabase();
         await admin.auth.admin.updateUserById(data.user.id, {
-          user_metadata: {
+          app_metadata: {
             odoo_partner_id: partners[0].id,
             customer_name: partners[0].name,
             role: "cliente",

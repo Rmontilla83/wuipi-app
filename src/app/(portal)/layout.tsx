@@ -11,8 +11,8 @@ export default async function PortalLayout({ children }: { children: React.React
   const supabase = createServerSupabase();
   const { data: { user } } = await supabase.auth.getUser();
 
-  const partnerId = user?.user_metadata?.odoo_partner_id;
-  const customerName = user?.user_metadata?.customer_name || "";
+  const partnerId = user?.app_metadata?.odoo_partner_id;
+  const customerName = user?.app_metadata?.customer_name || "";
 
   // If not authenticated or no partner_id, only allow login and callback pages
   if (!user || !partnerId) {
