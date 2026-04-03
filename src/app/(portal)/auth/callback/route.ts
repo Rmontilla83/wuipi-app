@@ -41,7 +41,7 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    return NextResponse.redirect(`${origin}/portal`);
+    return NextResponse.redirect(`${origin}/portal/inicio`);
   } catch (err) {
     console.error("[Portal Callback] Error:", err);
     return NextResponse.redirect(`${origin}/portal/login`);

@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { Home, Wifi, FileText, Headphones } from "lucide-react";
 
 const NAV_ITEMS = [
-  { href: "/portal", label: "Inicio", icon: Home },
+  { href: "/portal/inicio", label: "Inicio", icon: Home },
   { href: "/portal/suscripciones", label: "Servicios", icon: Wifi },
   { href: "/portal/facturas", label: "Facturas", icon: FileText },
   { href: "/portal/ayuda", label: "Soporte", icon: Headphones },
@@ -18,7 +18,7 @@ export function PortalNav() {
     <nav className="fixed bottom-0 left-0 right-0 z-50 bg-wuipi-card/95 backdrop-blur border-t border-wuipi-border sm:static sm:border-t-0 sm:border-b sm:border-wuipi-border">
       <div className="max-w-3xl mx-auto flex items-center justify-around sm:justify-start sm:gap-1 px-2 py-1 sm:px-4">
         {NAV_ITEMS.map((item) => {
-          const active = pathname === item.href || (item.href !== "/portal" && pathname.startsWith(item.href));
+          const active = pathname === item.href || (item.href !== "/portal/inicio" && pathname.startsWith(item.href));
           return (
             <Link
               key={item.href}

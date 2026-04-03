@@ -1,7 +1,5 @@
-import PortalDashboard from "./portal-dashboard";
+import { redirect } from "next/navigation";
 
-export const dynamic = "force-dynamic";
-
-export default function PortalPage() {
-  return <PortalDashboard />;
+export default function PortalRoot() {
+  redirect("/portal/inicio");
 }
