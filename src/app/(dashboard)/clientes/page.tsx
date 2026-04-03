@@ -124,7 +124,7 @@ export default function ClientesPage() {
           </Card>
         ) : (
           <Card className="!p-0 overflow-hidden">
-            <div className="overflow-x-auto">
+            <div className="overflow-auto max-h-[calc(100vh-280px)]">
               <table className="w-full text-sm">
                 <thead className="sticky top-0 bg-wuipi-card z-10">
                   <tr className="text-gray-500 text-xs border-b border-wuipi-border">
