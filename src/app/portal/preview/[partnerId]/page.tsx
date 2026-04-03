@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useParams } from "next/navigation";
 import { Card } from "@/components/ui/card";
-import { RefreshCw, Eye, ArrowLeft, FileText, Package, HelpCircle, ChevronDown, ChevronUp } from "lucide-react";
+import { RefreshCw, Eye, ArrowLeft, FileText, Package, HelpCircle, ChevronDown, ChevronUp, CreditCard } from "lucide-react";
 import type { OdooClientDetail, OdooInvoiceDetail } from "@/types/odoo";
 import Link from "next/link";
 
@@ -84,6 +84,7 @@ export default function PortalPreview() {
   const [data, setData] = useState<OdooClientDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<"facturas" | "servicios" | "soporte">("facturas");
+  const [paymentUrl, setPaymentUrl] = useState("");
 
   useEffect(() => {
     fetch(`/api/odoo/clients/${partnerId}`)
@@ -91,6 +92,11 @@ export default function PortalPreview() {
       .then((d) => setData(d))
       .catch(console.error)
       .finally(() => setLoading(false));
+
+    fetch(`/api/portal/payment-link?partnerId=${partnerId}`)
+      .then((r) => r.json())
+      .then((d) => { if (d.url) setPaymentUrl(d.url); })
+      .catch(() => {});
   }, [partnerId]);
 
   if (loading) {
@@ -190,6 +196,17 @@ export default function PortalPreview() {
                     <p className="text-base font-bold text-white">Monto a pagar</p>
                     <p className="text-2xl font-bold text-amber-400">{fmtAmount(data.total_due, "USD")}</p>
                   </div>
+                  {paymentUrl && (
+                    <a
+                      href={paymentUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="mt-3 w-full py-3.5 bg-gradient-to-r from-emerald-500 to-cyan-500 rounded-xl text-white font-bold text-sm flex items-center justify-center gap-2 hover:opacity-90 transition-opacity"
+                    >
+                      <CreditCard size={18} />
+                      Pagar {fmtAmount(data.total_due, "USD")}
+                    </a>
+                  )}
                 </div>
               ) : (
                 <div className="text-center py-2">
