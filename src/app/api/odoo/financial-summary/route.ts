@@ -5,6 +5,7 @@ import {
   getSubscriptionSummary,
   getPendingByCustomer,
   getPlanDistribution,
+  getMonthlyHistory,
 } from "@/lib/integrations/odoo";
 import { fetchBCVRate } from "@/lib/integrations/bcv";
 
@@ -30,12 +31,13 @@ export async function GET() {
     const month = now.getMonth() + 1;
 
     // Parallel fetch all data sources
-    const [invoiceSummary, subscriptions, pendingData, planDist, bcvRate] = await Promise.all([
+    const [invoiceSummary, subscriptions, pendingData, planDist, bcvRate, monthlyHistory] = await Promise.all([
       getMonthlyInvoiceSummary(year, month),
       getSubscriptionSummary(),
       getPendingByCustomer(),
       getPlanDistribution(),
       fetchBCVRate().catch(() => null),
+      getMonthlyHistory(6),
     ]);
 
     // Compute aging buckets from pending customers
@@ -128,6 +130,9 @@ export async function GET() {
       total_services: planDist.reduce((s, c) => s + c.total, 0),
       active_services: planDist.reduce((s, c) => s + c.active, 0),
       paused_services: planDist.reduce((s, c) => s + c.paused, 0),
+
+      // Monthly history (drafts vs posted)
+      monthly_history: monthlyHistory,
 
       // Exchange rate
       exchange_rate: bcvRate?.usd_to_bs ?? null,

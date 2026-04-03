@@ -468,6 +468,92 @@ export async function getMonthlyInvoiceSummary(
   return result;
 }
 
+// ── Monthly history (drafts vs posted) ──────────────────────
+
+export interface MonthlyHistoryEntry {
+  month: string;       // "2026-01"
+  label: string;       // "Ene 2026"
+  drafted_usd: number; // total generated in drafts
+  posted_usd: number;  // total collected (posted)
+  effectiveness: number; // % posted/drafted
+}
+
+/**
+ * Get last N months of draft vs posted invoice totals in USD.
+ * Drafts use invoice_date_due, posted use invoice_date.
+ */
+export async function getMonthlyHistory(months = 6): Promise<MonthlyHistoryEntry[]> {
+  const now = new Date();
+  const results: MonthlyHistoryEntry[] = [];
+
+  // Build date ranges for each month
+  const ranges: Array<{ start: string; end: string; month: string; label: string }> = [];
+  for (let i = months - 1; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const y = d.getFullYear();
+    const m = d.getMonth() + 1;
+    const nextD = new Date(y, m, 1);
+    const ny = nextD.getFullYear();
+    const nm = nextD.getMonth() + 1;
+    const monthNames = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
+    ranges.push({
+      start: `${y}-${String(m).padStart(2, "0")}-01`,
+      end: `${ny}-${String(nm).padStart(2, "0")}-01`,
+      month: `${y}-${String(m).padStart(2, "0")}`,
+      label: `${monthNames[m - 1]} ${y}`,
+    });
+  }
+
+  // Fetch all drafts and posted in the full range (single query each)
+  const fullStart = ranges[0].start;
+  const fullEnd = ranges[ranges.length - 1].end;
+
+  const [allDrafts, allPosted] = await Promise.all([
+    searchRead("account.move", [
+      ["move_type", "=", "out_invoice"],
+      ["state", "=", "draft"],
+      ["invoice_date_due", ">=", fullStart],
+      ["invoice_date_due", "<", fullEnd],
+    ], { fields: ["amount_total", "invoice_date_due", "currency_id"], limit: 10000 }),
+    searchRead("account.move", [
+      ["move_type", "=", "out_invoice"],
+      ["state", "=", "posted"],
+      ["invoice_date", ">=", fullStart],
+      ["invoice_date", "<", fullEnd],
+    ], { fields: ["amount_total", "invoice_date", "currency_id"], limit: 10000 }),
+  ]);
+
+  // Group by month
+  const draftByMonth = new Map<string, number>();
+  const postedByMonth = new Map<string, number>();
+
+  for (const inv of allDrafts) {
+    if (!inv.invoice_date_due) continue;
+    const m = inv.invoice_date_due.substring(0, 7); // "2026-01"
+    draftByMonth.set(m, (draftByMonth.get(m) || 0) + (inv.amount_total || 0));
+  }
+
+  for (const inv of allPosted) {
+    if (!inv.invoice_date) continue;
+    const m = inv.invoice_date.substring(0, 7);
+    postedByMonth.set(m, (postedByMonth.get(m) || 0) + (inv.amount_total || 0));
+  }
+
+  for (const r of ranges) {
+    const drafted = Math.round((draftByMonth.get(r.month) || 0) * 100) / 100;
+    const posted = Math.round((postedByMonth.get(r.month) || 0) * 100) / 100;
+    results.push({
+      month: r.month,
+      label: r.label,
+      drafted_usd: drafted,
+      posted_usd: posted,
+      effectiveness: drafted > 0 ? Math.round((posted / drafted) * 1000) / 10 : 0,
+    });
+  }
+
+  return results;
+}
+
 // ── Subscription summary ─────────────────────────────────────
 
 export interface SubscriptionSummary {

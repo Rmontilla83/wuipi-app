@@ -16,6 +16,7 @@ import {
   Activity, Zap,
   CreditCard, BarChart3, UserPlus,
 } from "lucide-react";
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
 
 // ============================================
 // TYPES
@@ -26,6 +27,14 @@ interface AgingBucket { count: number; total: number }
 interface TopDebtor { partner_id: number; name: string; total_due: number; invoice_count: number; oldest_due_date: string; currency: string }
 interface PlanInfo { code: string; name: string; active: number; paused: number; total: number }
 interface PlanCategory { category: string; total: number; active: number; paused: number; plans: PlanInfo[] }
+
+interface MonthlyHistoryEntry {
+  month: string;
+  label: string;
+  drafted_usd: number;
+  posted_usd: number;
+  effectiveness: number;
+}
 
 interface FinanceStats {
   invoiced_ved: number;
@@ -49,6 +58,7 @@ interface FinanceStats {
   active_services: number;
   paused_services: number;
   exchange_rate: number | null;
+  monthly_history?: MonthlyHistoryEntry[];
 }
 
 interface TicketStats {
@@ -319,7 +329,54 @@ function FinancieroTab({ stats, loading }: { stats: FinanceStats | null; loading
         </Card>
       </div>
 
-      {/* Row 4: Plan Distribution */}
+      {/* Row 4: Monthly History Chart */}
+      {stats.monthly_history && stats.monthly_history.length > 0 && (
+        <Card>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-base font-bold text-white">📈 Histórico Mensual — Generado vs Cobrado (USD)</h3>
+            <span className="text-xs text-gray-500">Últimos 6 meses</span>
+          </div>
+          <div className="h-[280px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={stats.monthly_history} barGap={4}>
+                <XAxis dataKey="label" tick={{ fill: "#6b7280", fontSize: 11 }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fill: "#6b7280", fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} />
+                <Tooltip
+                  contentStyle={{ backgroundColor: "#111827", border: "1px solid #1e293b", borderRadius: 12, fontSize: 12 }}
+                  labelStyle={{ color: "#fff", fontWeight: 600, marginBottom: 4 }}
+                  formatter={(value: number, name: string) => [
+                    `$${value.toLocaleString("es-VE", { minimumFractionDigits: 2 })}`,
+                    name === "drafted_usd" ? "Generado (Borradores)" : "Cobrado (Facturado)",
+                  ]}
+                />
+                <Bar dataKey="drafted_usd" radius={[6, 6, 0, 0]} maxBarSize={40}>
+                  {stats.monthly_history.map((_, i) => (
+                    <Cell key={i} fill="#06b6d4" fillOpacity={0.3} />
+                  ))}
+                </Bar>
+                <Bar dataKey="posted_usd" radius={[6, 6, 0, 0]} maxBarSize={40}>
+                  {stats.monthly_history.map((_, i) => (
+                    <Cell key={i} fill="#10b981" />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+          {/* Effectiveness row */}
+          <div className="flex items-center gap-4 mt-3 pt-3 border-t border-wuipi-border">
+            <span className="flex items-center gap-1.5 text-[10px] text-gray-500"><span className="w-2.5 h-2.5 rounded bg-cyan-500/30 inline-block" /> Generado</span>
+            <span className="flex items-center gap-1.5 text-[10px] text-gray-500"><span className="w-2.5 h-2.5 rounded bg-emerald-500 inline-block" /> Cobrado</span>
+            <span className="ml-auto text-[10px] text-gray-500">Efectividad:</span>
+            {stats.monthly_history.map((m) => (
+              <span key={m.month} className={`text-[10px] font-semibold ${m.effectiveness >= 90 ? "text-emerald-400" : m.effectiveness >= 70 ? "text-amber-400" : "text-red-400"}`}>
+                {m.label.split(" ")[0]} {m.effectiveness}%
+              </span>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      {/* Row 5: Plan Distribution */}
       {stats.plan_distribution && stats.plan_distribution.length > 0 && (
         <Card>
           <div className="flex items-center justify-between mb-4">
