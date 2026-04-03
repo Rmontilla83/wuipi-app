@@ -1047,6 +1047,9 @@ export async function getOdooClientDetail(partnerId: number): Promise<OdooClient
   // Combine: pending first, then paid
   const invoices: OdooInvoiceDetail[] = [...pendingInvoices, ...paidInvoices];
 
+  // Calculate real debt: sum of draft totals (USD)
+  const draftTotalUsd = pendingInvoices.reduce((s, i) => s + i.amount_due, 0);
+
   // Map payments
   const payments: OdooPayment[] = rawPayments.map((pay: any) => ({
     id: pay.id,
@@ -1083,7 +1086,7 @@ export async function getOdooClientDetail(partnerId: number): Promise<OdooClient
     credit: p.credit || 0,
     debit: p.debit || 0,
     total_invoiced: p.total_invoiced || 0,
-    total_due: p.total_due || 0,
+    total_due: Math.round(draftTotalUsd * 100) / 100, // real debt from drafts (USD)
     total_overdue: p.total_overdue || 0,
     days_sales_outstanding: p.days_sales_outstanding || 0,
     trust: p.trust || "",

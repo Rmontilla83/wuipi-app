@@ -160,8 +160,8 @@ export default function ClienteDetailPage() {
           </Card>
           <Card className="!p-3 text-center">
             <p className="text-[10px] text-gray-500 uppercase">Por cobrar</p>
-            <p className={`text-lg font-bold ${data.credit > 0 ? "text-red-400" : "text-emerald-400"}`}>
-              {fmtBs(data.credit)}
+            <p className={`text-lg font-bold ${data.total_due > 0 ? "text-amber-400" : "text-emerald-400"}`}>
+              {fmtUSD(data.total_due)}
             </p>
           </Card>
           <Card className="!p-3 text-center">
@@ -274,7 +274,7 @@ function FacturacionTab({ data }: { data: OdooClientDetail }) {
         </Card>
         <Card className="!p-3 text-center">
           <p className="text-[10px] text-gray-500">Por cobrar</p>
-          <p className="text-sm font-bold text-red-400">{fmtBs(data.credit)}</p>
+          <p className={`text-sm font-bold ${data.total_due > 0 ? "text-amber-400" : "text-emerald-400"}`}>{fmtUSD(data.total_due)}</p>
         </Card>
         <Card className="!p-3 text-center">
           <p className="text-[10px] text-gray-500">Vencido</p>
