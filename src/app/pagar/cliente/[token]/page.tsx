@@ -37,6 +37,7 @@ export default function ClientPaymentPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [expandedInvoice, setExpandedInvoice] = useState<number | null>(null);
+  const [initiating, setInitiating] = useState(false);
 
   useEffect(() => {
     fetch(`/api/pagar/cliente?token=${token}`)
@@ -152,15 +153,38 @@ export default function ClientPaymentPage() {
               ))}
             </div>
 
-            {/* Pay button — Phase 2: connect to payment methods */}
+            {/* Pay button */}
             <button
-              disabled
-              className="w-full py-4 bg-gradient-to-r from-emerald-500 to-cyan-500 rounded-xl text-white font-bold text-base flex items-center justify-center gap-2 opacity-50 cursor-not-allowed"
+              onClick={async () => {
+                setInitiating(true);
+                try {
+                  const res = await fetch("/api/pagar/cliente/iniciar", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ token }),
+                  });
+                  const result = await res.json();
+                  if (result.payment_token) {
+                    window.location.href = `/pagar/${result.payment_token}`;
+                  } else {
+                    alert(result.error || "Error al iniciar el pago");
+                  }
+                } catch {
+                  alert("Error de conexion");
+                } finally {
+                  setInitiating(false);
+                }
+              }}
+              disabled={initiating}
+              className="w-full py-4 bg-gradient-to-r from-emerald-500 to-cyan-500 rounded-xl text-white font-bold text-base flex items-center justify-center gap-2 hover:opacity-90 transition-opacity disabled:opacity-50"
             >
-              <CreditCard size={20} />
-              Pagar {fmtUsd(data.net_due)}
+              {initiating ? (
+                <><RefreshCw size={18} className="animate-spin" /> Preparando pago...</>
+              ) : (
+                <><CreditCard size={20} /> Pagar {fmtUsd(data.net_due)}</>
+              )}
             </button>
-            <p className="text-center text-gray-600 text-[10px]">Pago seguro — Metodos de pago disponibles proximamente</p>
+            <p className="text-center text-gray-600 text-[10px]">Pago seguro — Debito inmediato, transferencia o tarjeta</p>
           </>
         )}
 
