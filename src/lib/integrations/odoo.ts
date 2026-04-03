@@ -275,7 +275,7 @@ export interface OdooInvoiceDetail {
   currency: string;
   payment_state: string;
   products: string[];
-  lines: Array<{ product_name: string; quantity: number; price_unit: number; price_subtotal: number }>;
+  lines: Array<{ product_name: string; quantity: number; price_unit: number; price_subtotal: number; price_total: number }>;
   ref: string;
 }
 
@@ -966,13 +966,14 @@ export async function getOdooClientDetail(partnerId: number): Promise<OdooClient
       limit: 20,
       order: "invoice_date desc",
     }),
-    // 4. Recent payments
-    searchRead("account.payment", [
+    // 4. Recent payments (bank/cash journal entries for this client)
+    searchRead("account.move", [
       ["partner_id", "=", partnerId],
-      ["payment_type", "=", "inbound"],
+      ["move_type", "=", "entry"],
+      ["journal_id.type", "in", ["bank", "cash"]],
       ["state", "=", "posted"],
     ], {
-      fields: ["date", "amount", "currency_id", "journal_id"],
+      fields: ["date", "amount_total", "currency_id", "journal_id", "ref"],
       limit: 20,
       order: "date desc",
     }),
@@ -1035,13 +1036,13 @@ export async function getOdooClientDetail(partnerId: number): Promise<OdooClient
     ...rawDraftInvoices.map((i: any) => i.id),
     ...rawPostedInvoices.map((i: any) => i.id),
   ];
-  const invoiceLinesByMove = new Map<number, Array<{ product_name: string; quantity: number; price_unit: number; price_subtotal: number }>>();
+  const invoiceLinesByMove = new Map<number, Array<{ product_name: string; quantity: number; price_unit: number; price_subtotal: number; price_total: number }>>();
   if (allInvoiceIds.length > 0) {
     const rawLines = await searchRead("account.move.line", [
       ["move_id", "in", allInvoiceIds],
       ["display_type", "=", "product"],
     ], {
-      fields: ["move_id", "product_id", "name", "quantity", "price_unit", "price_subtotal"],
+      fields: ["move_id", "product_id", "name", "quantity", "price_unit", "price_subtotal", "price_total"],
       limit: 500,
     });
     for (const l of rawLines) {
@@ -1052,6 +1053,7 @@ export async function getOdooClientDetail(partnerId: number): Promise<OdooClient
         quantity: l.quantity || 1,
         price_unit: l.price_unit || 0,
         price_subtotal: l.price_subtotal || 0,
+        price_total: l.price_total || 0,
       });
     }
   }
@@ -1093,13 +1095,14 @@ export async function getOdooClientDetail(partnerId: number): Promise<OdooClient
   const creditFavorUsd = partnerCredit < 0 ? Math.abs(partnerCredit) / 95 : 0; // approximate BCV
   const netDueUsd = Math.max(draftTotalUsd - creditFavorUsd, 0);
 
-  // Map payments
+  // Map payments (bank/cash journal entries)
   const payments: OdooPayment[] = rawPayments.map((pay: any) => ({
     id: pay.id,
     date: pay.date || "",
-    amount: pay.amount || 0,
+    amount: pay.amount_total || 0,
     currency: pay.currency_id?.[1] || "VED",
     journal: pay.journal_id?.[1] || "",
+    ref: pay.ref || "",
   }));
 
   return {

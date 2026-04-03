@@ -5,6 +5,7 @@ export interface OdooInvoiceLineDetail {
   quantity: number;
   price_unit: number;
   price_subtotal: number;
+  price_total: number; // includes tax
 }
 
 export interface OdooInvoiceDetail {
@@ -95,6 +96,7 @@ export interface OdooPayment {
   amount: number;
   currency: string;
   journal: string;          // "Banco Mercantil 9021"
+  ref: string;              // bank reference / memo
 }
 
 export interface OdooClientDetail {

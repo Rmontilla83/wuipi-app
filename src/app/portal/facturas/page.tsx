@@ -60,6 +60,7 @@ function InvoiceCard({ inv, defaultExpanded }: { inv: OdooInvoiceDetail; default
                 <th className="text-right py-1 font-medium">Precio</th>
                 <th className="text-right py-1 font-medium">Cant.</th>
                 <th className="text-right py-1 font-medium">Subtotal</th>
+                <th className="text-right py-1 font-medium">Con IVA</th>
               </tr>
             </thead>
             <tbody>
@@ -68,10 +69,28 @@ function InvoiceCard({ inv, defaultExpanded }: { inv: OdooInvoiceDetail; default
                   <td className="py-1.5 text-gray-300">{line.product_name}</td>
                   <td className="py-1.5 text-right text-gray-400">{fmtAmount(line.price_unit, inv.currency)}</td>
                   <td className="py-1.5 text-right text-gray-500">{line.quantity}</td>
-                  <td className="py-1.5 text-right text-white font-medium">{fmtAmount(line.price_subtotal, inv.currency)}</td>
+                  <td className="py-1.5 text-right text-gray-400">{fmtAmount(line.price_subtotal, inv.currency)}</td>
+                  <td className="py-1.5 text-right text-white font-medium">{fmtAmount(line.price_total, inv.currency)}</td>
                 </tr>
               ))}
             </tbody>
+            <tfoot>
+              <tr className="border-t border-wuipi-border">
+                <td colSpan={3} className="py-2 text-right text-gray-500 font-medium">Subtotal</td>
+                <td className="py-2 text-right text-gray-400">{fmtAmount(inv.lines.reduce((s, l) => s + l.price_subtotal, 0), inv.currency)}</td>
+                <td></td>
+              </tr>
+              <tr>
+                <td colSpan={3} className="py-1 text-right text-gray-500 font-medium">IVA</td>
+                <td className="py-1 text-right text-gray-400">{fmtAmount(inv.lines.reduce((s, l) => s + (l.price_total - l.price_subtotal), 0), inv.currency)}</td>
+                <td></td>
+              </tr>
+              <tr className="border-t border-wuipi-border">
+                <td colSpan={3} className="py-2 text-right text-white font-bold">Total</td>
+                <td></td>
+                <td className="py-2 text-right text-white font-bold">{fmtAmount(inv.total, inv.currency)}</td>
+              </tr>
+            </tfoot>
           </table>
           {inv.ref && (
             <p className="text-[10px] text-gray-600 mt-2">Ref: {inv.ref}</p>
@@ -187,6 +206,7 @@ export default function PortalFacturas() {
                     <th className="text-left p-3 font-medium">Fecha</th>
                     <th className="text-right p-3 font-medium">Monto</th>
                     <th className="text-left p-3 font-medium">Banco</th>
+                    <th className="text-left p-3 font-medium">Referencia</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -195,6 +215,7 @@ export default function PortalFacturas() {
                       <td className="p-3 text-gray-400">{pay.date}</td>
                       <td className="p-3 text-right text-emerald-400 font-medium">{fmtAmount(pay.amount, pay.currency)}</td>
                       <td className="p-3 text-gray-300">{pay.journal}</td>
+                      <td className="p-3 text-gray-500 font-mono text-[10px]">{pay.ref || "—"}</td>
                     </tr>
                   ))}
                 </tbody>

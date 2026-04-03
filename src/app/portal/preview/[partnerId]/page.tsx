@@ -42,17 +42,23 @@ function ExpandableInvoice({ inv, defaultExpanded }: { inv: OdooInvoiceDetail; d
       {expanded && inv.lines && inv.lines.length > 0 && (
         <div className="border-t border-wuipi-border px-4 pb-3 pt-2">
           <table className="w-full text-xs">
-            <thead><tr className="text-gray-600"><th className="text-left py-1 font-medium">Servicio</th><th className="text-right py-1 font-medium">Precio</th><th className="text-right py-1 font-medium">Cant.</th><th className="text-right py-1 font-medium">Subtotal</th></tr></thead>
+            <thead><tr className="text-gray-600"><th className="text-left py-1 font-medium">Servicio</th><th className="text-right py-1 font-medium">Precio</th><th className="text-right py-1 font-medium">Cant.</th><th className="text-right py-1 font-medium">Subtotal</th><th className="text-right py-1 font-medium">Con IVA</th></tr></thead>
             <tbody>
               {inv.lines.map((line, i) => (
                 <tr key={i} className="border-t border-wuipi-border/20">
                   <td className="py-1.5 text-gray-300">{line.product_name}</td>
                   <td className="py-1.5 text-right text-gray-400">{fmtAmount(line.price_unit, inv.currency)}</td>
                   <td className="py-1.5 text-right text-gray-500">{line.quantity}</td>
-                  <td className="py-1.5 text-right text-white font-medium">{fmtAmount(line.price_subtotal, inv.currency)}</td>
+                  <td className="py-1.5 text-right text-gray-400">{fmtAmount(line.price_subtotal, inv.currency)}</td>
+                  <td className="py-1.5 text-right text-white font-medium">{fmtAmount(line.price_total, inv.currency)}</td>
                 </tr>
               ))}
             </tbody>
+            <tfoot>
+              <tr className="border-t border-wuipi-border"><td colSpan={3} className="py-2 text-right text-gray-500 font-medium">Subtotal</td><td className="py-2 text-right text-gray-400">{fmtAmount(inv.lines.reduce((s, l) => s + l.price_subtotal, 0), inv.currency)}</td><td></td></tr>
+              <tr><td colSpan={3} className="py-1 text-right text-gray-500 font-medium">IVA</td><td className="py-1 text-right text-gray-400">{fmtAmount(inv.lines.reduce((s, l) => s + (l.price_total - l.price_subtotal), 0), inv.currency)}</td><td></td></tr>
+              <tr className="border-t border-wuipi-border"><td colSpan={3} className="py-2 text-right text-white font-bold">Total</td><td></td><td className="py-2 text-right text-white font-bold">{fmtAmount(inv.total, inv.currency)}</td></tr>
+            </tfoot>
           </table>
           {inv.ref && <p className="text-[10px] text-gray-600 mt-2">Ref: {inv.ref}</p>}
         </div>
