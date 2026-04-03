@@ -3,6 +3,8 @@
 // Docs: https://www.odoo.com/documentation/18.0/developer/reference/external_api.html
 // ============================================================
 
+import { getJournalDisplayName } from "@/lib/utils/journal-names";
+
 const ODOO_URL = process.env.ODOO_URL || "";
 const ODOO_DB = process.env.ODOO_DB || "";
 const ODOO_USER = process.env.ODOO_USER || "";
@@ -625,7 +627,7 @@ export async function getPaymentsByJournal(year: number, month: number): Promise
     if (!byJournal.has(jid)) {
       byJournal.set(jid, {
         journal_id: jid,
-        journal_name: jname,
+        journal_name: getJournalDisplayName(jname),
         count: 0,
         total: 0,
         currency: m.currency_id?.[1] || "VED",
@@ -1084,7 +1086,7 @@ export async function getOdooClientDetail(partnerId: number): Promise<OdooClient
         : inv.invoice_payments_widget;
       if (widget?.content) {
         linkedPayments = widget.content.map((p: any) => ({
-          journal_name: p.journal_name || "",
+          journal_name: getJournalDisplayName(p.journal_name || ""),
           amount: p.amount || 0,
           date: p.date || "",
           ref: p.ref?.replace(/^[A-Z]+\d*\/\d+\/\d+\s*/, "").replace(/^Pago manual:\s*/, "") || "",
@@ -1123,7 +1125,7 @@ export async function getOdooClientDetail(partnerId: number): Promise<OdooClient
     date: pay.date || "",
     amount: pay.amount_total || 0,
     currency: pay.currency_id?.[1] || "VED",
-    journal: pay.journal_id?.[1] || "",
+    journal: getJournalDisplayName(pay.journal_id?.[1] || ""),
     ref: pay.ref || "",
   }));
 
