@@ -8,7 +8,7 @@ import {
   Brain, RefreshCw, ChevronDown, ChevronUp, Send, Sparkles,
   AlertTriangle, Lightbulb, MessageSquare, TrendingUp, TrendingDown,
   Minus, Shield, Headphones, ShoppingCart, Users, Server,
-  AlertCircle,
+  AlertCircle, DollarSign,
 } from "lucide-react";
 
 // ============================================
@@ -24,7 +24,7 @@ interface BriefingInsight {
   severity: "critical" | "high" | "medium" | "low";
   title: string;
   description: string;
-  category: "infraestructura" | "soporte" | "ventas" | "clientes";
+  category: "infraestructura" | "soporte" | "ventas" | "clientes" | "finanzas";
 }
 
 interface BriefingData {
@@ -35,6 +35,7 @@ interface BriefingData {
     riesgo_operativo: BriefingKPI;
     eficiencia_soporte: BriefingKPI;
     crecimiento: BriefingKPI;
+    salud_financiera?: BriefingKPI;
   };
   summary: string;
   insights: BriefingInsight[];
@@ -58,6 +59,7 @@ const CATEGORY_ICONS: Record<string, typeof Server> = {
   soporte: Headphones,
   ventas: ShoppingCart,
   clientes: Users,
+  finanzas: DollarSign,
 };
 
 // Engine badge styles
@@ -77,8 +79,9 @@ const SUGGESTED_QUESTIONS = [
   "¿Qué nodos necesitan atencion?",
   "¿Cuantos tickets hay sin asignar?",
   "¿Como va el pipeline de ventas?",
-  "¿Que zonas necesitan expansion?",
-  "¿Cual es el estado de la infraestructura?",
+  "¿Como esta la salud financiera?",
+  "¿Quienes son los mayores morosos?",
+  "¿Cual es el MRR actual y tasa de cobranza?",
 ];
 
 // ============================================
@@ -314,8 +317,8 @@ export default function SupervisorPage() {
               <Sparkles size={20} className="animate-pulse text-violet-400" />
               <span className="text-sm text-gray-400">Generando briefing con Claude — analizando datos de infraestructura, soporte, ventas y clientes...</span>
             </div>
-            <div className="grid grid-cols-4 gap-3">
-              {[1, 2, 3, 4].map(i => (
+            <div className="grid grid-cols-5 gap-3">
+              {[1, 2, 3, 4, 5].map(i => (
                 <div key={i} className="p-3 bg-wuipi-bg rounded-lg border border-wuipi-border">
                   <div className="h-3 w-20 bg-wuipi-border rounded animate-pulse mb-2" />
                   <div className="h-6 w-16 bg-wuipi-border/70 rounded animate-pulse mb-1" />
@@ -432,11 +435,12 @@ export default function SupervisorPage() {
           {briefingExpanded && (
             <div className="mt-4 pt-4 border-t border-wuipi-border space-y-4 animate-fade-in">
               {/* KPIs */}
-              <div className="grid grid-cols-4 gap-3">
+              <div className="grid grid-cols-5 gap-3">
                 {briefing.kpis.salud_general && <KPICard kpi={briefing.kpis.salud_general} icon="🏢" />}
                 {briefing.kpis.riesgo_operativo && <KPICard kpi={briefing.kpis.riesgo_operativo} icon="⚠️" />}
                 {briefing.kpis.eficiencia_soporte && <KPICard kpi={briefing.kpis.eficiencia_soporte} icon="🎧" />}
                 {briefing.kpis.crecimiento && <KPICard kpi={briefing.kpis.crecimiento} icon="📈" />}
+                {briefing.kpis.salud_financiera && <KPICard kpi={briefing.kpis.salud_financiera} icon="💰" />}
               </div>
 
               {/* Summary */}

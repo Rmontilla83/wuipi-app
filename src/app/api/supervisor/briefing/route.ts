@@ -16,7 +16,8 @@ Analiza los datos proporcionados y genera un briefing ejecutivo en formato JSON 
     "salud_general": { "value": string, "label": string, "trend": "up" | "down" | "stable" },
     "riesgo_operativo": { "value": string, "label": string, "trend": "up" | "down" | "stable" },
     "eficiencia_soporte": { "value": string, "label": string, "trend": "up" | "down" | "stable" },
-    "crecimiento": { "value": string, "label": string, "trend": "up" | "down" | "stable" }
+    "crecimiento": { "value": string, "label": string, "trend": "up" | "down" | "stable" },
+    "salud_financiera": { "value": string, "label": string, "trend": "up" | "down" | "stable" }
   },
   "summary": string (parrafo ejecutivo de 3-4 oraciones, directo y accionable, en espanol),
   "insights": [
@@ -24,7 +25,7 @@ Analiza los datos proporcionados y genera un briefing ejecutivo en formato JSON 
       "severity": "critical" | "high" | "medium" | "low",
       "title": string (corto, max 60 chars),
       "description": string (1-2 oraciones explicando el hallazgo y recomendacion),
-      "category": "infraestructura" | "soporte" | "ventas" | "clientes"
+      "category": "infraestructura" | "soporte" | "ventas" | "clientes" | "finanzas"
     }
   ]
 }
@@ -34,7 +35,10 @@ Reglas:
 - Si hay equipos caidos, menciona cuales y cuanto tiempo llevan
 - Si hay tickets sin asignar o con SLA violado, senalalo como riesgo
 - Correlaciona datos: si un nodo tiene muchos problemas Y muchos tickets, es un insight critico
-- Los insights deben ser maximo 5, priorizados por impacto
+- Analiza la salud financiera: tasa de cobranza, morosos top, MRR, y tendencias de facturacion
+- Si la tasa de cobranza es menor al 90%, es un insight high o critical
+- Si hay clientes con deuda mayor a 60 dias, priorizalos como riesgo financiero
+- Los insights deben ser maximo 7, priorizados por impacto
 - Si no hay datos de alguna fuente, no inventes — menciona que falta esa visibilidad
 - Habla en espanol
 - No uses emojis en el summary ni en las descripciones
@@ -160,16 +164,40 @@ ${critical.map((p: any) => `- [${p.severity}] ${p.name} en ${p.hostName} (${p.si
     parts.push(`NODOS DE RED: ${data.nodes.map((n: any) => `${n.code} (${n.name})`).join(", ")}`);
   }
 
+  if (data.finance) {
+    const f = data.finance;
+    const financeParts: string[] = ["FINANZAS (Odoo):"];
+
+    if (f.monthly) {
+      financeParts.push(`- Facturacion del mes (${f.monthly.period}): Bs ${f.monthly.ved_invoiced.toLocaleString()} facturado, Bs ${f.monthly.ved_collected.toLocaleString()} cobrado (${f.monthly.ved_collection_rate}% tasa cobranza VED)`);
+      financeParts.push(`- USD: $${f.monthly.usd_invoiced.toLocaleString()} facturado, $${f.monthly.usd_collected.toLocaleString()} cobrado (${f.monthly.usd_collection_rate}% tasa cobranza USD)`);
+    }
+
+    if (f.subscriptions) {
+      financeParts.push(`- Suscripciones: ${f.subscriptions.active} activas, ${f.subscriptions.paused} pausadas`);
+      financeParts.push(`- MRR (Monthly Recurring Revenue): $${f.subscriptions.mrr_usd.toLocaleString()} USD`);
+    }
+
+    if (f.accounts_receivable) {
+      const ar = f.accounts_receivable;
+      financeParts.push(`- Cartera pendiente: ${ar.total_customers_with_debt} clientes con deuda, total: $${ar.total_pending_amount.toLocaleString()}`);
+      if (ar.top_debtors?.length > 0) {
+        financeParts.push(`- Top 10 morosos: ${ar.top_debtors.map((d: any) => `${d.name}: $${d.amount.toLocaleString()}`).join(" | ")}`);
+      }
+    }
+
+    parts.push(financeParts.join("\n"));
+  }
+
   const missing: string[] = [];
   if (!data.sources?.zabbix) missing.push("Zabbix (infraestructura)");
   if (!data.sources?.tickets) missing.push("Tickets (soporte)");
   if (!data.sources?.ventas) missing.push("CRM Ventas");
   if (!data.sources?.clients) missing.push("Base de clientes");
+  if (!data.sources?.odoo) missing.push("Odoo (finanzas/facturacion)");
   if (missing.length > 0) {
     parts.push(`FUENTES NO DISPONIBLES: ${missing.join(", ")} — no se pueden analizar estos datos.`);
   }
-
-  parts.push("NOTA: No hay conexion con Odoo (finanzas/facturacion). No hay datos de MRR, cobranza ni facturacion disponibles aun.");
 
   return parts.join("\n\n");
 }

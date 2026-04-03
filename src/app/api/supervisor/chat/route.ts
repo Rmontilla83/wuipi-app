@@ -36,12 +36,13 @@ El usuario es el gerente/dueno de la empresa. Tienes acceso a datos en tiempo re
 - Soporte (tickets): tickets abiertos, prioridades, tiempos de resolucion
 - Ventas (CRM): leads, pipeline, conversiones
 - Clientes: base de clientes, distribucion por nodo y tecnologia
+- Finanzas (Odoo): facturacion mensual, cobranza, MRR, cartera pendiente, morosos
 
 Datos actuales del negocio:
 ${contextText}
 
 Responde en espanol, se directo y especifico con numeros.
-Si te preguntan algo que no tienes datos para responder (ej: finanzas detalladas, Odoo no esta conectado aun), dilo honestamente.
+Si te preguntan algo que no tienes datos para responder, dilo honestamente.
 No inventes datos.
 Puedes hacer recomendaciones basadas en los datos disponibles.
 Formatea con markdown basico (bold, listas) para legibilidad.`;
@@ -92,9 +93,27 @@ function buildChatContext(data: any): string {
     parts.push(`NODOS: ${data.nodes.map((n: any) => `${n.code}(${n.name})`).join(", ")}`);
   }
 
+  if (data.finance) {
+    const f = data.finance;
+    const fp: string[] = [];
+    if (f.monthly) {
+      fp.push(`Facturacion ${f.monthly.period}: VED Bs${f.monthly.ved_invoiced.toLocaleString()} (${f.monthly.ved_collection_rate}% cobrado), USD $${f.monthly.usd_invoiced.toLocaleString()} (${f.monthly.usd_collection_rate}% cobrado)`);
+    }
+    if (f.subscriptions) {
+      fp.push(`Suscripciones: ${f.subscriptions.active} activas, ${f.subscriptions.paused} pausadas, MRR $${f.subscriptions.mrr_usd.toLocaleString()}`);
+    }
+    if (f.accounts_receivable) {
+      fp.push(`Cartera: ${f.accounts_receivable.total_customers_with_debt} clientes con deuda, total $${f.accounts_receivable.total_pending_amount.toLocaleString()}`);
+      if (f.accounts_receivable.top_debtors?.length > 0) {
+        fp.push(`Top morosos: ${f.accounts_receivable.top_debtors.slice(0, 5).map((d: any) => `${d.name}($${d.amount})`).join(", ")}`);
+      }
+    }
+    parts.push(`FINANZAS: ${fp.join(". ")}`);
+  }
+
   if (!data.sources?.zabbix) parts.push("NOTA: Zabbix no disponible");
   if (!data.sources?.tickets) parts.push("NOTA: Tickets no disponibles");
-  parts.push("NOTA: Odoo (finanzas/facturacion) no conectado aun — no hay datos de MRR/cobranza.");
+  if (!data.sources?.odoo) parts.push("NOTA: Odoo (finanzas) no disponible");
 
   return parts.join("\n");
 }

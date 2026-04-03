@@ -9,6 +9,7 @@ import { getInfraOverview, getInfraProblems } from "@/lib/integrations/zabbix";
 import { getTicketStats } from "@/lib/dal/tickets";
 import { getLeadStats } from "@/lib/dal/crm-ventas";
 import { createAdminSupabase } from "@/lib/supabase/server";
+import { isOdooConfigured, getMonthlyInvoiceSummary, getSubscriptionSummary, getPendingByCustomer } from "@/lib/integrations/odoo";
 
 export interface BusinessData {
   timestamp: string;
@@ -19,6 +20,7 @@ export interface BusinessData {
   leads?: any;
   clients?: any;
   nodes?: any[];
+  finance?: any;
 }
 
 export async function gatherBusinessData(): Promise<BusinessData> {
@@ -27,7 +29,7 @@ export async function gatherBusinessData(): Promise<BusinessData> {
     sources: {},
   };
 
-  const [infraRes, problemsRes, ticketsRes, leadsRes, clientsRes, nodesRes] =
+  const [infraRes, problemsRes, ticketsRes, leadsRes, clientsRes, nodesRes, financeRes] =
     await Promise.allSettled([
       getInfraOverview(),
       getInfraProblems(),
@@ -35,6 +37,7 @@ export async function gatherBusinessData(): Promise<BusinessData> {
       getLeadStats(),
       getClientCounts(),
       getNetworkNodesList(),
+      getFinancialSnapshot(),
     ]);
 
   if (infraRes.status === "fulfilled") {
@@ -73,6 +76,13 @@ export async function gatherBusinessData(): Promise<BusinessData> {
     result.nodes = nodesRes.value;
   }
 
+  if (financeRes.status === "fulfilled") {
+    result.finance = financeRes.value;
+    result.sources.odoo = true;
+  } else {
+    result.sources.odoo = false;
+  }
+
   return result;
 }
 
@@ -107,6 +117,56 @@ async function getClientCounts() {
     by_node: byNode,
     by_technology: byTech,
   };
+}
+
+async function getFinancialSnapshot() {
+  if (!isOdooConfigured()) return null;
+
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth() + 1;
+
+  const [invoiceSummary, subscriptions, pendingData] = await Promise.allSettled([
+    getMonthlyInvoiceSummary(year, month),
+    getSubscriptionSummary(),
+    getPendingByCustomer(),
+  ]);
+
+  const result: any = {};
+
+  if (invoiceSummary.status === "fulfilled") {
+    const s = invoiceSummary.value;
+    const vedRate = s.ved.invoiced > 0 ? Math.round((s.ved.collected / s.ved.invoiced) * 100) : 0;
+    const usdRate = s.usd.invoiced > 0 ? Math.round((s.usd.collected / s.usd.invoiced) * 100) : 0;
+    result.monthly = {
+      ved_invoiced: s.ved.invoiced,
+      ved_collected: s.ved.collected,
+      ved_collection_rate: vedRate,
+      usd_invoiced: s.usd.invoiced,
+      usd_collected: s.usd.collected,
+      usd_collection_rate: usdRate,
+      period: `${year}-${String(month).padStart(2, "0")}`,
+    };
+  }
+
+  if (subscriptions.status === "fulfilled") {
+    result.subscriptions = subscriptions.value;
+  }
+
+  if (pendingData.status === "fulfilled") {
+    const p = pendingData.value;
+    result.accounts_receivable = {
+      total_customers_with_debt: p.total_customers,
+      total_pending_amount: Math.round(p.total_due * 100) / 100,
+      top_debtors: p.customers.slice(0, 10).map(c => ({
+        name: c.name,
+        amount: c.total_due,
+        oldest_invoice: c.oldest_due_date,
+      })),
+    };
+  }
+
+  return result;
 }
 
 async function getNetworkNodesList() {
