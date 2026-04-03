@@ -365,21 +365,19 @@ function FinancieroTab({ stats, loading }: { stats: FinanceStats | null; loading
               </ResponsiveContainer>
             </div>
             <div className="flex items-center gap-4 mt-2 pt-2 border-t border-wuipi-border">
-              <span className="flex items-center gap-1.5 text-[10px] text-gray-500"><span className="w-2.5 h-2.5 rounded bg-amber-500/70 inline-block" /> Generado</span>
-              <span className="flex items-center gap-1.5 text-[10px] text-gray-500"><span className="w-2.5 h-2.5 rounded bg-emerald-500 inline-block" /> Cobrado</span>
-              <span className="ml-auto text-[10px] text-gray-600">VED convertido a USD con tasa BCV</span>
+              <span className="flex items-center gap-1.5 text-[10px] text-gray-500"><span className="w-2.5 h-2.5 rounded bg-amber-500/70 inline-block" /> Generado (Borradores)</span>
+              <span className="flex items-center gap-1.5 text-[10px] text-gray-500"><span className="w-2.5 h-2.5 rounded bg-emerald-500 inline-block" /> Cobrado (Confirmado)</span>
             </div>
-            {/* Effectiveness per month */}
             <div className="grid grid-cols-6 gap-1 mt-2">
               {stats.monthly_history.map((m) => (
-                <div key={m.month} className="text-center py-1 bg-wuipi-bg rounded">
+                <div key={m.month} className="text-center py-1.5 bg-wuipi-bg rounded">
                   <p className="text-[9px] text-gray-600">{m.label.split(" ")[0]}</p>
-                  <p className={`text-xs font-bold ${m.effectiveness >= 100 ? "text-emerald-400" : m.effectiveness >= 50 ? "text-amber-400" : "text-red-400"}`}>
-                    {m.effectiveness > 0 ? `${m.effectiveness}%` : "—"}
-                  </p>
+                  <p className="text-[10px] font-semibold text-amber-400">${fmtShort(m.drafted_usd)}</p>
+                  <p className="text-[10px] font-semibold text-emerald-400">${fmtShort(m.posted_usd)}</p>
                 </div>
               ))}
             </div>
+            <p className="text-[10px] text-gray-600 mt-1">VED convertido a USD con tasa BCV actual</p>
           </Card>
         )}
 
