@@ -200,10 +200,7 @@ function PageShell({ children }: { children: React.ReactNode }) {
       {/* Header */}
       <header className="py-4 px-6 border-b border-white/5">
         <div className="max-w-md mx-auto flex items-center gap-3">
-          <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-[#03318C] to-[#F46800] flex items-center justify-center text-white font-extrabold text-sm">
-            W
-          </div>
-          <span className="text-lg font-bold text-white tracking-tight">Wuipi Pagos</span>
+          <img src="/img/wuipi-logo.webp" alt="Wuipi" className="h-9 object-contain" />
         </div>
       </header>
 
