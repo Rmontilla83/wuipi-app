@@ -169,7 +169,7 @@ export default function PortalFacturas() {
           <h3 className="text-sm font-semibold text-amber-400 mb-2">Pendientes de pago ({pending.length})</h3>
           <div className="space-y-2">
             {pending.map((inv) => (
-              <InvoiceCard key={inv.id} inv={inv} defaultExpanded={true} />
+              <InvoiceCard key={inv.id} inv={inv} defaultExpanded={false} />
             ))}
           </div>
         </div>
