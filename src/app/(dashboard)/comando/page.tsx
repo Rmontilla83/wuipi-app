@@ -36,6 +36,14 @@ interface MonthlyHistoryEntry {
   effectiveness: number;
 }
 
+interface JournalPayment {
+  journal_id: number;
+  journal_name: string;
+  count: number;
+  total: number;
+  currency: string;
+}
+
 interface FinanceStats {
   invoiced_ved: number;
   collected_ved: number;
@@ -59,6 +67,7 @@ interface FinanceStats {
   paused_services: number;
   exchange_rate: number | null;
   monthly_history?: MonthlyHistoryEntry[];
+  payments_by_journal?: JournalPayment[];
 }
 
 interface TicketStats {
@@ -331,48 +340,93 @@ function FinancieroTab({ stats, loading }: { stats: FinanceStats | null; loading
         </Card>
       </div>
 
-      {/* Row 4: Monthly History Chart — Posted VED (ingresos reales) */}
-      {stats.monthly_history && stats.monthly_history.length > 0 && (
-        <Card>
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-base font-bold text-white">Historico Mensual — Cobrado vs Generado</h3>
-            <span className="text-xs text-gray-500">Ultimos 6 meses (USD)</span>
-          </div>
-          <div className="h-[280px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={stats.monthly_history} barCategoryGap="20%">
-                <XAxis dataKey="label" tick={{ fill: "#9ca3af", fontSize: 12 }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fill: "#6b7280", fontSize: 11 }} axisLine={false} tickLine={false} width={60} tickFormatter={(v) => `$${fmtShort(v)}`} />
-                <Tooltip
-                  contentStyle={{ backgroundColor: "#111827", border: "1px solid #1e293b", borderRadius: 12, fontSize: 13 }}
-                  labelStyle={{ color: "#fff", fontWeight: 600, marginBottom: 6 }}
-                  formatter={(value: number, name: string) => [
-                    fmtUsd(value),
-                    name === "drafted_usd" ? "Generado (Borradores)" : "Cobrado (Confirmado)",
-                  ]}
-                />
-                <Bar dataKey="drafted_usd" name="Generado" fill="#06b6d4" fillOpacity={0.25} stroke="#06b6d4" strokeWidth={1} radius={[6, 6, 0, 0]} barSize={28} />
-                <Bar dataKey="posted_usd" name="Cobrado" fill="#10b981" radius={[6, 6, 0, 0]} barSize={28} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-          <div className="grid grid-cols-6 gap-2 mt-3 pt-3 border-t border-wuipi-border">
-            {stats.monthly_history.map((m) => (
-              <div key={m.month} className="text-center">
-                <p className="text-[10px] text-gray-500">{m.label.split(" ")[0]}</p>
-                <p className={`text-sm font-bold ${m.effectiveness >= 90 ? "text-emerald-400" : m.effectiveness >= 70 ? "text-amber-400" : "text-red-400"}`}>
-                  {m.effectiveness}%
-                </p>
-                <p className="text-[10px] text-gray-600">efectividad</p>
-              </div>
-            ))}
-          </div>
-          <div className="flex items-center gap-6 mt-2">
-            <span className="flex items-center gap-1.5 text-xs text-gray-500"><span className="w-3 h-3 rounded bg-cyan-500/25 border border-cyan-500 inline-block" /> Generado (Borradores)</span>
-            <span className="flex items-center gap-1.5 text-xs text-gray-500"><span className="w-3 h-3 rounded bg-emerald-500 inline-block" /> Cobrado (Confirmado)</span>
-          </div>
-        </Card>
-      )}
+      {/* Row 4: Monthly History + Payment Distribution */}
+      <div className="grid grid-cols-2 gap-4">
+        {/* History Chart */}
+        {stats.monthly_history && stats.monthly_history.length > 0 && (
+          <Card>
+            <h3 className="text-base font-bold text-white mb-4">Historico Mensual (USD equiv.)</h3>
+            <div className="h-[240px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={stats.monthly_history} barCategoryGap="25%">
+                  <XAxis dataKey="label" tick={{ fill: "#9ca3af", fontSize: 11 }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fill: "#6b7280", fontSize: 10 }} axisLine={false} tickLine={false} width={55} tickFormatter={(v) => `$${fmtShort(v)}`} />
+                  <Tooltip
+                    contentStyle={{ backgroundColor: "#111827", border: "1px solid #1e293b", borderRadius: 12, fontSize: 12 }}
+                    labelStyle={{ color: "#fff", fontWeight: 600, marginBottom: 4 }}
+                    formatter={(value: number, name: string) => [
+                      fmtUsd(value),
+                      name === "drafted_usd" ? "Generado (Borradores)" : "Cobrado (Confirmado)",
+                    ]}
+                  />
+                  <Bar dataKey="drafted_usd" name="Generado" fill="#f59e0b" fillOpacity={0.7} radius={[4, 4, 0, 0]} barSize={18} />
+                  <Bar dataKey="posted_usd" name="Cobrado" fill="#10b981" radius={[4, 4, 0, 0]} barSize={18} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+            <div className="flex items-center gap-4 mt-2 pt-2 border-t border-wuipi-border">
+              <span className="flex items-center gap-1.5 text-[10px] text-gray-500"><span className="w-2.5 h-2.5 rounded bg-amber-500/70 inline-block" /> Generado</span>
+              <span className="flex items-center gap-1.5 text-[10px] text-gray-500"><span className="w-2.5 h-2.5 rounded bg-emerald-500 inline-block" /> Cobrado</span>
+              <span className="ml-auto text-[10px] text-gray-600">VED convertido a USD con tasa BCV</span>
+            </div>
+            {/* Effectiveness per month */}
+            <div className="grid grid-cols-6 gap-1 mt-2">
+              {stats.monthly_history.map((m) => (
+                <div key={m.month} className="text-center py-1 bg-wuipi-bg rounded">
+                  <p className="text-[9px] text-gray-600">{m.label.split(" ")[0]}</p>
+                  <p className={`text-xs font-bold ${m.effectiveness >= 100 ? "text-emerald-400" : m.effectiveness >= 50 ? "text-amber-400" : "text-red-400"}`}>
+                    {m.effectiveness > 0 ? `${m.effectiveness}%` : "—"}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </Card>
+        )}
+
+        {/* Payment Distribution by Journal */}
+        {stats.payments_by_journal && stats.payments_by_journal.length > 0 && (
+          <Card>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-base font-bold text-white">Distribucion de Cobros por Banco</h3>
+              <span className="text-xs text-gray-500">Mes actual</span>
+            </div>
+            {(() => {
+              const maxTotal = Math.max(...stats.payments_by_journal!.map(j => j.total), 1);
+              const grandTotal = stats.payments_by_journal!.reduce((s, j) => s + j.total, 0);
+              const colors = ["bg-emerald-500", "bg-cyan-500", "bg-violet-500", "bg-amber-500", "bg-rose-500", "bg-blue-500", "bg-orange-500"];
+              return (
+                <div className="space-y-3">
+                  {stats.payments_by_journal!.map((j, i) => {
+                    const pct = grandTotal > 0 ? Math.round((j.total / grandTotal) * 100) : 0;
+                    const isUsd = j.currency === "USD" || j.currency === "EUR" || j.journal_name.includes("USD");
+                    return (
+                      <div key={j.journal_id}>
+                        <div className="flex items-center justify-between text-xs mb-1">
+                          <span className="text-gray-300 font-medium truncate max-w-[200px]">{j.journal_name}</span>
+                          <span className="text-gray-400">
+                            {j.count} mov. — {isUsd ? fmtUsd(j.total) : fmtBs(j.total)}{" "}
+                            <span className="text-gray-600">({pct}%)</span>
+                          </span>
+                        </div>
+                        <div className="h-2.5 bg-wuipi-bg rounded-full overflow-hidden">
+                          <div
+                            className={`h-full rounded-full ${colors[i % colors.length]} transition-all`}
+                            style={{ width: `${Math.max((j.total / maxTotal) * 100, 2)}%` }}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <div className="pt-2 border-t border-wuipi-border flex items-center justify-between text-xs">
+                    <span className="text-gray-500">Total: {stats.payments_by_journal!.reduce((s, j) => s + j.count, 0)} movimientos</span>
+                    <span className="text-white font-semibold">{fmtBs(grandTotal)}</span>
+                  </div>
+                </div>
+              );
+            })()}
+          </Card>
+        )}
+      </div>
 
       {/* Row 5: Plan Distribution */}
       {stats.plan_distribution && stats.plan_distribution.length > 0 && (

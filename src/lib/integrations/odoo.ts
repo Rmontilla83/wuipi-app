@@ -561,6 +561,61 @@ export async function getMonthlyHistory(months = 6, bcvRate?: number): Promise<M
   return results;
 }
 
+// ── Payment distribution by journal ─────────────────────────
+
+export interface JournalPayment {
+  journal_id: number;
+  journal_name: string;
+  count: number;
+  total: number;
+  currency: string;
+}
+
+/**
+ * Get payment distribution by bank journal for a given month.
+ * Payments are account.move entries with journal type bank/cash.
+ * Only returns journals with activity (count > 0).
+ */
+export async function getPaymentsByJournal(year: number, month: number): Promise<JournalPayment[]> {
+  const startDate = `${year}-${String(month).padStart(2, "0")}-01`;
+  const endMonth = month === 12 ? 1 : month + 1;
+  const endYear = month === 12 ? year + 1 : year;
+  const endDate = `${endYear}-${String(endMonth).padStart(2, "0")}-01`;
+
+  const moves = await searchRead("account.move", [
+    ["move_type", "=", "entry"],
+    ["journal_id.type", "in", ["bank", "cash"]],
+    ["state", "=", "posted"],
+    ["date", ">=", startDate],
+    ["date", "<", endDate],
+  ], {
+    fields: ["amount_total", "journal_id", "currency_id"],
+    limit: 5000,
+  });
+
+  const byJournal = new Map<number, JournalPayment>();
+  for (const m of moves) {
+    const jid = m.journal_id?.[0];
+    const jname = m.journal_id?.[1] || "Desconocido";
+    if (!byJournal.has(jid)) {
+      byJournal.set(jid, {
+        journal_id: jid,
+        journal_name: jname,
+        count: 0,
+        total: 0,
+        currency: m.currency_id?.[1] || "VED",
+      });
+    }
+    const j = byJournal.get(jid)!;
+    j.count++;
+    j.total += m.amount_total || 0;
+  }
+
+  return Array.from(byJournal.values())
+    .filter(j => j.total > 0)
+    .sort((a, b) => b.total - a.total);
+}
+
 // ── Subscription summary ─────────────────────────────────────
 
 export interface SubscriptionSummary {

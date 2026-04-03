@@ -6,6 +6,7 @@ import {
   getPendingByCustomer,
   getPlanDistribution,
   getMonthlyHistory,
+  getPaymentsByJournal,
 } from "@/lib/integrations/odoo";
 import { fetchBCVRate } from "@/lib/integrations/bcv";
 
@@ -39,8 +40,11 @@ export async function GET() {
       fetchBCVRate().catch(() => null),
     ]);
 
-    // Fetch history with BCV rate for VED→USD conversion
-    const monthlyHistory = await getMonthlyHistory(6, bcvRate?.usd_to_bs || undefined);
+    // Fetch history and payment distribution
+    const [monthlyHistory, paymentsByJournal] = await Promise.all([
+      getMonthlyHistory(6, bcvRate?.usd_to_bs || undefined),
+      getPaymentsByJournal(year, month),
+    ]);
 
     // Compute aging buckets from pending customers
     const today = new Date();
@@ -135,6 +139,9 @@ export async function GET() {
 
       // Monthly history (drafts vs posted)
       monthly_history: monthlyHistory,
+
+      // Payment distribution by bank journal (current month)
+      payments_by_journal: paymentsByJournal,
 
       // Exchange rate
       exchange_rate: bcvRate?.usd_to_bs ?? null,
