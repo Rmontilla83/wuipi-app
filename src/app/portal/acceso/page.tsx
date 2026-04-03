@@ -31,7 +31,7 @@ export default function PortalLoginPage() {
         throw new Error(verifyData.error || "Error al verificar email");
       }
       if (!verifyData.exists) {
-        setError("Este email no está registrado como cliente. Si crees que es un error, contacta a soporte.");
+        setError("Este correo no está registrado como cliente Wuipi. Verifica que sea el mismo email con el que contrataste el servicio, o contacta a soporte.");
         setLoading(false);
         return;
       }
@@ -86,7 +86,7 @@ export default function PortalLoginPage() {
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
                 <label className="block text-sm text-gray-400 mb-1.5 font-medium">
-                  Correo electrónico
+                  Correo registrado en Wuipi
                 </label>
                 <div className="relative">
                   <Mail size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
@@ -122,7 +122,7 @@ export default function PortalLoginPage() {
               </button>
 
               <p className="text-xs text-gray-600 text-center">
-                Te enviaremos un enlace de acceso a tu correo. Sin contraseña.
+                Ingresa el correo asociado a tu cuenta de cliente Wuipi. Te enviaremos un enlace de acceso. Sin contraseña.
               </p>
             </form>
           ) : (
