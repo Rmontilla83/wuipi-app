@@ -185,7 +185,9 @@ export interface OdooInvoice {
 }
 
 /**
- * Fetch pending invoices from Odoo.
+ * Fetch pending invoices (accounts receivable) from Odoo.
+ * In our workflow: draft invoices = what clients owe (cuentas por cobrar).
+ * Posted invoices = already collected revenue.
  * Optional: pass partner name to filter by customer.
  */
 export async function getPendingInvoices(options?: {
@@ -195,9 +197,7 @@ export async function getPendingInvoices(options?: {
 }): Promise<{ invoices: OdooInvoice[]; total: number }> {
   const domain: OdooDomain[] = [
     ["move_type", "=", "out_invoice"],
-    ["payment_state", "in", ["not_paid", "partial"]],
-    ["state", "=", "posted"],
-    ["amount_residual", ">", 0],
+    ["state", "=", "draft"],
   ];
 
   // If searching by customer name, first find matching partners
@@ -253,9 +253,9 @@ export async function getPendingInvoices(options?: {
       subtotal: inv.amount_untaxed || 0,
       tax: inv.amount_tax || 0,
       total: inv.amount_total || 0,
-      amount_due: inv.amount_residual || 0,
+      amount_due: inv.amount_total || 0, // drafts: full amount is owed
       currency: inv.currency_id?.[1] || "USD",
-      payment_state: inv.payment_state || "",
+      payment_state: "not_paid", // all drafts are unpaid
     };
   });
 
@@ -297,11 +297,10 @@ export async function getPendingByCustomer(options?: {
   search?: string;
   minAmount?: number;
 }): Promise<{ customers: OdooCustomerBalance[]; total_customers: number; total_due: number }> {
+  // Draft invoices = accounts receivable (what clients owe)
   const domain: OdooDomain[] = [
     ["move_type", "=", "out_invoice"],
-    ["payment_state", "in", ["not_paid", "partial"]],
-    ["state", "=", "posted"],
-    ["amount_residual", ">", 0],
+    ["state", "=", "draft"],
   ];
 
   if (options?.search) {
@@ -373,7 +372,7 @@ export async function getPendingByCustomer(options?: {
     const currency = data.invoices[0]?.currency_id?.[1] || "VED";
 
     const invoiceDetails: OdooInvoiceDetail[] = data.invoices.map((inv: any) => {
-      customerDue += inv.amount_residual;
+      customerDue += inv.amount_total; // drafts: full amount is owed
       if (inv.invoice_date_due && inv.invoice_date_due < oldestDue) {
         oldestDue = inv.invoice_date_due;
       }
@@ -383,9 +382,9 @@ export async function getPendingByCustomer(options?: {
         invoice_date: inv.invoice_date || "",
         due_date: inv.invoice_date_due || "",
         total: inv.amount_total || 0,
-        amount_due: inv.amount_residual || 0,
-        currency: inv.currency_id?.[1] || "VED",
-        payment_state: inv.payment_state || "",
+        amount_due: inv.amount_total || 0, // drafts: full amount is owed
+        currency: inv.currency_id?.[1] || "USD",
+        payment_state: "not_paid",
         products: productsByInvoice.get(inv.id) || [],
       };
     });
@@ -756,7 +755,7 @@ export async function getOdooClients(options?: {
  */
 export async function getOdooClientDetail(partnerId: number): Promise<OdooClientDetail> {
   // All queries in parallel
-  const [rawPartner, rawSubs, rawInvoices, rawPayments, rawTags] = await Promise.all([
+  const [rawPartner, rawSubs, rawDraftInvoices, rawPostedInvoices, rawPayments, rawTags] = await Promise.all([
     // 1. Partner full data
     read("res.partner", [partnerId], [...CLIENT_DETAIL_FIELDS]),
     // 2. Subscriptions
@@ -769,14 +768,25 @@ export async function getOdooClientDetail(partnerId: number): Promise<OdooClient
       limit: 50,
       order: "subscription_state asc, start_date desc",
     }),
-    // 3. Recent invoices
+    // 3. Pending invoices (drafts = accounts receivable)
+    searchRead("account.move", [
+      ["partner_id", "=", partnerId],
+      ["move_type", "=", "out_invoice"],
+      ["state", "=", "draft"],
+    ], {
+      fields: ["name", "invoice_date", "invoice_date_due", "amount_total",
+               "amount_residual", "currency_id", "payment_state", "state"],
+      limit: 50,
+      order: "invoice_date_due desc",
+    }),
+    // 3b. Paid invoices (posted = collected revenue)
     searchRead("account.move", [
       ["partner_id", "=", partnerId],
       ["move_type", "=", "out_invoice"],
       ["state", "=", "posted"],
     ], {
       fields: ["name", "invoice_date", "invoice_date_due", "amount_total",
-               "amount_residual", "currency_id", "payment_state"],
+               "amount_residual", "currency_id", "payment_state", "state"],
       limit: 20,
       order: "invoice_date desc",
     }),
@@ -844,18 +854,31 @@ export async function getOdooClientDetail(partnerId: number): Promise<OdooClient
         .filter(Boolean) as OdooSubscriptionLine[],
     }));
 
-  // Map invoices
-  const invoices: OdooInvoiceDetail[] = rawInvoices.map((inv: any) => ({
+  // Map invoices: drafts (pending) + posted (paid)
+  const pendingInvoices: OdooInvoiceDetail[] = rawDraftInvoices.map((inv: any) => ({
     id: inv.id,
     invoice_number: inv.name || "",
     invoice_date: inv.invoice_date || "",
     due_date: inv.invoice_date_due || "",
     total: inv.amount_total || 0,
-    amount_due: inv.amount_residual || 0,
-    currency: inv.currency_id?.[1] || "VED",
-    payment_state: inv.payment_state || "",
+    amount_due: inv.amount_total || 0, // drafts: full amount owed
+    currency: inv.currency_id?.[1] || "USD",
+    payment_state: "not_paid",
     products: [],
   }));
+  const paidInvoices: OdooInvoiceDetail[] = rawPostedInvoices.map((inv: any) => ({
+    id: inv.id,
+    invoice_number: inv.name || "",
+    invoice_date: inv.invoice_date || "",
+    due_date: inv.invoice_date_due || "",
+    total: inv.amount_total || 0,
+    amount_due: 0, // posted = paid/collected
+    currency: inv.currency_id?.[1] || "USD",
+    payment_state: "paid",
+    products: [],
+  }));
+  // Combine: pending first, then paid
+  const invoices: OdooInvoiceDetail[] = [...pendingInvoices, ...paidInvoices];
 
   // Map payments
   const payments: OdooPayment[] = rawPayments.map((pay: any) => ({
