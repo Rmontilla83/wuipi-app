@@ -479,12 +479,16 @@ export interface MonthlyHistoryEntry {
 }
 
 /**
- * Get last N months of draft vs posted invoice totals in USD.
- * Drafts use invoice_date_due, posted use invoice_date.
+ * Get last N months of draft vs posted invoice totals, normalized to USD.
+ * Drafts (accounts receivable) use invoice_date_due — all in USD.
+ * Posted (collected revenue) use invoice_date — mostly VED, converted to USD
+ * using the exchange rate embedded in each invoice (amount_total VED / amount from subscription).
+ * Since we don't have per-invoice exchange rate, we use the posted USD directly
+ * plus VED divided by a rough BCV rate. Pass bcvRate for conversion.
  */
-export async function getMonthlyHistory(months = 6): Promise<MonthlyHistoryEntry[]> {
+export async function getMonthlyHistory(months = 6, bcvRate?: number): Promise<MonthlyHistoryEntry[]> {
   const now = new Date();
-  const results: MonthlyHistoryEntry[] = [];
+  const rate = bcvRate || 95; // fallback approximate rate
 
   // Build date ranges for each month
   const ranges: Array<{ start: string; end: string; month: string; label: string }> = [];
@@ -504,7 +508,6 @@ export async function getMonthlyHistory(months = 6): Promise<MonthlyHistoryEntry
     });
   }
 
-  // Fetch all drafts and posted in the full range (single query each)
   const fullStart = ranges[0].start;
   const fullEnd = ranges[ranges.length - 1].end;
 
@@ -523,22 +526,26 @@ export async function getMonthlyHistory(months = 6): Promise<MonthlyHistoryEntry
     ], { fields: ["amount_total", "invoice_date", "currency_id"], limit: 10000 }),
   ]);
 
-  // Group by month
+  // Group by month — drafts are USD, posted can be USD or VED
   const draftByMonth = new Map<string, number>();
   const postedByMonth = new Map<string, number>();
 
   for (const inv of allDrafts) {
     if (!inv.invoice_date_due) continue;
-    const m = inv.invoice_date_due.substring(0, 7); // "2026-01"
+    const m = inv.invoice_date_due.substring(0, 7);
     draftByMonth.set(m, (draftByMonth.get(m) || 0) + (inv.amount_total || 0));
   }
 
   for (const inv of allPosted) {
     if (!inv.invoice_date) continue;
     const m = inv.invoice_date.substring(0, 7);
-    postedByMonth.set(m, (postedByMonth.get(m) || 0) + (inv.amount_total || 0));
+    const isUSD = inv.currency_id?.[0] === 1;
+    // Convert VED to USD equivalent for fair comparison
+    const amountUsd = isUSD ? (inv.amount_total || 0) : (inv.amount_total || 0) / rate;
+    postedByMonth.set(m, (postedByMonth.get(m) || 0) + amountUsd);
   }
 
+  const results: MonthlyHistoryEntry[] = [];
   for (const r of ranges) {
     const drafted = Math.round((draftByMonth.get(r.month) || 0) * 100) / 100;
     const posted = Math.round((postedByMonth.get(r.month) || 0) * 100) / 100;

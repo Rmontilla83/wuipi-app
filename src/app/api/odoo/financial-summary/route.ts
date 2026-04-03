@@ -31,14 +31,16 @@ export async function GET() {
     const month = now.getMonth() + 1;
 
     // Parallel fetch all data sources
-    const [invoiceSummary, subscriptions, pendingData, planDist, bcvRate, monthlyHistory] = await Promise.all([
+    const [invoiceSummary, subscriptions, pendingData, planDist, bcvRate] = await Promise.all([
       getMonthlyInvoiceSummary(year, month),
       getSubscriptionSummary(),
       getPendingByCustomer(),
       getPlanDistribution(),
       fetchBCVRate().catch(() => null),
-      getMonthlyHistory(6),
     ]);
+
+    // Fetch history with BCV rate for VED→USD conversion
+    const monthlyHistory = await getMonthlyHistory(6, bcvRate?.usd_to_bs || undefined);
 
     // Compute aging buckets from pending customers
     const today = new Date();

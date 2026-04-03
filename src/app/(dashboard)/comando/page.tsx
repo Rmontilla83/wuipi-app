@@ -184,14 +184,16 @@ function FinancieroTab({ stats, loading }: { stats: FinanceStats | null; loading
   if (!stats) return <EmptyState msg="No se pudieron cargar los datos financieros" />;
 
   const fmt = (n: number) => n.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fmtUsd = (n: number) => `$${fmt(n)}`;
   const fmtBs = (n: number) => `Bs ${fmt(n)}`;
+  const fmtShort = (n: number) => n >= 1000000 ? `${(n / 1000000).toFixed(1)}M` : n >= 1000 ? `${(n / 1000).toFixed(0)}k` : n.toFixed(0);
 
-  // Aging bar helper
+  // Aging bar helper — cartera is USD
   const agingBuckets = [
-    { label: "0–15 días", ...stats.aging.bucket_0_15, color: "bg-emerald-500" },
-    { label: "16–30 días", ...stats.aging.bucket_16_30, color: "bg-amber-500" },
-    { label: "31–60 días", ...stats.aging.bucket_31_60, color: "bg-orange-500" },
-    { label: "60+ días", ...stats.aging.bucket_60_plus, color: "bg-red-500" },
+    { label: "0-15 dias", ...stats.aging.bucket_0_15, color: "bg-emerald-500" },
+    { label: "16-30 dias", ...stats.aging.bucket_16_30, color: "bg-amber-500" },
+    { label: "31-60 dias", ...stats.aging.bucket_31_60, color: "bg-orange-500" },
+    { label: "60+ dias", ...stats.aging.bucket_60_plus, color: "bg-red-500" },
   ];
   const maxAgingTotal = Math.max(...agingBuckets.map((b) => b.total), 1);
 
@@ -200,66 +202,66 @@ function FinancieroTab({ stats, loading }: { stats: FinanceStats | null; loading
       {/* Main KPIs */}
       <div className="grid grid-cols-4 gap-4">
         <KPICard
-          label="Facturado Bs" value={fmtBs(stats.invoiced_ved)}
+          label="MRR" value={fmtUsd(stats.mrr_usd)}
           icon={DollarSign} color="cyan"
-          sub={`${stats.invoices_count_ved} facturas este mes`}
+          sub={`${stats.active_subscriptions} suscripciones activas`}
         />
         <KPICard
-          label="Cobrado Bs" value={fmtBs(stats.collected_ved)}
+          label="Cobrado este mes" value={fmtBs(stats.collected_ved)}
           icon={CreditCard} color="emerald"
-          sub={`${stats.collection_rate_ved}% cobranza`}
+          sub={`${stats.invoices_count_ved} facturas confirmadas`}
         />
         <KPICard
-          label="Cobranza VED" value={`${stats.collection_rate_ved}%`}
-          icon={BarChart3} color={stats.collection_rate_ved > 80 ? "emerald" : "amber"}
-          sub="Eficiencia de cobro mensual"
+          label="Cuentas por cobrar" value={fmtUsd(stats.overdue_total_usd)}
+          icon={BarChart3} color="amber"
+          sub={`${stats.overdue_count} clientes con deuda`}
         />
         <KPICard
-          label="Morosos" value={stats.overdue_count.toString()}
-          icon={AlertTriangle} color="red"
-          sub={`${fmtBs(stats.overdue_total_ved)} pendiente`}
+          label="Tasa BCV" value={stats.exchange_rate ? `Bs ${stats.exchange_rate.toFixed(2)}` : "—"}
+          icon={Activity} color="cyan"
+          sub="por 1 USD"
         />
       </div>
 
-      {/* Row 2: Revenue breakdown + Exchange/MRR */}
+      {/* Row 2: Ingresos del mes + MRR/Suscripciones */}
       <div className="grid grid-cols-3 gap-4">
         <Card className="col-span-2">
-          <h3 className="text-base font-bold text-white mb-4">💰 Resumen de Ingresos</h3>
+          <h3 className="text-base font-bold text-white mb-4">Ingresos del Mes (Cobrado)</h3>
           <div className="grid grid-cols-2 gap-4">
             <div className="p-4 bg-wuipi-bg rounded-xl border border-wuipi-border">
-              <p className="text-xs text-gray-500 mb-1">Facturado en VED</p>
-              <p className="text-2xl font-bold text-emerald-400">{fmtBs(stats.invoiced_ved)}</p>
-              <p className="text-xs text-gray-500 mt-1">Cobrado: {fmtBs(stats.collected_ved)}</p>
+              <p className="text-xs text-gray-500 mb-1">Cobrado en VED</p>
+              <p className="text-2xl font-bold text-emerald-400">{fmtBs(stats.collected_ved)}</p>
+              <p className="text-xs text-gray-500 mt-1">{stats.invoices_count_ved} facturas confirmadas</p>
             </div>
             <div className="p-4 bg-wuipi-bg rounded-xl border border-wuipi-border">
-              <p className="text-xs text-gray-500 mb-1">Facturado en USD</p>
-              <p className="text-2xl font-bold text-cyan-400">${fmt(stats.invoiced_usd)}</p>
-              <p className="text-xs text-gray-500 mt-1">Cobrado: ${fmt(stats.collected_usd)}</p>
+              <p className="text-xs text-gray-500 mb-1">Cobrado en USD</p>
+              <p className="text-2xl font-bold text-cyan-400">{fmtUsd(stats.collected_usd)}</p>
+              <p className="text-xs text-gray-500 mt-1">{stats.invoices_count_usd} facturas confirmadas</p>
             </div>
           </div>
           <div className="mt-4 grid grid-cols-4 gap-3">
             <MiniStat label="Servicios activos" value={stats.active_services.toString()} color="text-white" />
             <MiniStat label="Servicios pausados" value={stats.paused_services.toString()} color="text-amber-400" />
             <MiniStat label="Total servicios" value={stats.total_services.toString()} color="text-gray-300" />
-            <MiniStat label="Morosos" value={stats.overdue_count.toString()} color="text-red-400" />
+            <MiniStat label="Clientes con deuda" value={stats.overdue_count.toString()} color="text-red-400" />
           </div>
         </Card>
 
         <Card>
-          <h3 className="text-base font-bold text-white mb-4">💱 Tasa BCV</h3>
-          <div className="text-center py-4">
-            <p className="text-4xl font-bold text-cyan-400">
-              {stats.exchange_rate ? `Bs ${stats.exchange_rate.toFixed(2)}` : "—"}
+          <h3 className="text-base font-bold text-white mb-4">Suscripciones</h3>
+          <div className="p-4 bg-wuipi-bg rounded-xl border border-wuipi-border mb-3">
+            <p className="text-xs text-gray-500">MRR (Ingreso Recurrente Mensual)</p>
+            <p className="text-2xl font-bold text-white mt-1">
+              {fmtUsd(stats.mrr_usd)}
             </p>
-            <p className="text-xs text-gray-500 mt-2">por 1 USD</p>
+            <p className="text-xs text-gray-600 mt-1">{stats.active_subscriptions} activas / {stats.paused_subscriptions} pausadas</p>
           </div>
-          <div className="mt-4 p-3 bg-wuipi-bg rounded-xl border border-wuipi-border">
-            <p className="text-xs text-gray-500">MRR (Suscripciones)</p>
-            <p className="text-lg font-bold text-white">
-              ${fmt(stats.mrr_usd)}{" "}
-              <span className="text-xs text-gray-500 font-normal">USD/mes</span>
+          <div className="p-4 bg-wuipi-bg rounded-xl border border-wuipi-border">
+            <p className="text-xs text-gray-500">Cuentas por Cobrar (Borradores)</p>
+            <p className="text-2xl font-bold text-amber-400 mt-1">
+              {fmtUsd(stats.overdue_total_usd)}
             </p>
-            <p className="text-xs text-gray-600 mt-1">{stats.active_subscriptions} suscripciones activas</p>
+            <p className="text-xs text-gray-600 mt-1">{stats.overdue_count} clientes pendientes</p>
           </div>
         </Card>
       </div>
@@ -268,13 +270,13 @@ function FinancieroTab({ stats, loading }: { stats: FinanceStats | null; loading
       <div className="grid grid-cols-2 gap-4">
         {/* Aging Chart */}
         <Card>
-          <h3 className="text-base font-bold text-white mb-4">📊 Antigüedad de Cartera</h3>
+          <h3 className="text-base font-bold text-white mb-4">Antiguedad de Cartera (USD)</h3>
           <div className="space-y-3">
             {agingBuckets.map((b) => (
               <div key={b.label}>
                 <div className="flex items-center justify-between text-xs mb-1">
                   <span className="text-gray-400">{b.label}</span>
-                  <span className="text-gray-300 font-medium">{b.count} clientes — {fmtBs(b.total)}</span>
+                  <span className="text-gray-300 font-medium">{b.count} clientes — {fmtUsd(b.total)}</span>
                 </div>
                 <div className="h-2 bg-wuipi-bg rounded-full overflow-hidden">
                   <div
@@ -289,9 +291,9 @@ function FinancieroTab({ stats, loading }: { stats: FinanceStats | null; loading
 
         {/* Top Morosos */}
         <Card>
-          <h3 className="text-base font-bold text-white mb-4">🔴 Top 10 Morosos</h3>
+          <h3 className="text-base font-bold text-white mb-4">Top 10 Deudores</h3>
           {stats.top_debtors.length === 0 ? (
-            <p className="text-gray-500 text-sm text-center py-8">Sin morosos</p>
+            <p className="text-gray-500 text-sm text-center py-8">Sin deudores</p>
           ) : (
             <div className="overflow-auto max-h-[280px]">
               <table className="w-full text-xs">
@@ -300,8 +302,8 @@ function FinancieroTab({ stats, loading }: { stats: FinanceStats | null; loading
                     <th className="text-left py-1.5 px-2 font-medium">#</th>
                     <th className="text-left py-1.5 px-2 font-medium">Cliente</th>
                     <th className="text-right py-1.5 px-2 font-medium">Fact.</th>
-                    <th className="text-right py-1.5 px-2 font-medium">Saldo</th>
-                    <th className="text-right py-1.5 px-2 font-medium">Días</th>
+                    <th className="text-right py-1.5 px-2 font-medium">Deuda</th>
+                    <th className="text-right py-1.5 px-2 font-medium">Dias</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -315,8 +317,8 @@ function FinancieroTab({ stats, loading }: { stats: FinanceStats | null; loading
                         <td className="py-1.5 px-2 text-gray-600">{i + 1}</td>
                         <td className="py-1.5 px-2 text-white truncate max-w-[180px]">{d.name}</td>
                         <td className="py-1.5 px-2 text-right text-gray-400">{d.invoice_count}</td>
-                        <td className="py-1.5 px-2 text-right text-emerald-400 font-medium">
-                          {d.currency === "USD" ? `$${fmt(d.total_due)}` : fmtBs(d.total_due)}
+                        <td className="py-1.5 px-2 text-right text-amber-400 font-medium">
+                          {fmtUsd(d.total_due)}
                         </td>
                         <td className={`py-1.5 px-2 text-right font-medium ${dayColor}`}>{days}d</td>
                       </tr>
@@ -329,49 +331,45 @@ function FinancieroTab({ stats, loading }: { stats: FinanceStats | null; loading
         </Card>
       </div>
 
-      {/* Row 4: Monthly History Chart */}
+      {/* Row 4: Monthly History Chart — Posted VED (ingresos reales) */}
       {stats.monthly_history && stats.monthly_history.length > 0 && (
         <Card>
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-base font-bold text-white">📈 Histórico Mensual — Generado vs Cobrado (USD)</h3>
-            <span className="text-xs text-gray-500">Últimos 6 meses</span>
+            <h3 className="text-base font-bold text-white">Historico Mensual — Cobrado vs Generado</h3>
+            <span className="text-xs text-gray-500">Ultimos 6 meses (USD)</span>
           </div>
           <div className="h-[280px]">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={stats.monthly_history} barGap={4}>
-                <XAxis dataKey="label" tick={{ fill: "#6b7280", fontSize: 11 }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fill: "#6b7280", fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} />
+              <BarChart data={stats.monthly_history} barCategoryGap="20%">
+                <XAxis dataKey="label" tick={{ fill: "#9ca3af", fontSize: 12 }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fill: "#6b7280", fontSize: 11 }} axisLine={false} tickLine={false} width={60} tickFormatter={(v) => `$${fmtShort(v)}`} />
                 <Tooltip
-                  contentStyle={{ backgroundColor: "#111827", border: "1px solid #1e293b", borderRadius: 12, fontSize: 12 }}
-                  labelStyle={{ color: "#fff", fontWeight: 600, marginBottom: 4 }}
+                  contentStyle={{ backgroundColor: "#111827", border: "1px solid #1e293b", borderRadius: 12, fontSize: 13 }}
+                  labelStyle={{ color: "#fff", fontWeight: 600, marginBottom: 6 }}
                   formatter={(value: number, name: string) => [
-                    `$${value.toLocaleString("es-VE", { minimumFractionDigits: 2 })}`,
-                    name === "drafted_usd" ? "Generado (Borradores)" : "Cobrado (Facturado)",
+                    fmtUsd(value),
+                    name === "drafted_usd" ? "Generado (Borradores)" : "Cobrado (Confirmado)",
                   ]}
                 />
-                <Bar dataKey="drafted_usd" radius={[6, 6, 0, 0]} maxBarSize={40}>
-                  {stats.monthly_history.map((_, i) => (
-                    <Cell key={i} fill="#06b6d4" fillOpacity={0.3} />
-                  ))}
-                </Bar>
-                <Bar dataKey="posted_usd" radius={[6, 6, 0, 0]} maxBarSize={40}>
-                  {stats.monthly_history.map((_, i) => (
-                    <Cell key={i} fill="#10b981" />
-                  ))}
-                </Bar>
+                <Bar dataKey="drafted_usd" name="Generado" fill="#06b6d4" fillOpacity={0.25} stroke="#06b6d4" strokeWidth={1} radius={[6, 6, 0, 0]} barSize={28} />
+                <Bar dataKey="posted_usd" name="Cobrado" fill="#10b981" radius={[6, 6, 0, 0]} barSize={28} />
               </BarChart>
             </ResponsiveContainer>
           </div>
-          {/* Effectiveness row */}
-          <div className="flex items-center gap-4 mt-3 pt-3 border-t border-wuipi-border">
-            <span className="flex items-center gap-1.5 text-[10px] text-gray-500"><span className="w-2.5 h-2.5 rounded bg-cyan-500/30 inline-block" /> Generado</span>
-            <span className="flex items-center gap-1.5 text-[10px] text-gray-500"><span className="w-2.5 h-2.5 rounded bg-emerald-500 inline-block" /> Cobrado</span>
-            <span className="ml-auto text-[10px] text-gray-500">Efectividad:</span>
+          <div className="grid grid-cols-6 gap-2 mt-3 pt-3 border-t border-wuipi-border">
             {stats.monthly_history.map((m) => (
-              <span key={m.month} className={`text-[10px] font-semibold ${m.effectiveness >= 90 ? "text-emerald-400" : m.effectiveness >= 70 ? "text-amber-400" : "text-red-400"}`}>
-                {m.label.split(" ")[0]} {m.effectiveness}%
-              </span>
+              <div key={m.month} className="text-center">
+                <p className="text-[10px] text-gray-500">{m.label.split(" ")[0]}</p>
+                <p className={`text-sm font-bold ${m.effectiveness >= 90 ? "text-emerald-400" : m.effectiveness >= 70 ? "text-amber-400" : "text-red-400"}`}>
+                  {m.effectiveness}%
+                </p>
+                <p className="text-[10px] text-gray-600">efectividad</p>
+              </div>
             ))}
+          </div>
+          <div className="flex items-center gap-6 mt-2">
+            <span className="flex items-center gap-1.5 text-xs text-gray-500"><span className="w-3 h-3 rounded bg-cyan-500/25 border border-cyan-500 inline-block" /> Generado (Borradores)</span>
+            <span className="flex items-center gap-1.5 text-xs text-gray-500"><span className="w-3 h-3 rounded bg-emerald-500 inline-block" /> Cobrado (Confirmado)</span>
           </div>
         </Card>
       )}
