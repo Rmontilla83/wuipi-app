@@ -117,7 +117,7 @@ export function Sidebar({ user }: SidebarProps) {
         <img
           src="/img/wuipi-logo.webp"
           alt="WUIPI"
-          className={cn("object-contain", collapsed ? "w-10 h-10" : "h-11")}
+          className={cn("object-contain", collapsed ? "h-9" : "h-20")}
         />
       </div>
 

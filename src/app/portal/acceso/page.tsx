@@ -78,7 +78,7 @@ export default function PortalLoginPage() {
         <div className="bg-wuipi-card border border-wuipi-border rounded-2xl p-8 shadow-2xl">
           {/* Logo */}
           <div className="text-center mb-8">
-            <img src="/img/wuipi-logo.webp" alt="Wuipi" className="h-14 mx-auto mb-2 object-contain" />
+            <img src="/img/wuipi-logo.webp" alt="Wuipi" className="h-24 mx-auto mb-2 object-contain" />
             <p className="text-sm text-gray-500">Portal de Clientes</p>
           </div>
 

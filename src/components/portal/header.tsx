@@ -19,7 +19,7 @@ export function PortalHeader() {
     <header className="sticky top-0 z-50 bg-wuipi-card/95 backdrop-blur border-b border-wuipi-border px-4 py-3">
       <div className="max-w-3xl mx-auto flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <img src="/img/wuipi-logo.webp" alt="Wuipi" className="h-8 object-contain" />
+          <img src="/img/wuipi-logo.webp" alt="Wuipi" className="h-10 object-contain" />
         </div>
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2 text-sm text-gray-400">
