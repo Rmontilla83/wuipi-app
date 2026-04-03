@@ -159,7 +159,7 @@ async function getFinancialSnapshot() {
       total_customers_with_debt: p.total_customers,
       total_pending_amount: Math.round(p.total_due * 100) / 100,
       top_debtors: p.customers.slice(0, 10).map(c => ({
-        name: c.name,
+        name: c.customer_name,
         amount: c.total_due,
         oldest_invoice: c.oldest_due_date,
       })),
