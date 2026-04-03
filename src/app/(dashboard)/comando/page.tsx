@@ -357,7 +357,7 @@ function FinancieroTab({ stats, loading }: { stats: FinanceStats | null; loading
                     labelStyle={{ color: "#fff", fontWeight: 600, marginBottom: 4 }}
                     formatter={(value: number, name: string) => [
                       fmtUsd(value),
-                      name === "drafted_usd" ? "Meta (Borradores)" : "Cobrado (Diarios)",
+                      name === "Meta" ? "Meta (Borradores)" : "Cobrado (Diarios)",
                     ]}
                   />
                   <Bar dataKey="drafted_usd" name="Meta" fill="#10b981" radius={[4, 4, 0, 0]} barSize={20} />
