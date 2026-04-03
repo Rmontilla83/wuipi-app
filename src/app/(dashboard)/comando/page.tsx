@@ -220,7 +220,7 @@ function BankDistribution() {
       const res = await fetch(`/api/odoo/payments-by-journal?year=${y}&month=${m}`);
       if (res.ok) {
         const d = await res.json();
-        setData(d.data || []);
+        setData(Array.isArray(d) ? d : []);
       }
     } catch { /* ignore */ }
     finally { setLoading(false); }
