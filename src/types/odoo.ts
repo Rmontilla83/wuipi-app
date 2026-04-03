@@ -1,5 +1,12 @@
 // Shared types for Odoo data — used in both server (integrations/odoo.ts) and client components
 
+export interface OdooInvoiceLineDetail {
+  product_name: string;
+  quantity: number;
+  price_unit: number;
+  price_subtotal: number;
+}
+
 export interface OdooInvoiceDetail {
   id: number;
   invoice_number: string;
@@ -10,6 +17,8 @@ export interface OdooInvoiceDetail {
   currency: string;
   payment_state: string;
   products: string[];
+  lines: OdooInvoiceLineDetail[];
+  ref: string;
 }
 
 export interface OdooCustomerBalance {

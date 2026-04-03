@@ -275,6 +275,8 @@ export interface OdooInvoiceDetail {
   currency: string;
   payment_state: string;
   products: string[];
+  lines: Array<{ product_name: string; quantity: number; price_unit: number; price_subtotal: number }>;
+  ref: string;
 }
 
 export interface OdooCustomerBalance {
@@ -387,10 +389,12 @@ export async function getPendingByCustomer(options?: {
         invoice_date: inv.invoice_date || "",
         due_date: inv.invoice_date_due || "",
         total: inv.amount_total || 0,
-        amount_due: inv.amount_total || 0, // drafts: full amount is owed
+        amount_due: inv.amount_total || 0,
         currency: inv.currency_id?.[1] || "USD",
         payment_state: "not_paid",
         products: productsByInvoice.get(inv.id) || [],
+        lines: [],
+        ref: "",
       };
     });
 
@@ -957,7 +961,8 @@ export async function getOdooClientDetail(partnerId: number): Promise<OdooClient
       ["state", "=", "posted"],
     ], {
       fields: ["name", "invoice_date", "invoice_date_due", "amount_total",
-               "amount_residual", "currency_id", "payment_state", "state"],
+               "amount_residual", "currency_id", "payment_state", "state",
+               "ref", "payment_reference"],
       limit: 20,
       order: "invoice_date desc",
     }),
@@ -1025,6 +1030,32 @@ export async function getOdooClientDetail(partnerId: number): Promise<OdooClient
         .filter(Boolean) as OdooSubscriptionLine[],
     }));
 
+  // Fetch invoice lines for both drafts and posted
+  const allInvoiceIds = [
+    ...rawDraftInvoices.map((i: any) => i.id),
+    ...rawPostedInvoices.map((i: any) => i.id),
+  ];
+  const invoiceLinesByMove = new Map<number, Array<{ product_name: string; quantity: number; price_unit: number; price_subtotal: number }>>();
+  if (allInvoiceIds.length > 0) {
+    const rawLines = await searchRead("account.move.line", [
+      ["move_id", "in", allInvoiceIds],
+      ["display_type", "=", "product"],
+    ], {
+      fields: ["move_id", "product_id", "name", "quantity", "price_unit", "price_subtotal"],
+      limit: 500,
+    });
+    for (const l of rawLines) {
+      const moveId = l.move_id[0];
+      if (!invoiceLinesByMove.has(moveId)) invoiceLinesByMove.set(moveId, []);
+      invoiceLinesByMove.get(moveId)!.push({
+        product_name: l.product_id?.[1]?.replace(/\[.*?\]\s*/, "") || l.name || "",
+        quantity: l.quantity || 1,
+        price_unit: l.price_unit || 0,
+        price_subtotal: l.price_subtotal || 0,
+      });
+    }
+  }
+
   // Map invoices: drafts (pending) + posted (paid)
   const pendingInvoices: OdooInvoiceDetail[] = rawDraftInvoices.map((inv: any) => ({
     id: inv.id,
@@ -1032,10 +1063,12 @@ export async function getOdooClientDetail(partnerId: number): Promise<OdooClient
     invoice_date: inv.invoice_date || "",
     due_date: inv.invoice_date_due || "",
     total: inv.amount_total || 0,
-    amount_due: inv.amount_total || 0, // drafts: full amount owed
+    amount_due: inv.amount_total || 0,
     currency: inv.currency_id?.[1] || "USD",
     payment_state: "not_paid",
-    products: [],
+    products: (invoiceLinesByMove.get(inv.id) || []).map(l => l.product_name),
+    lines: invoiceLinesByMove.get(inv.id) || [],
+    ref: "",
   }));
   const paidInvoices: OdooInvoiceDetail[] = rawPostedInvoices.map((inv: any) => ({
     id: inv.id,
@@ -1043,10 +1076,12 @@ export async function getOdooClientDetail(partnerId: number): Promise<OdooClient
     invoice_date: inv.invoice_date || "",
     due_date: inv.invoice_date_due || "",
     total: inv.amount_total || 0,
-    amount_due: 0, // posted = paid/collected
+    amount_due: 0,
     currency: inv.currency_id?.[1] || "USD",
     payment_state: "paid",
-    products: [],
+    products: (invoiceLinesByMove.get(inv.id) || []).map(l => l.product_name),
+    lines: invoiceLinesByMove.get(inv.id) || [],
+    ref: inv.payment_reference || inv.ref || "",
   }));
   // Combine: pending first, then paid
   const invoices: OdooInvoiceDetail[] = [...pendingInvoices, ...paidInvoices];

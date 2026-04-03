@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useParams } from "next/navigation";
 import { Card } from "@/components/ui/card";
-import { RefreshCw, Eye, ArrowLeft, FileText, Package, HelpCircle } from "lucide-react";
+import { RefreshCw, Eye, ArrowLeft, FileText, Package, HelpCircle, ChevronDown, ChevronUp } from "lucide-react";
 import type { OdooClientDetail, OdooInvoiceDetail } from "@/types/odoo";
 import Link from "next/link";
 
@@ -19,6 +19,46 @@ function PaymentBadge({ state }: { state: string }) {
   };
   const c = cfg[state] || { label: state, color: "text-gray-400 bg-gray-400/10" };
   return <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-medium ${c.color}`}>{c.label}</span>;
+}
+
+function ExpandableInvoice({ inv, defaultExpanded }: { inv: OdooInvoiceDetail; defaultExpanded?: boolean }) {
+  const [expanded, setExpanded] = useState(defaultExpanded || false);
+  const isPending = inv.amount_due > 0;
+  return (
+    <Card className="!p-0 overflow-hidden">
+      <button onClick={() => setExpanded(!expanded)} className="w-full p-4 flex items-center justify-between text-left hover:bg-wuipi-card-hover transition-colors">
+        <div>
+          <p className="text-white text-sm font-mono font-medium">{inv.invoice_number || "Borrador"}</p>
+          <p className="text-gray-500 text-[10px]">{inv.invoice_date ? `${inv.invoice_date} — ` : ""}Vence {inv.due_date}</p>
+        </div>
+        <div className="flex items-center gap-3">
+          <div className="text-right">
+            <p className={`font-bold text-sm ${isPending ? "text-amber-400" : "text-gray-300"}`}>{fmtAmount(isPending ? inv.amount_due : inv.total, inv.currency)}</p>
+            <PaymentBadge state={inv.payment_state} />
+          </div>
+          {inv.lines && inv.lines.length > 0 && (expanded ? <ChevronUp size={14} className="text-gray-500" /> : <ChevronDown size={14} className="text-gray-500" />)}
+        </div>
+      </button>
+      {expanded && inv.lines && inv.lines.length > 0 && (
+        <div className="border-t border-wuipi-border px-4 pb-3 pt-2">
+          <table className="w-full text-xs">
+            <thead><tr className="text-gray-600"><th className="text-left py-1 font-medium">Servicio</th><th className="text-right py-1 font-medium">Precio</th><th className="text-right py-1 font-medium">Cant.</th><th className="text-right py-1 font-medium">Subtotal</th></tr></thead>
+            <tbody>
+              {inv.lines.map((line, i) => (
+                <tr key={i} className="border-t border-wuipi-border/20">
+                  <td className="py-1.5 text-gray-300">{line.product_name}</td>
+                  <td className="py-1.5 text-right text-gray-400">{fmtAmount(line.price_unit, inv.currency)}</td>
+                  <td className="py-1.5 text-right text-gray-500">{line.quantity}</td>
+                  <td className="py-1.5 text-right text-white font-medium">{fmtAmount(line.price_subtotal, inv.currency)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {inv.ref && <p className="text-[10px] text-gray-600 mt-2">Ref: {inv.ref}</p>}
+        </div>
+      )}
+    </Card>
+  );
 }
 
 export default function PortalPreview() {
@@ -141,55 +181,27 @@ export default function PortalPreview() {
               )}
             </Card>
 
-            {/* Pending */}
+            {/* Pending — expandable */}
             {pending.length > 0 && (
               <div>
-                <h3 className="text-sm font-semibold text-red-400 mb-2">Facturas pendientes ({pending.length})</h3>
+                <h3 className="text-sm font-semibold text-amber-400 mb-2">Pendientes de pago ({pending.length})</h3>
                 <div className="space-y-2">
                   {pending.map((inv) => (
-                    <Card key={inv.id} className="!p-4">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-white text-sm font-mono font-medium">{inv.invoice_number || "Borrador"}</p>
-                          <p className="text-gray-500 text-[10px]">Vence {inv.due_date}</p>
-                        </div>
-                        <div className="text-right">
-                          <p className="text-red-400 font-bold text-sm">{fmtAmount(inv.amount_due, inv.currency)}</p>
-                          <PaymentBadge state={inv.payment_state} />
-                        </div>
-                      </div>
-                    </Card>
+                    <ExpandableInvoice key={inv.id} inv={inv} defaultExpanded={true} />
                   ))}
                 </div>
               </div>
             )}
 
-            {/* Paid history */}
+            {/* Paid — expandable */}
             {paid.length > 0 && (
               <div>
-                <h3 className="text-sm font-semibold text-gray-400 mb-2">Historial ({paid.length})</h3>
-                <Card className="!p-0 overflow-hidden">
-                  <table className="w-full text-xs">
-                    <thead>
-                      <tr className="text-gray-500 border-b border-wuipi-border">
-                        <th className="text-left p-3 font-medium">Factura</th>
-                        <th className="text-left p-3 font-medium">Fecha</th>
-                        <th className="text-right p-3 font-medium">Total</th>
-                        <th className="text-center p-3 font-medium">Estado</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {paid.map((inv) => (
-                        <tr key={inv.id} className="border-b border-wuipi-border/30">
-                          <td className="p-3 text-white font-mono">{inv.invoice_number}</td>
-                          <td className="p-3 text-gray-400">{inv.invoice_date}</td>
-                          <td className="p-3 text-right text-gray-300">{fmtAmount(inv.total, inv.currency)}</td>
-                          <td className="p-3 text-center"><PaymentBadge state={inv.payment_state} /></td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </Card>
+                <h3 className="text-sm font-semibold text-gray-400 mb-2">Historial de pagos ({paid.length})</h3>
+                <div className="space-y-2">
+                  {paid.map((inv) => (
+                    <ExpandableInvoice key={inv.id} inv={inv} />
+                  ))}
+                </div>
               </div>
             )}
           </>
