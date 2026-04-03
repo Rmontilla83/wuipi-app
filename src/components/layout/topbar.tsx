@@ -1,8 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { formatTime } from "@/lib/utils";
-import { Users, Brain } from "lucide-react";
+import { Wifi, Brain } from "lucide-react";
+
+interface ServiceStats {
+  total: number;
+  active: number;
+  paused: number;
+}
 
 interface TopBarProps {
   title: string;
@@ -13,11 +19,28 @@ interface TopBarProps {
 
 export function TopBar({ title, subtitle, icon, actions }: TopBarProps) {
   const [time, setTime] = useState(new Date());
+  const [services, setServices] = useState<ServiceStats | null>(null);
+
+  const fetchServices = useCallback(() => {
+    fetch("/api/odoo/financial-summary")
+      .then((r) => r.ok ? r.json() : null)
+      .then((d) => {
+        if (d?.active_services !== undefined) {
+          setServices({
+            total: (d.active_services || 0) + (d.paused_services || 0),
+            active: d.active_services || 0,
+            paused: d.paused_services || 0,
+          });
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     const timer = setInterval(() => setTime(new Date()), 1000);
+    fetchServices();
     return () => clearInterval(timer);
-  }, []);
+  }, [fetchServices]);
 
   return (
     <header className="h-16 px-7 flex items-center justify-between border-b border-wuipi-border bg-wuipi-sidebar shrink-0">
@@ -31,12 +54,16 @@ export function TopBar({ title, subtitle, icon, actions }: TopBarProps) {
 
       <div className="flex items-center gap-4">
         {actions}
-        {/* Client count */}
-        <div className="flex items-center gap-2 px-3 py-1.5 bg-wuipi-bg rounded-lg border border-wuipi-border">
-          <Users size={14} className="text-gray-500" />
-          <span className="text-sm font-bold text-white">1,173</span>
-          <span className="text-xs text-gray-500">clientes</span>
-        </div>
+        {/* Service count */}
+        {services && (
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-wuipi-bg rounded-lg border border-wuipi-border">
+            <Wifi size={14} className="text-emerald-400" />
+            <span className="text-sm font-bold text-white">{services.total.toLocaleString()}</span>
+            <span className="text-xs text-gray-500">servicios</span>
+            <span className="text-[10px] text-emerald-400">{services.active.toLocaleString()}</span>
+            {services.paused > 0 && <span className="text-[10px] text-amber-400">/ {services.paused.toLocaleString()} pau</span>}
+          </div>
+        )}
 
         {/* AI Status */}
         <div className="flex items-center gap-2 px-3 py-1.5 bg-wuipi-purple/5 rounded-lg border border-wuipi-purple/20">
