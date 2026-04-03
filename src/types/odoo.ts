@@ -8,6 +8,13 @@ export interface OdooInvoiceLineDetail {
   price_total: number; // includes tax
 }
 
+export interface OdooInvoicePayment {
+  journal_name: string;
+  amount: number;
+  date: string;
+  ref: string;
+}
+
 export interface OdooInvoiceDetail {
   id: number;
   invoice_number: string;
@@ -20,6 +27,7 @@ export interface OdooInvoiceDetail {
   products: string[];
   lines: OdooInvoiceLineDetail[];
   ref: string;
+  payments: OdooInvoicePayment[];
 }
 
 export interface OdooCustomerBalance {

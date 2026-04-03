@@ -277,6 +277,7 @@ export interface OdooInvoiceDetail {
   products: string[];
   lines: Array<{ product_name: string; quantity: number; price_unit: number; price_subtotal: number; price_total: number }>;
   ref: string;
+  payments: Array<{ journal_name: string; amount: number; date: string; ref: string }>;
 }
 
 export interface OdooCustomerBalance {
@@ -395,6 +396,7 @@ export async function getPendingByCustomer(options?: {
         products: productsByInvoice.get(inv.id) || [],
         lines: [],
         ref: "",
+        payments: [],
       };
     });
 
@@ -962,7 +964,7 @@ export async function getOdooClientDetail(partnerId: number): Promise<OdooClient
     ], {
       fields: ["name", "invoice_date", "invoice_date_due", "amount_total",
                "amount_residual", "currency_id", "payment_state", "state",
-               "ref", "payment_reference"],
+               "ref", "payment_reference", "invoice_payments_widget"],
       limit: 20,
       order: "invoice_date desc",
     }),
@@ -1071,20 +1073,40 @@ export async function getOdooClientDetail(partnerId: number): Promise<OdooClient
     products: (invoiceLinesByMove.get(inv.id) || []).map(l => l.product_name),
     lines: invoiceLinesByMove.get(inv.id) || [],
     ref: "",
+    payments: [],
   }));
-  const paidInvoices: OdooInvoiceDetail[] = rawPostedInvoices.map((inv: any) => ({
-    id: inv.id,
-    invoice_number: inv.name || "",
-    invoice_date: inv.invoice_date || "",
-    due_date: inv.invoice_date_due || "",
-    total: inv.amount_total || 0,
-    amount_due: 0,
-    currency: inv.currency_id?.[1] || "USD",
-    payment_state: "paid",
-    products: (invoiceLinesByMove.get(inv.id) || []).map(l => l.product_name),
-    lines: invoiceLinesByMove.get(inv.id) || [],
-    ref: inv.payment_reference || inv.ref || "",
-  }));
+  const paidInvoices: OdooInvoiceDetail[] = rawPostedInvoices.map((inv: any) => {
+    // Parse payment widget to extract linked payments
+    let linkedPayments: Array<{ journal_name: string; amount: number; date: string; ref: string }> = [];
+    try {
+      const widget = typeof inv.invoice_payments_widget === "string"
+        ? JSON.parse(inv.invoice_payments_widget)
+        : inv.invoice_payments_widget;
+      if (widget?.content) {
+        linkedPayments = widget.content.map((p: any) => ({
+          journal_name: p.journal_name || "",
+          amount: p.amount || 0,
+          date: p.date || "",
+          ref: p.ref?.replace(/^[A-Z]+\d*\/\d+\/\d+\s*/, "").replace(/^Pago manual:\s*/, "") || "",
+        }));
+      }
+    } catch { /* ignore parse errors */ }
+
+    return {
+      id: inv.id,
+      invoice_number: inv.name || "",
+      invoice_date: inv.invoice_date || "",
+      due_date: inv.invoice_date_due || "",
+      total: inv.amount_total || 0,
+      amount_due: 0,
+      currency: inv.currency_id?.[1] || "USD",
+      payment_state: "paid",
+      products: (invoiceLinesByMove.get(inv.id) || []).map(l => l.product_name),
+      lines: invoiceLinesByMove.get(inv.id) || [],
+      ref: inv.payment_reference || inv.ref || "",
+      payments: linkedPayments,
+    };
+  });
   // Combine: pending first, then paid
   const invoices: OdooInvoiceDetail[] = [...pendingInvoices, ...paidInvoices];
 

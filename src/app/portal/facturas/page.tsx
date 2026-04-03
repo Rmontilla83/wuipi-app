@@ -92,8 +92,18 @@ function InvoiceCard({ inv, defaultExpanded }: { inv: OdooInvoiceDetail; default
               </tr>
             </tfoot>
           </table>
-          {inv.ref && (
-            <p className="text-[10px] text-gray-600 mt-2">Ref: {inv.ref}</p>
+          {inv.payments && inv.payments.length > 0 && (
+            <div className="mt-3 pt-2 border-t border-wuipi-border/30">
+              <p className="text-[10px] text-gray-500 font-medium mb-1">Pagos vinculados</p>
+              {inv.payments.map((pay, i) => (
+                <div key={i} className="flex items-center justify-between text-xs py-1">
+                  <span className="text-gray-400">{pay.date}</span>
+                  <span className="text-emerald-400 font-medium">{fmtAmount(pay.amount, inv.currency)}</span>
+                  <span className="text-gray-300">{pay.journal_name}</span>
+                  <span className="text-gray-500 font-mono text-[10px]">{pay.ref || "—"}</span>
+                </div>
+              ))}
+            </div>
           )}
         </div>
       )}
@@ -194,36 +204,6 @@ export default function PortalFacturas() {
         </Card>
       )}
 
-      {/* Recent payments */}
-      {payments.length > 0 && (
-        <div>
-          <h3 className="text-sm font-semibold text-gray-400 mb-2">Pagos recientes</h3>
-          <Card className="!p-0 overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="text-gray-500 border-b border-wuipi-border">
-                    <th className="text-left p-3 font-medium">Fecha</th>
-                    <th className="text-right p-3 font-medium">Monto</th>
-                    <th className="text-left p-3 font-medium">Banco</th>
-                    <th className="text-left p-3 font-medium">Referencia</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {payments.map((pay) => (
-                    <tr key={pay.id} className="border-b border-wuipi-border/30">
-                      <td className="p-3 text-gray-400">{pay.date}</td>
-                      <td className="p-3 text-right text-emerald-400 font-medium">{fmtAmount(pay.amount, pay.currency)}</td>
-                      <td className="p-3 text-gray-300">{pay.journal}</td>
-                      <td className="p-3 text-gray-500 font-mono text-[10px]">{pay.ref || "—"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </Card>
-        </div>
-      )}
     </div>
   );
 }
