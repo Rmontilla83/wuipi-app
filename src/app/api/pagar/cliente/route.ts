@@ -36,7 +36,7 @@ export async function GET(request: NextRequest) {
 
     // Fetch draft lines for detail
     const draftIds = drafts.map((d: any) => d.id);
-    let linesByInvoice: Record<number, Array<{ product_name: string; price_total: number }>> = {};
+    const linesByInvoice: Record<number, Array<{ product_name: string; price_total: number }>> = {};
     if (draftIds.length > 0) {
       const lines = await searchRead("account.move.line", [
         ["move_id", "in", draftIds],
