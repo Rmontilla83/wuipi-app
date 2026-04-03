@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "rm -rf .next/cache && next build",
+    "build": "next build",
     "start": "next start",
     "lint": "next lint",
     "db:types": "supabase gen types typescript --local > src/types/database.ts"
