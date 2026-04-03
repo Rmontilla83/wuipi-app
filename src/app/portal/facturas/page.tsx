@@ -30,6 +30,8 @@ export default function PortalFacturas() {
   const [creditVed, setCreditVed] = useState(0);
   const [loading, setLoading] = useState(true);
 
+  const [totalDue, setTotalDue] = useState(0);
+
   useEffect(() => {
     fetch(`/api/odoo/clients/${partnerId}`)
       .then((r) => r.json())
@@ -37,6 +39,7 @@ export default function PortalFacturas() {
         setInvoices(d.invoices || []);
         setPayments(d.payments || []);
         setCreditVed(d.credit || 0);
+        setTotalDue(d.total_due || 0);
       })
       .catch(console.error)
       .finally(() => setLoading(false));
@@ -56,23 +59,32 @@ export default function PortalFacturas() {
     <div className="space-y-6">
       <h2 className="text-lg font-bold text-white">Mis Facturas</h2>
 
-      {/* Balance summary */}
-      {pending.length > 0 && (
-        <Card className="!p-4 bg-wuipi-bg border-wuipi-border">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-xs text-gray-500">Saldo pendiente</p>
-              <p className="text-xl font-bold text-amber-400">{fmtAmount(totalPending, "USD")}</p>
+      {/* Balance summary — Estado de cuenta */}
+      <Card className="!p-5 border-wuipi-border">
+        {totalDue > 0 ? (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <p className="text-sm text-gray-400">Total facturas pendientes</p>
+              <p className="text-sm text-white font-medium">{fmtAmount(totalPending, "USD")}</p>
             </div>
             {hasCreditFavor && (
-              <div className="text-right">
-                <p className="text-xs text-gray-500">Saldo a favor</p>
-                <p className="text-sm font-semibold text-emerald-400">{fmtAmount(creditFavorBs, "VED")}</p>
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-gray-400">Saldo a favor</p>
+                <p className="text-sm text-emerald-400 font-medium">- {fmtAmount(creditFavorBs, "VED")}</p>
               </div>
             )}
+            <div className="border-t border-wuipi-border pt-3 flex items-center justify-between">
+              <p className="text-base font-bold text-white">Monto a pagar</p>
+              <p className="text-2xl font-bold text-amber-400">{fmtAmount(totalDue, "USD")}</p>
+            </div>
           </div>
-        </Card>
-      )}
+        ) : (
+          <div className="text-center py-2">
+            <p className="text-emerald-400 font-semibold">Estas al dia</p>
+            <p className="text-xs text-gray-500 mt-1">No tienes saldo pendiente</p>
+          </div>
+        )}
+      </Card>
 
       {/* Pending invoices */}
       {pending.length > 0 && (
