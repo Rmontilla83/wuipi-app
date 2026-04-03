@@ -31,18 +31,17 @@ export async function GET() {
     const year = now.getFullYear();
     const month = now.getMonth() + 1;
 
-    // Parallel fetch all data sources
-    const [invoiceSummary, subscriptions, pendingData, planDist, bcvRate] = await Promise.all([
+    // Fetch BCV rate first (needed for VED→USD conversions)
+    const bcvRate = await fetchBCVRate().catch(() => null);
+    const rate = bcvRate?.usd_to_bs || undefined;
+
+    // Parallel fetch all data sources (with BCV rate for credit conversion)
+    const [invoiceSummary, subscriptions, pendingData, planDist, monthlyHistory, paymentsByJournal] = await Promise.all([
       getMonthlyInvoiceSummary(year, month),
       getSubscriptionSummary(),
-      getPendingByCustomer(),
+      getPendingByCustomer({ bcvRate: rate }),
       getPlanDistribution(),
-      fetchBCVRate().catch(() => null),
-    ]);
-
-    // Fetch history and payment distribution
-    const [monthlyHistory, paymentsByJournal] = await Promise.all([
-      getMonthlyHistory(6, bcvRate?.usd_to_bs || undefined),
+      getMonthlyHistory(6, rate),
       getPaymentsByJournal(year, month),
     ]);
 

@@ -164,6 +164,7 @@ const PARTNER_FIELDS = [
   "mobile",
   "phone",
   "vat",              // RIF/Cedula
+  "credit",           // Receivable balance (negative = client has credit in favor)
 ] as const;
 
 export interface OdooInvoice {
@@ -283,7 +284,9 @@ export interface OdooCustomerBalance {
   customer_phone: string;
   customer_cedula_rif: string;
   invoice_count: number;
-  total_due: number;
+  total_due: number;       // net debt: drafts - credit_favor (in USD)
+  credit_favor_usd: number; // saldo a favor converted to USD (0 if none)
+  draft_total_usd: number;  // raw draft total before credit deduction
   currency: string;
   oldest_due_date: string;
   invoices: OdooInvoiceDetail[];
@@ -296,7 +299,9 @@ export interface OdooCustomerBalance {
 export async function getPendingByCustomer(options?: {
   search?: string;
   minAmount?: number;
+  bcvRate?: number;
 }): Promise<{ customers: OdooCustomerBalance[]; total_customers: number; total_due: number }> {
+  const rate = options?.bcvRate || 95;
   // Draft invoices = accounts receivable (what clients owe)
   const domain: OdooDomain[] = [
     ["move_type", "=", "out_invoice"],
@@ -367,12 +372,12 @@ export async function getPendingByCustomer(options?: {
 
   for (const [pid, data] of grouped) {
     const p = data.partner;
-    let customerDue = 0;
+    let draftTotal = 0;
     let oldestDue = "9999-12-31";
-    const currency = data.invoices[0]?.currency_id?.[1] || "VED";
+    const currency = data.invoices[0]?.currency_id?.[1] || "USD";
 
     const invoiceDetails: OdooInvoiceDetail[] = data.invoices.map((inv: any) => {
-      customerDue += inv.amount_total; // drafts: full amount is owed
+      draftTotal += inv.amount_total; // drafts: full amount is owed
       if (inv.invoice_date_due && inv.invoice_date_due < oldestDue) {
         oldestDue = inv.invoice_date_due;
       }
@@ -389,9 +394,15 @@ export async function getPendingByCustomer(options?: {
       };
     });
 
-    if (options?.minAmount && customerDue < options.minAmount) continue;
+    // Calculate credit in favor (negative credit = overpaid, in VED)
+    // Convert to USD for fair comparison with draft amounts
+    const partnerCredit = p.credit || 0; // VED — negative = saldo a favor
+    const creditFavorUsd = partnerCredit < 0 ? Math.abs(partnerCredit) / rate : 0;
+    const netDue = Math.max(draftTotal - creditFavorUsd, 0);
 
-    grandTotal += customerDue;
+    if (options?.minAmount && netDue < options.minAmount) continue;
+
+    grandTotal += netDue;
     customers.push({
       odoo_partner_id: pid,
       customer_name: p.name || data.invoices[0]?.partner_id[1] || "",
@@ -399,7 +410,9 @@ export async function getPendingByCustomer(options?: {
       customer_phone: p.mobile || p.phone || "",
       customer_cedula_rif: p.vat || "",
       invoice_count: data.invoices.length,
-      total_due: Math.round(customerDue * 100) / 100,
+      total_due: Math.round(netDue * 100) / 100,
+      credit_favor_usd: Math.round(creditFavorUsd * 100) / 100,
+      draft_total_usd: Math.round(draftTotal * 100) / 100,
       currency,
       oldest_due_date: oldestDue === "9999-12-31" ? "" : oldestDue,
       invoices: invoiceDetails,

@@ -27,6 +27,7 @@ export default function PortalFacturas() {
   const { partnerId } = usePortal();
   const [invoices, setInvoices] = useState<OdooInvoiceDetail[]>([]);
   const [payments, setPayments] = useState<OdooPayment[]>([]);
+  const [creditVed, setCreditVed] = useState(0);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -35,6 +36,7 @@ export default function PortalFacturas() {
       .then((d: OdooClientDetail) => {
         setInvoices(d.invoices || []);
         setPayments(d.payments || []);
+        setCreditVed(d.credit || 0);
       })
       .catch(console.error)
       .finally(() => setLoading(false));
@@ -46,10 +48,31 @@ export default function PortalFacturas() {
 
   const pending = invoices.filter((i) => i.amount_due > 0);
   const paid = invoices.filter((i) => i.amount_due === 0);
+  const totalPending = pending.reduce((s, i) => s + i.amount_due, 0);
+  const hasCreditFavor = creditVed < 0;
+  const creditFavorBs = hasCreditFavor ? Math.abs(creditVed) : 0;
 
   return (
     <div className="space-y-6">
       <h2 className="text-lg font-bold text-white">Mis Facturas</h2>
+
+      {/* Balance summary */}
+      {pending.length > 0 && (
+        <Card className="!p-4 bg-wuipi-bg border-wuipi-border">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-xs text-gray-500">Saldo pendiente</p>
+              <p className="text-xl font-bold text-amber-400">{fmtAmount(totalPending, "USD")}</p>
+            </div>
+            {hasCreditFavor && (
+              <div className="text-right">
+                <p className="text-xs text-gray-500">Saldo a favor</p>
+                <p className="text-sm font-semibold text-emerald-400">{fmtAmount(creditFavorBs, "VED")}</p>
+              </div>
+            )}
+          </div>
+        </Card>
+      )}
 
       {/* Pending invoices */}
       {pending.length > 0 && (

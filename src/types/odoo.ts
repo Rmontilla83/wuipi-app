@@ -19,7 +19,9 @@ export interface OdooCustomerBalance {
   customer_phone: string;
   customer_cedula_rif: string;
   invoice_count: number;
-  total_due: number;
+  total_due: number;       // net debt: drafts - credit_favor (in USD)
+  credit_favor_usd: number; // saldo a favor converted to USD (0 if none)
+  draft_total_usd: number;  // raw draft total before credit deduction
   currency: string;
   oldest_due_date: string;
   invoices: OdooInvoiceDetail[];
