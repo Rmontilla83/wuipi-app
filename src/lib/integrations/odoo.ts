@@ -1047,8 +1047,12 @@ export async function getOdooClientDetail(partnerId: number): Promise<OdooClient
   // Combine: pending first, then paid
   const invoices: OdooInvoiceDetail[] = [...pendingInvoices, ...paidInvoices];
 
-  // Calculate real debt: sum of draft totals (USD)
+  // Calculate real debt: drafts - credit in favor
+  // credit < 0 means client overpaid (VED), convert to USD
   const draftTotalUsd = pendingInvoices.reduce((s, i) => s + i.amount_due, 0);
+  const partnerCredit = p.credit || 0;
+  const creditFavorUsd = partnerCredit < 0 ? Math.abs(partnerCredit) / 95 : 0; // approximate BCV
+  const netDueUsd = Math.max(draftTotalUsd - creditFavorUsd, 0);
 
   // Map payments
   const payments: OdooPayment[] = rawPayments.map((pay: any) => ({
@@ -1086,7 +1090,7 @@ export async function getOdooClientDetail(partnerId: number): Promise<OdooClient
     credit: p.credit || 0,
     debit: p.debit || 0,
     total_invoiced: p.total_invoiced || 0,
-    total_due: Math.round(draftTotalUsd * 100) / 100, // real debt from drafts (USD)
+    total_due: Math.round(netDueUsd * 100) / 100, // net debt: drafts - credit favor (USD)
     total_overdue: p.total_overdue || 0,
     days_sales_outstanding: p.days_sales_outstanding || 0,
     trust: p.trust || "",
