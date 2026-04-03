@@ -515,14 +515,7 @@ export async function getMonthlyHistory(months = 6, bcvRate?: number): Promise<M
   const fullStart = ranges[0].start;
   const fullEnd = ranges[ranges.length - 1].end;
 
-  const [allDrafts, allBankMoves] = await Promise.all([
-    // Drafts with due date in range (the monthly target)
-    searchRead("account.move", [
-      ["move_type", "=", "out_invoice"],
-      ["state", "=", "draft"],
-      ["invoice_date_due", ">=", fullStart],
-      ["invoice_date_due", "<", fullEnd],
-    ], { fields: ["amount_total", "invoice_date_due", "currency_id"], limit: 10000 }),
+  const [allBankMoves] = await Promise.all([
     // Bank/cash journal entries in range (actual money collected)
     searchRead("account.move", [
       ["move_type", "=", "entry"],
@@ -533,12 +526,19 @@ export async function getMonthlyHistory(months = 6, bcvRate?: number): Promise<M
     ], { fields: ["amount_total", "date", "currency_id"], limit: 10000 }),
   ]);
 
-  // Group drafts by due month (all USD)
+  // For each month-end, count total outstanding drafts (accumulated debt)
+  // A draft created before month-end that is still in draft state = unpaid
   const draftByMonth = new Map<string, number>();
-  for (const inv of allDrafts) {
-    if (!inv.invoice_date_due) continue;
-    const m = inv.invoice_date_due.substring(0, 7);
-    draftByMonth.set(m, (draftByMonth.get(m) || 0) + (inv.amount_total || 0));
+  for (const r of ranges) {
+    const allDraftsAtEnd = await searchRead("account.move", [
+      ["move_type", "=", "out_invoice"],
+      ["state", "=", "draft"],
+      ["invoice_date_due", "<", r.end],
+    ], { fields: ["amount_total"], limit: 10000 });
+
+    let total = 0;
+    for (const d of allDraftsAtEnd) total += d.amount_total || 0;
+    draftByMonth.set(r.month, total);
   }
 
   // Group bank entries by month, convert VED to USD
