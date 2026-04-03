@@ -809,14 +809,13 @@ export async function getOdooClients(options?: {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const domain: any[] = ["|", ["customer_rank", ">", 0], ["subscription_count", ">", 0]];
 
-  // Status filter
+  // Status filter — based on subscription state, NOT suspend field
   if (options?.status === "active") {
     domain.push(["subscription_status", "=", "progress"]);
-    domain.push(["suspend", "=", false]);
   } else if (options?.status === "paused") {
-    domain.push(["subscription_status", "=", "paused"]);
-  } else if (options?.status === "suspended") {
-    domain.push(["suspend", "=", true]);
+    domain.push(["subscription_status", "in", ["paused", "suspended"]]);
+  } else if (options?.status === "no_service") {
+    domain.push(["subscription_count", "=", 0]);
   } else if (options?.status === "debt") {
     domain.push(["credit", ">", 0]);
   }

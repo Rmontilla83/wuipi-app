@@ -16,16 +16,17 @@ const STATUS_FILTERS = [
   { value: "", label: "Todos" },
   { value: "active", label: "Activos" },
   { value: "paused", label: "Pausados" },
-  { value: "suspended", label: "Suspendidos" },
+  { value: "no_service", label: "Sin servicio" },
   { value: "debt", label: "Con deuda" },
 ];
 
 function getClientStatus(c: OdooClient): { label: string; color: string } {
-  if (c.suspend) return { label: "Suspendido", color: "text-red-400 bg-red-400/10" };
-  if (c.subscription_status === "paused") return { label: "Pausado", color: "text-amber-400 bg-amber-400/10" };
+  // Priority: subscription state is the source of truth for service status
+  // The "suspend" field in Odoo is unreliable (most clients have suspend=true)
   if (c.subscription_status === "progress") return { label: "Activo", color: "text-emerald-400 bg-emerald-400/10" };
-  if (c.subscription_count === 0) return { label: "Sin servicio", color: "text-gray-400 bg-gray-400/10" };
-  return { label: "Inactivo", color: "text-gray-400 bg-gray-400/10" };
+  if (c.subscription_status === "paused" || c.subscription_status === "suspended") return { label: "Pausado", color: "text-amber-400 bg-amber-400/10" };
+  if (c.subscription_count > 0) return { label: "Inactivo", color: "text-orange-400 bg-orange-400/10" };
+  return { label: "Sin servicio", color: "text-gray-400 bg-gray-400/10" };
 }
 
 export default function ClientesPage() {

@@ -106,8 +106,8 @@ export default function ClienteDetailPage() {
     );
   }
 
-  const statusLabel = data.suspend ? "Suspendido" : data.subscription_status === "paused" ? "Pausado" : data.subscription_status === "progress" ? "Activo" : "Sin servicio";
-  const statusColor = data.suspend ? "text-red-400" : data.subscription_status === "paused" ? "text-amber-400" : data.subscription_status === "progress" ? "text-emerald-400" : "text-gray-400";
+  const statusLabel = data.subscription_status === "progress" ? "Activo" : data.subscription_status === "paused" || data.subscription_status === "suspended" ? "Pausado" : data.subscription_count > 0 ? "Inactivo" : "Sin servicio";
+  const statusColor = data.subscription_status === "progress" ? "text-emerald-400" : data.subscription_status === "paused" || data.subscription_status === "suspended" ? "text-amber-400" : data.subscription_count > 0 ? "text-orange-400" : "text-gray-400";
   const totalMRR = data.subscriptions.filter(s => s.state === "3_progress").reduce((s, sub) => s + sub.recurring_monthly, 0);
   const totalServices = data.subscriptions.reduce((s, sub) => s + sub.lines.length, 0);
 
