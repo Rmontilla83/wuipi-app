@@ -109,6 +109,7 @@ export default function ClienteDetailPage() {
   const statusLabel = data.suspend ? "Suspendido" : data.subscription_status === "paused" ? "Pausado" : data.subscription_status === "progress" ? "Activo" : "Sin servicio";
   const statusColor = data.suspend ? "text-red-400" : data.subscription_status === "paused" ? "text-amber-400" : data.subscription_status === "progress" ? "text-emerald-400" : "text-gray-400";
   const totalMRR = data.subscriptions.filter(s => s.state === "3_progress").reduce((s, sub) => s + sub.recurring_monthly, 0);
+  const totalServices = data.subscriptions.reduce((s, sub) => s + sub.lines.length, 0);
 
   const tabs: { id: Tab; label: string }[] = [
     { id: "suscripciones", label: `Servicios (${data.subscriptions.reduce((s, sub) => s + sub.lines.length, 0)})` },
@@ -145,18 +146,14 @@ export default function ClienteDetailPage() {
         </div>
 
         {/* Quick stats */}
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <Card className="!p-3 text-center">
             <p className="text-[10px] text-gray-500 uppercase">MRR</p>
             <p className="text-lg font-bold text-cyan-400">{fmtUSD(totalMRR)}</p>
           </Card>
           <Card className="!p-3 text-center">
             <p className="text-[10px] text-gray-500 uppercase">Servicios</p>
-            <p className="text-lg font-bold text-white">{data.subscription_count}</p>
-          </Card>
-          <Card className="!p-3 text-center">
-            <p className="text-[10px] text-gray-500 uppercase">Total facturado</p>
-            <p className="text-lg font-bold text-gray-300">{fmtBs(data.total_invoiced)}</p>
+            <p className="text-lg font-bold text-white">{totalServices}</p>
           </Card>
           <Card className="!p-3 text-center">
             <p className="text-[10px] text-gray-500 uppercase">Por cobrar</p>
@@ -165,8 +162,8 @@ export default function ClienteDetailPage() {
             </p>
           </Card>
           <Card className="!p-3 text-center">
-            <p className="text-[10px] text-gray-500 uppercase">DSO</p>
-            <p className="text-lg font-bold text-amber-400">{data.days_sales_outstanding}d</p>
+            <p className="text-[10px] text-gray-500 uppercase">Suscripciones</p>
+            <p className="text-lg font-bold text-white">{data.subscription_count}</p>
           </Card>
         </div>
 
