@@ -15,6 +15,8 @@ export async function middleware(request: NextRequest) {
     "/api/cobranzas/pay",       // includes /pay and /pay/confirm
     "/api/cobranzas/wpy_",      // public payment tokens
     "/api/odoo/",               // Odoo integration (read-only)
+    "/api/pagar/cliente",       // Public client payment info
+    "/pagar/cliente/",          // Public client payment page
     "/portal/",                 // Customer portal (own auth at layout level)
     "/api/portal/",             // Portal API endpoints
   ];

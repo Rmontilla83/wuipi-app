@@ -149,6 +149,16 @@ export default function ClienteDetailPage() {
             >
               <Eye size={14} /> Ver portal
             </a>
+            <button
+              onClick={() => {
+                fetch(`/api/portal/payment-link?partnerId=${data.id}`)
+                  .then(r => r.json())
+                  .then(d => { if (d.url) { navigator.clipboard.writeText(d.url); alert("Link copiado: " + d.url); } });
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 text-xs font-medium hover:bg-emerald-500/20 transition-colors"
+            >
+              <CreditCard size={14} /> Link de pago
+            </button>
             <button onClick={fetchDetail} className="p-2 rounded-lg border border-wuipi-border text-gray-400 hover:text-white">
               <RefreshCw size={16} />
             </button>

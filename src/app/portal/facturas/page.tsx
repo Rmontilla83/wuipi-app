@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { usePortal } from "@/lib/portal/context";
 import { Card } from "@/components/ui/card";
-import { RefreshCw, FileText, ChevronDown, ChevronUp } from "lucide-react";
+import { RefreshCw, FileText, ChevronDown, ChevronUp, CreditCard } from "lucide-react";
 import type { OdooClientDetail, OdooInvoiceDetail, OdooPayment } from "@/types/odoo";
 
 const fmtAmount = (n: number, currency: string) =>
@@ -117,6 +117,7 @@ export default function PortalFacturas() {
   const [payments, setPayments] = useState<OdooPayment[]>([]);
   const [creditVed, setCreditVed] = useState(0);
   const [totalDue, setTotalDue] = useState(0);
+  const [paymentUrl, setPaymentUrl] = useState("");
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -130,6 +131,11 @@ export default function PortalFacturas() {
       })
       .catch(console.error)
       .finally(() => setLoading(false));
+
+    fetch(`/api/portal/payment-link?partnerId=${partnerId}`)
+      .then((r) => r.json())
+      .then((d) => { if (d.url) setPaymentUrl(d.url); })
+      .catch(() => {});
   }, [partnerId]);
 
   if (loading) {
@@ -164,6 +170,17 @@ export default function PortalFacturas() {
               <p className="text-base font-bold text-white">Monto a pagar</p>
               <p className="text-2xl font-bold text-amber-400">{fmtAmount(totalDue, "USD")}</p>
             </div>
+            {paymentUrl && (
+              <a
+                href={paymentUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-3 w-full py-3.5 bg-gradient-to-r from-emerald-500 to-cyan-500 rounded-xl text-white font-bold text-sm flex items-center justify-center gap-2 hover:opacity-90 transition-opacity"
+              >
+                <CreditCard size={18} />
+                Pagar {fmtAmount(totalDue, "USD")}
+              </a>
+            )}
           </div>
         ) : (
           <div className="text-center py-2">
