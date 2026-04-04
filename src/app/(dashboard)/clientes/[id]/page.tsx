@@ -9,9 +9,9 @@ import {
   CreditCard, FileText, Receipt, Clock, Tag, Globe,
   AlertTriangle, CheckCircle2, Pause, Ban, Eye,
 } from "lucide-react";
-import type { OdooClientDetail, OdooSubscription, OdooInvoiceDetail, OdooPayment } from "@/types/odoo";
+import type { OdooClientDetail, OdooSubscription, OdooInvoiceDetail, OdooPayment, MikrotikService } from "@/types/odoo";
 
-type Tab = "suscripciones" | "facturacion" | "informacion" | "soporte";
+type Tab = "suscripciones" | "red" | "facturacion" | "informacion" | "soporte";
 
 const fmtUSD = (n: number) => `$${n.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const fmtBs = (n: number) => `Bs ${n.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -115,6 +115,7 @@ export default function ClienteDetailPage() {
 
   const tabs: { id: Tab; label: string }[] = [
     { id: "suscripciones", label: `Servicios (${data.subscriptions.reduce((s, sub) => s + sub.lines.length, 0)})` },
+    { id: "red", label: "Red" },
     { id: "facturacion", label: `Facturación (${data.invoices.length})` },
     { id: "informacion", label: "Información" },
     { id: "soporte", label: "Soporte" },
@@ -208,6 +209,7 @@ export default function ClienteDetailPage() {
 
         {/* Tab content */}
         {tab === "suscripciones" && <SubscripcionesTab subscriptions={data.subscriptions} />}
+        {tab === "red" && <RedTab partnerId={data.id} />}
         {tab === "facturacion" && <FacturacionTab data={data} />}
         {tab === "informacion" && <InformacionTab data={data} />}
         {tab === "soporte" && <SoporteTab vat={data.vat} name={data.name} />}
@@ -478,6 +480,104 @@ function InformacionTab({ data }: { data: OdooClientDetail }) {
           )}
         </Card>
       )}
+    </div>
+  );
+}
+
+// ── Tab: Red ──────────────────────────────────────────
+
+function RedTab({ partnerId }: { partnerId: number }) {
+  const [services, setServices] = useState<MikrotikService[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch(`/api/odoo/clients/${partnerId}/network`);
+        if (res.ok) {
+          const data = await res.json();
+          setServices(data.services || []);
+        }
+      } catch { /* ignore */ }
+      finally { setLoading(false); }
+    })();
+  }, [partnerId]);
+
+  if (loading) {
+    return (
+      <div className="flex justify-center py-12">
+        <RefreshCw size={20} className="animate-spin text-gray-500" />
+      </div>
+    );
+  }
+
+  if (services.length === 0) {
+    return (
+      <Card className="text-center py-12">
+        <AlertTriangle size={32} className="mx-auto mb-3 text-gray-600" />
+        <p className="text-gray-400 text-sm">No se encontraron servicios de red para este cliente</p>
+      </Card>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {services.map((svc) => {
+        const stateMap: Record<string, { label: string; color: string }> = {
+          progress: { label: "Activo", color: "text-emerald-400 bg-emerald-400/10 border-emerald-400/20" },
+          suspended: { label: "Suspendido", color: "text-red-400 bg-red-400/10 border-red-400/20" },
+          closed: { label: "Cerrado", color: "text-gray-400 bg-gray-400/10 border-gray-400/20" },
+        };
+        const st = stateMap[svc.state] || stateMap.closed;
+
+        return (
+          <Card key={svc.id} className="!p-0 overflow-hidden">
+            {/* Header */}
+            <div className="flex items-center justify-between px-5 py-3 border-b border-wuipi-border bg-wuipi-card/50">
+              <div className="flex items-center gap-3">
+                <span className="text-white font-semibold text-sm">{svc.name}</span>
+                <span className={`text-xs px-2 py-0.5 rounded-full font-medium border ${st.color}`}>{st.label}</span>
+                {svc.mikrotik_activated && (
+                  <span className="text-xs px-2 py-0.5 rounded-full font-medium text-blue-400 bg-blue-400/10">MK Activo</span>
+                )}
+              </div>
+              <span className="text-xs text-gray-500">{svc.product_name.replace(/\[.*?\]\s*/, "")}</span>
+            </div>
+
+            {/* Body */}
+            <div className="px-5 py-4 grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-0.5">
+              <InfoRow label="Nodo" value={svc.node_name} />
+              <InfoRow label="Router" value={svc.router_name} />
+              <InfoRow label="Sector" value={svc.monitoring_sector} />
+              <InfoRow label="Categoría" value={svc.category} />
+              <InfoRow label="IP CPE" value={svc.ip_cpe} mono />
+              <InfoRow label="IP Red" value={svc.ipv4} mono />
+              <InfoRow label="Dirección instalación" value={svc.address} />
+              <InfoRow label="Suscripción" value={svc.subscription_ref} />
+              <InfoRow label="Fecha instalación" value={svc.install_date} />
+              <InfoRow label="Fecha suspensión" value={svc.suspend_date} />
+              <InfoRow label="Teléfono" value={svc.mobile || svc.phone} />
+              <InfoRow label="Promesa de pago" value={svc.payment_promise_date} />
+            </div>
+
+            {/* Flags */}
+            {(svc.to_suspend || svc.to_change_plan) && (
+              <div className="px-5 py-2 border-t border-wuipi-border/30 flex gap-3">
+                {svc.to_suspend && (
+                  <span className="text-xs text-red-400 flex items-center gap-1">
+                    <Ban size={12} /> Pendiente suspensión
+                  </span>
+                )}
+                {svc.to_change_plan && (
+                  <span className="text-xs text-amber-400 flex items-center gap-1">
+                    <RefreshCw size={12} /> Cambio de plan pendiente
+                  </span>
+                )}
+              </div>
+            )}
+          </Card>
+        );
+      })}
     </div>
   );
 }

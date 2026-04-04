@@ -1181,3 +1181,185 @@ export async function getOdooClientDetail(partnerId: number): Promise<OdooClient
     payments,
   };
 }
+
+// ── Mikrotik Network Infrastructure ─────────────────────────
+
+import type { MikrotikNode, MikrotikRouter, MikrotikService } from "@/types/odoo";
+
+const MK_SERVICE_FIELDS = [
+  "name", "partner_id", "product_id", "state", "subscription_state",
+  "node_id", "router_id", "monitoring_id", "connected_to",
+  "ip_cpe", "ipv4", "address", "categ_id",
+  "subscription_id", "date", "date_suspend",
+  "mikrotik_activated", "to_suspend", "to_change_plan",
+  "mobile", "phone", "payment_promise_date",
+];
+
+function mapMkService(s: any): MikrotikService {
+  return {
+    id: s.id,
+    name: s.name || "",
+    partner_id: s.partner_id?.[0] || 0,
+    partner_name: s.partner_id?.[1] || "",
+    product_name: s.product_id?.[1] || "",
+    state: s.state || "",
+    node_name: s.node_id?.[1] || "",
+    node_id: s.node_id?.[0] || 0,
+    router_name: s.router_id?.[1] || "",
+    router_id: s.router_id?.[0] || 0,
+    monitoring_sector: s.monitoring_id?.[1] || "",
+    ip_cpe: s.ip_cpe || "",
+    ipv4: s.ipv4?.[1] || s.ipv4 || "",
+    address: s.address || "",
+    category: s.categ_id?.[1] || "",
+    subscription_ref: s.subscription_id?.[1] || "",
+    install_date: s.date || "",
+    suspend_date: s.date_suspend || "",
+    mikrotik_activated: s.mikrotik_activated || false,
+    to_suspend: s.to_suspend || false,
+    to_change_plan: s.to_change_plan || false,
+    mobile: s.mobile || "",
+    phone: s.phone || "",
+    payment_promise_date: s.payment_promise_date || "",
+  };
+}
+
+/**
+ * Get all Mikrotik nodes with service counts.
+ */
+export async function getMikrotikNodes(): Promise<MikrotikNode[]> {
+  const [rawNodes, rawServices] = await Promise.all([
+    searchRead("mikrotik.node", [], {
+      fields: ["name", "interface", "router_id"],
+      limit: 200,
+    }),
+    searchRead("mikrotik.service", [
+      ["state", "in", ["progress", "suspended"]],
+    ], {
+      fields: ["node_id", "state"],
+      limit: 5000,
+    }),
+  ]);
+
+  // Count services per node
+  const nodeCounts = new Map<number, { active: number; suspended: number }>();
+  for (const s of rawServices) {
+    const nid = s.node_id?.[0];
+    if (!nid) continue;
+    if (!nodeCounts.has(nid)) nodeCounts.set(nid, { active: 0, suspended: 0 });
+    const c = nodeCounts.get(nid)!;
+    if (s.state === "progress") c.active++;
+    else if (s.state === "suspended") c.suspended++;
+  }
+
+  return rawNodes.map((n: any) => {
+    const counts = nodeCounts.get(n.id) || { active: 0, suspended: 0 };
+    return {
+      id: n.id,
+      name: n.name || "",
+      interface_name: n.interface || "",
+      router_id: n.router_id?.[0] || 0,
+      router_name: n.router_id?.[1] || "",
+      services_active: counts.active,
+      services_suspended: counts.suspended,
+      services_total: counts.active + counts.suspended,
+    };
+  }).sort((a, b) => b.services_total - a.services_total);
+}
+
+/**
+ * Get services for a specific node.
+ */
+export async function getMikrotikNodeDetail(
+  nodeId: number,
+  options?: { state?: string; search?: string }
+): Promise<MikrotikService[]> {
+  const domain: any[] = [["node_id", "=", nodeId]];
+
+  if (options?.state) {
+    domain.push(["state", "=", options.state]);
+  } else {
+    domain.push(["state", "in", ["progress", "suspended"]]);
+  }
+
+  if (options?.search) {
+    domain.unshift("|", "|", "|");
+    domain.push(
+      ["name", "ilike", options.search],
+      ["ip_cpe", "ilike", options.search],
+      ["partner_id.name", "ilike", options.search],
+    );
+  }
+
+  const raw = await searchRead("mikrotik.service", domain, {
+    fields: MK_SERVICE_FIELDS,
+    limit: 500,
+    order: "state asc, name asc",
+  });
+
+  return raw.map(mapMkService);
+}
+
+/**
+ * Get Mikrotik services for a specific client (partner).
+ */
+export async function getMikrotikServiceByPartner(
+  partnerId: number
+): Promise<MikrotikService[]> {
+  const raw = await searchRead("mikrotik.service", [
+    ["partner_id", "=", partnerId],
+    ["state", "in", ["progress", "suspended", "closed"]],
+  ], {
+    fields: MK_SERVICE_FIELDS,
+    limit: 50,
+    order: "state asc, date desc",
+  });
+
+  return raw.map(mapMkService);
+}
+
+/**
+ * Get all Mikrotik routers with their nodes.
+ */
+export async function getMikrotikRouters(): Promise<MikrotikRouter[]> {
+  const [rawRouters, nodes] = await Promise.all([
+    searchRead("router.mikrotik", [], {
+      fields: ["name", "ip_host", "location", "router_type"],
+      limit: 50,
+    }),
+    getMikrotikNodes(),
+  ]);
+
+  return rawRouters.map((r: any) => ({
+    id: r.id,
+    name: r.name || "",
+    ip_host: r.ip_host || "",
+    location: r.location || "",
+    router_type: r.router_type || "",
+    nodes: nodes.filter((n) => n.router_id === r.id),
+  }));
+}
+
+/**
+ * Search services globally by IP, reference, or client name.
+ */
+export async function searchMikrotikServices(
+  query: string
+): Promise<MikrotikService[]> {
+  const domain: any[] = [
+    ["state", "in", ["progress", "suspended"]],
+    "|", "|", "|",
+    ["name", "ilike", query],
+    ["ip_cpe", "ilike", query],
+    ["partner_id.name", "ilike", query],
+    ["ipv4.name", "ilike", query],
+  ];
+
+  const raw = await searchRead("mikrotik.service", domain, {
+    fields: MK_SERVICE_FIELDS,
+    limit: 50,
+    order: "state asc, name asc",
+  });
+
+  return raw.map(mapMkService);
+}

@@ -171,3 +171,52 @@ export interface OdooClientDetail {
   invoices: OdooInvoiceDetail[];
   payments: OdooPayment[];
 }
+
+// ── Mikrotik / Network Infrastructure ───────────────────────
+
+export interface MikrotikNode {
+  id: number;
+  name: string;
+  interface_name: string;
+  router_id: number;
+  router_name: string;
+  services_active: number;
+  services_suspended: number;
+  services_total: number;
+}
+
+export interface MikrotikRouter {
+  id: number;
+  name: string;
+  ip_host: string;
+  location: string;
+  router_type: string;
+  nodes: MikrotikNode[];
+}
+
+export interface MikrotikService {
+  id: number;
+  name: string;                  // SM006203
+  partner_id: number;
+  partner_name: string;
+  product_name: string;          // [BM030SE] WUIPI Beam 30
+  state: string;                 // progress | suspended | closed
+  node_name: string;
+  node_id: number;
+  router_name: string;
+  router_id: number;
+  monitoring_sector: string;     // WUIP-LATS-08
+  ip_cpe: string;                // 172.17.41.45
+  ipv4: string;                  // 192.168.114.122
+  address: string;
+  category: string;              // Beam30
+  subscription_ref: string;      // S20762
+  install_date: string;
+  suspend_date: string;
+  mikrotik_activated: boolean;
+  to_suspend: boolean;
+  to_change_plan: boolean;
+  mobile: string;
+  phone: string;
+  payment_promise_date: string;
+}
