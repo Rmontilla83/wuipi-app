@@ -5,6 +5,7 @@ export async function middleware(request: NextRequest) {
   // Public routes — skip auth entirely (no Supabase call, no cookie manipulation)
   const publicPaths = [
     "/login",
+    "/setup-password",
     "/pay/",
     "/pagar/",
     "/api/mercantil/webhook",

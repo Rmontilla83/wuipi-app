@@ -11,8 +11,14 @@ export async function GET(request: Request) {
 
   if (code) {
     const supabase = createServerSupabase();
-    const { error } = await supabase.auth.exchangeCodeForSession(code);
+    const { data, error } = await supabase.auth.exchangeCodeForSession(code);
     if (!error) {
+      // Check if user needs to set password (invited users have no password yet)
+      const user = data?.session?.user;
+      const isInvited = user && !user.last_sign_in_at;
+      if (isInvited) {
+        return NextResponse.redirect(`${origin}/setup-password`);
+      }
       return NextResponse.redirect(`${origin}${next}`);
     }
   }
