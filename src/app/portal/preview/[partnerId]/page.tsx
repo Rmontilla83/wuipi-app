@@ -120,6 +120,8 @@ export default function PortalPreview() {
   const totalServices = data.subscriptions.reduce((s, sub) => s + sub.lines.length, 0);
   const hasCreditFavor = data.credit < 0;
   const creditFavorBs = hasCreditFavor ? Math.abs(data.credit) : 0;
+  const hasCreditDebt = data.credit > 0;
+  const creditDebtBs = hasCreditDebt ? data.credit : 0;
   const totalPending = pending.reduce((s, i) => s + i.amount_due, 0);
 
   const tabs = [
@@ -186,6 +188,12 @@ export default function PortalPreview() {
                     <p className="text-sm text-gray-400">Total facturas pendientes</p>
                     <p className="text-sm text-white font-medium">{fmtAmount(totalPending, "USD")}</p>
                   </div>
+                  {hasCreditDebt && (
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm text-gray-400">Saldo pendiente anterior</p>
+                      <p className="text-sm text-red-400 font-medium">+ {fmtAmount(creditDebtBs, "VED")}</p>
+                    </div>
+                  )}
                   {hasCreditFavor && (
                     <div className="flex items-center justify-between">
                       <p className="text-sm text-gray-400">Saldo a favor</p>

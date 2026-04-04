@@ -402,11 +402,11 @@ export async function getPendingByCustomer(options?: {
       };
     });
 
-    // Calculate credit in favor (negative credit = overpaid, in VED)
-    // Convert to USD for fair comparison with draft amounts
-    const partnerCredit = p.credit || 0; // VED — negative = saldo a favor
-    const creditFavorUsd = partnerCredit < 0 ? Math.abs(partnerCredit) / rate : 0;
-    const netDue = Math.max(draftTotal - creditFavorUsd, 0);
+    // credit > 0 = owes money (posted unpaid, in VED) → convert to USD and ADD
+    // credit < 0 = overpaid (saldo a favor, in VED) → convert to USD and SUBTRACT
+    const partnerCredit = p.credit || 0; // VED
+    const creditUsd = partnerCredit / rate; // positive = debt, negative = favor
+    const netDue = Math.max(draftTotal + creditUsd, 0);
 
     if (options?.minAmount && netDue < options.minAmount) continue;
 
@@ -419,7 +419,7 @@ export async function getPendingByCustomer(options?: {
       customer_cedula_rif: p.vat || "",
       invoice_count: data.invoices.length,
       total_due: Math.round(netDue * 100) / 100,
-      credit_favor_usd: Math.round(creditFavorUsd * 100) / 100,
+      credit_favor_usd: Math.round((partnerCredit < 0 ? Math.abs(partnerCredit) / rate : 0) * 100) / 100,
       draft_total_usd: Math.round(draftTotal * 100) / 100,
       currency,
       oldest_due_date: oldestDue === "9999-12-31" ? "" : oldestDue,
@@ -1116,12 +1116,13 @@ export async function getOdooClientDetail(partnerId: number): Promise<OdooClient
   // Combine: pending first, then paid
   const invoices: OdooInvoiceDetail[] = [...pendingInvoices, ...paidInvoices];
 
-  // Calculate real debt: drafts - credit in favor
-  // credit < 0 means client overpaid (VED), convert to USD
+  // Calculate real debt:
+  // credit > 0 = owes money (posted unpaid VED) → add to debt
+  // credit < 0 = overpaid (saldo a favor VED) → subtract from debt
   const draftTotalUsd = pendingInvoices.reduce((s, i) => s + i.amount_due, 0);
   const partnerCredit = p.credit || 0;
-  const creditFavorUsd = partnerCredit < 0 ? Math.abs(partnerCredit) / 95 : 0; // approximate BCV
-  const netDueUsd = Math.max(draftTotalUsd - creditFavorUsd, 0);
+  const creditUsd = partnerCredit / 95; // approximate BCV
+  const netDueUsd = Math.max(draftTotalUsd + creditUsd, 0);
 
   // Map payments (bank/cash journal entries)
   const payments: OdooPayment[] = rawPayments.map((pay: any) => ({

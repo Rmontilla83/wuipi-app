@@ -147,6 +147,8 @@ export default function PortalFacturas() {
   const totalPending = pending.reduce((s, i) => s + i.amount_due, 0);
   const hasCreditFavor = creditVed < 0;
   const creditFavorBs = hasCreditFavor ? Math.abs(creditVed) : 0;
+  const hasCreditDebt = creditVed > 0; // posted unpaid debt in VED
+  const creditDebtBs = hasCreditDebt ? creditVed : 0;
 
   return (
     <div className="space-y-6">
@@ -160,6 +162,12 @@ export default function PortalFacturas() {
               <p className="text-sm text-gray-400">Total facturas pendientes</p>
               <p className="text-sm text-white font-medium">{fmtAmount(totalPending, "USD")}</p>
             </div>
+            {hasCreditDebt && (
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-gray-400">Saldo pendiente anterior</p>
+                <p className="text-sm text-red-400 font-medium">+ {fmtAmount(creditDebtBs, "VED")}</p>
+              </div>
+            )}
             {hasCreditFavor && (
               <div className="flex items-center justify-between">
                 <p className="text-sm text-gray-400">Saldo a favor</p>
