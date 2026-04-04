@@ -73,7 +73,9 @@ export async function POST(request: NextRequest) {
     }
 
     // Update profile with additional fields (trigger creates basic profile)
+    // Wait briefly for the trigger to create the profile, then override role
     if (authUser?.user?.id) {
+      await new Promise(r => setTimeout(r, 500));
       await sb.from("profiles").update({
         full_name,
         role,
