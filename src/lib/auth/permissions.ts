@@ -15,9 +15,53 @@ export type Module =
   | "auditoria"
   | "infraestructura"
   | "erp"
-  | "bequant";
+  | "bequant"
+  // Sidebar-only pseudo-modules
+  | "comando"
+  | "supervisor_ia"
+  | "portal_admin"
+  | "actualizaciones";
 
-export type Action = "create" | "read" | "update" | "delete" | "send" | "export" | "approve" | "assign";
+export type Action = "create" | "read" | "update" | "delete" | "send" | "export" | "approve" | "assign" | "access";
+
+/** All operational modules (excludes sidebar-only pseudo-modules) */
+export const OPERATIONAL_MODULES: Module[] = [
+  "cobranzas", "soporte", "ventas", "mercantil", "clientes",
+  "configuracion", "usuarios", "auditoria", "infraestructura", "erp", "bequant",
+];
+
+/** Sidebar-only modules (visibility toggle, "access" action) */
+export const SIDEBAR_ONLY_MODULES: Module[] = [
+  "comando", "supervisor_ia", "portal_admin", "actualizaciones",
+];
+
+/** All modules */
+export const ALL_MODULES: Module[] = [...OPERATIONAL_MODULES, ...SIDEBAR_ONLY_MODULES];
+
+/** Actions available for operational modules */
+export const OPERATIONAL_ACTIONS: Action[] = ["create", "read", "update", "delete", "send", "export", "approve", "assign"];
+
+/** Map sidebar nav IDs → permission module names */
+export const SIDEBAR_MODULE_MAP: Record<string, string> = {
+  "comando":         "comando",
+  "supervisor":      "supervisor_ia",
+  "soporte":         "soporte",
+  "ventas":          "ventas",
+  "cobranzas":       "cobranzas",
+  "bequant":         "bequant",
+  "infraestructura": "infraestructura",
+  "erp":             "erp",
+  "pagos":           "mercantil",
+  "clientes":        "clientes",
+  "portal-admin":    "portal_admin",
+  "configuracion":   "configuracion",
+  "actualizaciones": "actualizaciones",
+};
+
+/** Reverse map: permission module → sidebar nav ID */
+export const MODULE_SIDEBAR_MAP: Record<string, string> = Object.fromEntries(
+  Object.entries(SIDEBAR_MODULE_MAP).map(([k, v]) => [v, k])
+);
 
 // Full permission map: role → module → allowed actions
 const PERMISSIONS: Record<string, Partial<Record<Module, Action[]>>> = {

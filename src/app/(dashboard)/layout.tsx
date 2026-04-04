@@ -1,7 +1,10 @@
 import { redirect } from "next/navigation";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { Sidebar } from "@/components/layout/sidebar";
-import type { UserProfile } from "@/types";
+import { getSidebarModules } from "@/lib/dal/permissions";
+import { SIDEBAR_MODULE_MAP } from "@/lib/auth/permissions";
+import type { UserRole, UserProfile } from "@/types";
+import { ROLE_PERMISSIONS } from "@/types";
 
 export default async function DashboardLayout({
   children,
@@ -34,9 +37,22 @@ export default async function DashboardLayout({
     updated_at: user.updated_at || user.created_at,
   };
 
+  // Fetch sidebar modules from DB, fallback to hardcoded
+  let sidebarNavIds: string[];
+  try {
+    const dbModules = await getSidebarModules(userProfile.role as UserRole);
+    // Convert permission module names → sidebar nav IDs
+    const reverseMap = Object.fromEntries(
+      Object.entries(SIDEBAR_MODULE_MAP).map(([k, v]) => [v, k])
+    );
+    sidebarNavIds = dbModules.map((m) => reverseMap[m] || m);
+  } catch {
+    sidebarNavIds = ROLE_PERMISSIONS[userProfile.role as UserRole] || [];
+  }
+
   return (
     <div className="flex h-screen overflow-hidden bg-wuipi-bg">
-      <Sidebar user={userProfile} />
+      <Sidebar user={userProfile} allowedModules={sidebarNavIds} />
       <main className="flex-1 flex flex-col overflow-hidden">
         {children}
       </main>

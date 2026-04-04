@@ -6,7 +6,6 @@ import { usePathname, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { cn, getInitials } from "@/lib/utils";
 import type { UserProfile } from "@/types";
-import { ROLE_PERMISSIONS } from "@/types";
 import {
   Target,
   Brain,
@@ -78,15 +77,14 @@ const NAV_GROUPS: NavGroup[] = [
 
 interface SidebarProps {
   user: UserProfile;
+  allowedModules: string[];
 }
 
-export function Sidebar({ user }: SidebarProps) {
+export function Sidebar({ user, allowedModules }: SidebarProps) {
   const [collapsed, setCollapsed] = useState(false);
   const pathname = usePathname();
   const router = useRouter();
   const supabase = createClient();
-
-  const allowedModules = ROLE_PERMISSIONS[user.role] || [];
 
   const handleLogout = async () => {
     await supabase.auth.signOut();

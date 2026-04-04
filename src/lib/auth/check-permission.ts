@@ -1,6 +1,7 @@
 // Server-side permission check for API routes
 import { createServerSupabase, createAdminSupabase } from "@/lib/supabase/server";
 import { can } from "@/lib/auth/permissions";
+import { getPermissionsForRole } from "@/lib/dal/permissions";
 import type { Module, Action } from "@/lib/auth/permissions";
 import type { UserRole } from "@/types";
 
@@ -32,6 +33,22 @@ export async function getCallerProfile(): Promise<CallerInfo | null> {
 }
 
 /**
+ * Check permission against DB first, fallback to hardcoded.
+ */
+async function canAsync(role: UserRole, module: Module, action: Action): Promise<boolean> {
+  try {
+    const perms = await getPermissionsForRole(role);
+    const moduleActions = perms[module];
+    if (moduleActions !== undefined) {
+      return moduleActions.includes(action);
+    }
+  } catch {
+    // DB unavailable — fall through to hardcoded
+  }
+  return can(role, module, action);
+}
+
+/**
  * Check if the current user can perform an action on a module.
  * Returns the caller profile if authorized, or null.
  */
@@ -41,6 +58,6 @@ export async function requirePermission(
 ): Promise<CallerInfo | null> {
   const caller = await getCallerProfile();
   if (!caller) return null;
-  if (!can(caller.role, module, action)) return null;
+  if (!(await canAsync(caller.role, module, action))) return null;
   return caller;
 }

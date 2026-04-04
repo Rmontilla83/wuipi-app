@@ -1,6 +1,6 @@
 import { TopBar } from "@/components/layout/topbar";
 import { Card } from "@/components/ui/card";
-import { Settings, Users, Shield } from "lucide-react";
+import { Settings, Users, Shield, Lock } from "lucide-react";
 import Link from "next/link";
 
 export default function ConfiguracionPage() {
@@ -23,6 +23,20 @@ export default function ConfiguracionPage() {
             </Card>
           </Link>
 
+          <Link href="/configuracion/permisos">
+            <Card className="!p-5 cursor-pointer hover:border-[#F46800]/30 transition-colors">
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 rounded-xl bg-amber-500/10 flex items-center justify-center">
+                  <Lock size={24} className="text-amber-400" />
+                </div>
+                <div>
+                  <h3 className="text-white font-semibold">Permisos por Rol</h3>
+                  <p className="text-gray-500 text-sm">Controlar acceso a módulos y acciones por cada rol</p>
+                </div>
+              </div>
+            </Card>
+          </Link>
+
           <Card className="!p-5 opacity-50">
             <div className="flex items-center gap-4">
               <div className="w-12 h-12 rounded-xl bg-blue-500/10 flex items-center justify-center">
@@ -30,7 +44,7 @@ export default function ConfiguracionPage() {
               </div>
               <div>
                 <h3 className="text-white font-semibold">Integraciones</h3>
-                <p className="text-gray-500 text-sm">APIs, webhooks y conexiones externas — próximamente</p>
+                <p className="text-gray-500 text-sm">APIs, webhooks y conexiones externas — pr��ximamente</p>
               </div>
             </div>
           </Card>
