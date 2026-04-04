@@ -1,4 +1,4 @@
-import { createServerSupabase } from "@/lib/supabase/server";
+import { createServerSupabase, createAdminSupabase } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
 
 export async function GET(request: Request) {
@@ -12,10 +12,32 @@ export async function GET(request: Request) {
   if (code) {
     const supabase = createServerSupabase();
     const { data, error } = await supabase.auth.exchangeCodeForSession(code);
-    if (!error) {
+    if (!error && data?.session?.user) {
+      const user = data.session.user;
+
+      // Sync app_metadata.role from profiles table so middleware routes correctly
+      try {
+        const admin = createAdminSupabase();
+        const { data: profile } = await admin
+          .from("profiles")
+          .select("role")
+          .eq("id", user.id)
+          .single();
+
+        if (profile?.role && profile.role !== "cliente") {
+          await admin.auth.admin.updateUserById(user.id, {
+            app_metadata: {
+              ...user.app_metadata,
+              role: profile.role,
+            },
+          });
+        }
+      } catch (e) {
+        console.error("[Auth Callback] Failed to sync app_metadata.role:", e);
+      }
+
       // Check if user needs to set password (invited users have no password yet)
-      const user = data?.session?.user;
-      const isInvited = user && !user.last_sign_in_at;
+      const isInvited = !user.last_sign_in_at;
       if (isInvited) {
         return NextResponse.redirect(`${origin}/setup-password`);
       }

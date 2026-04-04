@@ -83,6 +83,11 @@ export async function POST(request: NextRequest) {
         department: department || null,
         created_by: caller.id,
       }).eq("id", authUser.user.id);
+
+      // Sync role to app_metadata so middleware routes correctly
+      await sb.auth.admin.updateUserById(authUser.user.id, {
+        app_metadata: { ...authUser.user.app_metadata, role },
+      });
     }
 
     await logAudit({ userId: caller.id, action: "user.create", resource: "users", resourceId: authUser?.user?.id, details: { email, role } });
@@ -127,6 +132,16 @@ export async function PATCH(request: NextRequest) {
       .select()
       .single();
     if (error) throw error;
+
+    // Sync role to app_metadata so middleware routes correctly
+    if (role !== undefined) {
+      const { data: authUser } = await sb.auth.admin.getUserById(id);
+      if (authUser?.user) {
+        await sb.auth.admin.updateUserById(id, {
+          app_metadata: { ...authUser.user.app_metadata, role },
+        });
+      }
+    }
 
     await logAudit({ userId: caller.id, action: "user.update", resource: "users", resourceId: id, details: updates });
     return apiSuccess({ user: data });

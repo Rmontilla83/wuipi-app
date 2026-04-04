@@ -20,6 +20,18 @@ export async function GET(request: NextRequest) {
       return NextResponse.redirect(`${origin}/portal/login`);
     }
 
+    const admin = createAdminSupabase();
+
+    // Check if user has a dashboard role in profiles table (authoritative source)
+    const { data: profile } = await admin
+      .from("profiles")
+      .select("role")
+      .eq("id", data.user.id)
+      .single();
+
+    const dashboardRole = profile?.role;
+    const isSystemUser = dashboardRole && dashboardRole !== "cliente";
+
     // Look up partner in Odoo by email
     const email = data.user.email;
     if (email) {
@@ -29,21 +41,22 @@ export async function GET(request: NextRequest) {
       ], { fields: ["id", "name"], limit: 1 });
 
       if (partners.length > 0) {
-        // Store partner_id in app_metadata (not user_metadata — user_metadata is editable by end users)
-        // IMPORTANT: merge with existing app_metadata to preserve the user's dashboard role
-        // (e.g., an admin who is also an Odoo client should keep role "admin")
-        const admin = createAdminSupabase();
         const existingMeta = data.user.app_metadata || {};
         await admin.auth.admin.updateUserById(data.user.id, {
           app_metadata: {
             ...existingMeta,
             odoo_partner_id: partners[0].id,
             customer_name: partners[0].name,
-            // Only set role to "cliente" if user doesn't already have a dashboard role
-            role: existingMeta.role || "cliente",
+            // Preserve dashboard role from profiles table — never overwrite with "cliente"
+            role: isSystemUser ? dashboardRole : (existingMeta.role || "cliente"),
           },
         });
       }
+    }
+
+    // System users who happen to be Odoo clients → send to dashboard, not portal
+    if (isSystemUser) {
+      return NextResponse.redirect(`${origin}/comando`);
     }
 
     return NextResponse.redirect(`${origin}/portal/inicio`);
