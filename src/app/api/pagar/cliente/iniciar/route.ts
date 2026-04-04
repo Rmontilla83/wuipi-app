@@ -37,7 +37,7 @@ export async function POST(request: NextRequest) {
     ], { fields: ["amount_total", "name", "invoice_date_due", "currency_id"], limit: 50 });
 
     const draftTotal = drafts.reduce((s: number, d: { amount_total: number }) => s + (d.amount_total || 0), 0);
-    const creditFavorUsd = partner.credit < 0 ? Math.abs(partner.credit) / 95 : 0;
+    const creditFavorUsd = partner.credit < 0 ? Math.abs(partner.credit) / 474 : 0;
     const netDue = Math.round(Math.max(draftTotal - creditFavorUsd, 0) * 100) / 100;
 
     if (netDue <= 0) return apiError("No hay saldo pendiente", 400);

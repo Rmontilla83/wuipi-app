@@ -57,8 +57,8 @@ export async function GET(request: NextRequest) {
 
     const draftTotal = drafts.reduce((s: number, d: any) => s + (d.amount_total || 0), 0);
     // credit > 0 = owes (posted unpaid VED), credit < 0 = overpaid (favor)
-    const creditUsd = (partner.credit || 0) / 95;
-    const creditFavorUsd = partner.credit < 0 ? Math.abs(partner.credit) / 95 : 0;
+    const creditUsd = (partner.credit || 0) / 474;
+    const creditFavorUsd = partner.credit < 0 ? Math.abs(partner.credit) / 474 : 0;
     const netDue = Math.max(draftTotal + creditUsd, 0);
 
     const invoices = drafts.map((d: any) => ({

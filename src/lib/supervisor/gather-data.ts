@@ -129,7 +129,7 @@ async function getFinancialSnapshot() {
   const [invoiceSummary, subscriptions, pendingData] = await Promise.allSettled([
     getMonthlyInvoiceSummary(year, month),
     getSubscriptionSummary(),
-    getPendingByCustomer({ bcvRate: 95 }), // approximate rate for supervisor context
+    getPendingByCustomer({ bcvRate: 474 }), // approximate rate for supervisor context
   ]);
 
   const result: any = {};

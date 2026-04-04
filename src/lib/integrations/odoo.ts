@@ -306,7 +306,7 @@ export async function getPendingByCustomer(options?: {
   minAmount?: number;
   bcvRate?: number;
 }): Promise<{ customers: OdooCustomerBalance[]; total_customers: number; total_due: number }> {
-  const rate = options?.bcvRate || 95;
+  const rate = options?.bcvRate || 474;
   // Draft invoices = accounts receivable (what clients owe)
   const domain: OdooDomain[] = [
     ["move_type", "=", "out_invoice"],
@@ -514,7 +514,7 @@ export interface MonthlyHistoryEntry {
  */
 export async function getMonthlyHistory(months = 6, bcvRate?: number): Promise<MonthlyHistoryEntry[]> {
   const now = new Date();
-  const rate = bcvRate || 95;
+  const rate = bcvRate || 474;
 
   const monthNames = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
   const ranges: Array<{ start: string; end: string; month: string; label: string }> = [];
@@ -1121,7 +1121,7 @@ export async function getOdooClientDetail(partnerId: number): Promise<OdooClient
   // credit < 0 = overpaid (saldo a favor VED) → subtract from debt
   const draftTotalUsd = pendingInvoices.reduce((s, i) => s + i.amount_due, 0);
   const partnerCredit = p.credit || 0;
-  const creditUsd = partnerCredit / 95; // approximate BCV
+  const creditUsd = partnerCredit / 474; // approximate BCV fallback
   const netDueUsd = Math.max(draftTotalUsd + creditUsd, 0);
 
   // Map payments (bank/cash journal entries)
