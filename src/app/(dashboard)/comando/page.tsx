@@ -13,9 +13,11 @@ import type { InfraOverview, InfraProblem, InfraHost } from "@/types/zabbix";
 import {
   Target, DollarSign, Headphones, Radio, TrendingUp,
   RefreshCw, AlertTriangle, Clock,
-  Activity, Zap,
+  Activity, Zap, Server, Wifi, ChevronRight, ExternalLink,
   CreditCard, BarChart3, UserPlus,
 } from "lucide-react";
+import Link from "next/link";
+import type { MikrotikNode } from "@/types/odoo";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
 
 // ============================================
@@ -597,7 +599,7 @@ function SoporteTab({ stats }: { stats: TicketStats | null }) {
 }
 
 // ============================================
-// TAB: INFRAESTRUCTURA (Zabbix-powered, executive dashboard)
+// TAB: INFRAESTRUCTURA (Mikrotik nodes + Zabbix summary)
 // ============================================
 function InfraestructuraTab({ overview, problems, hosts, loading }: {
   overview: InfraOverview | null;
@@ -605,24 +607,116 @@ function InfraestructuraTab({ overview, problems, hosts, loading }: {
   hosts: InfraHost[];
   loading: boolean;
 }) {
-  const [selectedSite, setSelectedSite] = useState<string | null>(null);
+  const [nodes, setNodes] = useState<MikrotikNode[]>([]);
+  const [nodesLoading, setNodesLoading] = useState(true);
 
-  if (loading) return <LoadingPlaceholder />;
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch("/api/infraestructura/nodes");
+        if (res.ok) {
+          const data = await res.json();
+          setNodes(data.nodes || []);
+        }
+      } catch { /* ignore */ }
+      finally { setNodesLoading(false); }
+    })();
+  }, []);
+
+  const totalActive = nodes.reduce((s, n) => s + n.services_active, 0);
+  const totalSuspended = nodes.reduce((s, n) => s + n.services_suspended, 0);
 
   return (
     <div className="space-y-6">
+      {/* Zabbix alerts (compact) */}
       {overview?.zabbixConnected === false && <ZabbixBanner />}
       <AlertBanner hosts={hosts} />
-      <KPIRow overview={overview} hosts={hosts} />
-      <MapaSitios
-        sites={overview?.sites || []}
-        problems={problems}
-        selectedSite={selectedSite}
-        onSelectSite={setSelectedSite}
-      />
-      <ProblemasActivos problems={problems} selectedSite={selectedSite} />
-      <PeoresRed hosts={hosts} selectedSite={selectedSite} />
-      <DetalleEquipos hosts={hosts} selectedSite={selectedSite} />
+
+      {/* KPIs row: Zabbix + Mikrotik combined */}
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <Card className="!p-3 text-center">
+          <p className="text-[10px] text-gray-500 uppercase">Hosts Online</p>
+          <p className="text-lg font-bold text-emerald-400">{overview?.hostsUp ?? "—"}<span className="text-gray-600 text-sm">/{overview?.totalHosts ?? "—"}</span></p>
+        </Card>
+        <Card className="!p-3 text-center">
+          <p className="text-[10px] text-gray-500 uppercase">Problemas</p>
+          <p className="text-lg font-bold text-red-400">{overview?.totalProblems ?? 0}</p>
+        </Card>
+        <Card className="!p-3 text-center">
+          <p className="text-[10px] text-gray-500 uppercase">Nodos MK</p>
+          <p className="text-lg font-bold text-purple-400">{nodesLoading ? "..." : nodes.length}</p>
+        </Card>
+        <Card className="!p-3 text-center">
+          <p className="text-[10px] text-gray-500 uppercase">Servicios Activos</p>
+          <p className="text-lg font-bold text-emerald-400">{nodesLoading ? "..." : totalActive.toLocaleString()}</p>
+        </Card>
+        <Card className="!p-3 text-center">
+          <p className="text-[10px] text-gray-500 uppercase">Suspendidos</p>
+          <p className="text-lg font-bold text-red-400">{nodesLoading ? "..." : totalSuspended.toLocaleString()}</p>
+        </Card>
+      </div>
+
+      {/* Nodos grid */}
+      {nodesLoading ? (
+        <div className="flex justify-center py-8">
+          <RefreshCw size={20} className="animate-spin text-gray-500" />
+        </div>
+      ) : (
+        <>
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm text-gray-500 font-medium">Nodos de Red ({nodes.length})</h3>
+            <Link
+              href="/infraestructura"
+              className="text-xs text-[#F46800] hover:underline flex items-center gap-1"
+            >
+              Ver todo <ExternalLink size={12} />
+            </Link>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+            {nodes.slice(0, 15).map((node) => {
+              const pctActive = node.services_total > 0 ? (node.services_active / node.services_total) * 100 : 0;
+              return (
+                <Link key={node.id} href={`/infraestructura`}>
+                  <Card className="!p-3 cursor-pointer hover:border-[#F46800]/30 transition-colors">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-white font-bold">{node.name}</span>
+                      <ChevronRight size={12} className="text-gray-600" />
+                    </div>
+                    <div className="text-[10px] text-gray-500 mb-1.5">{node.router_name}</div>
+                    <div className="w-full h-1 bg-wuipi-border rounded-full overflow-hidden mb-1.5">
+                      <div className="h-full bg-emerald-400 rounded-full" style={{ width: `${pctActive}%` }} />
+                    </div>
+                    <div className="flex justify-between text-[10px]">
+                      <span className="text-emerald-400">{node.services_active}</span>
+                      <span className="text-red-400">{node.services_suspended}</span>
+                    </div>
+                  </Card>
+                </Link>
+              );
+            })}
+          </div>
+          {nodes.length > 15 && (
+            <div className="text-center">
+              <Link href="/infraestructura" className="text-xs text-gray-500 hover:text-[#F46800]">
+                +{nodes.length - 15} nodos más →
+              </Link>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Zabbix: Problemas activos (compact) */}
+      {problems.length > 0 && (
+        <>
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm text-gray-500 font-medium">Problemas Activos ({problems.length})</h3>
+            <Link href="/infraestructura" className="text-xs text-[#F46800] hover:underline flex items-center gap-1">
+              Monitoreo completo <ExternalLink size={12} />
+            </Link>
+          </div>
+          <ProblemasActivos problems={problems} selectedSite={null} />
+        </>
+      )}
     </div>
   );
 }
