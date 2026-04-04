@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { TopBar } from "@/components/layout/topbar";
 import { Card } from "@/components/ui/card";
 import {
-  Users, Plus, RefreshCw, Search, Pencil, Save, X,
+  Users, Plus, RefreshCw, Search, Pencil, Save, X, Mail,
   Shield, UserCheck, UserX, Settings,
 } from "lucide-react";
 import { ROLE_CONFIG } from "@/lib/auth/permissions";
@@ -89,6 +89,21 @@ export default function UsuariosPage() {
       fetchUsers();
     } catch (err: unknown) {
       setMessage(err instanceof Error ? err.message : "Error");
+    }
+  };
+
+  const handleResendInvite = async (user: User) => {
+    try {
+      const res = await fetch("/api/users/resend-invite", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: user.email }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Error");
+      setMessage(`Invitacion reenviada a ${user.email}`);
+    } catch (err: unknown) {
+      setMessage(err instanceof Error ? err.message : "Error al reenviar");
     }
   };
 
@@ -265,6 +280,10 @@ export default function UsuariosPage() {
                       <td className="p-3 text-gray-400 text-xs">{user.last_login_at ? new Date(user.last_login_at).toLocaleDateString("es-VE") : "Nunca"}</td>
                       <td className="p-3 pr-4 text-center">
                         <div className="flex items-center justify-center gap-1">
+                          {!user.last_login_at && (
+                            <button onClick={() => handleResendInvite(user)}
+                              className="p-1.5 rounded text-gray-500 hover:text-cyan-400 hover:bg-cyan-400/10" title="Reenviar invitacion"><Mail size={12} /></button>
+                          )}
                           <button onClick={() => { setEditingId(user.id); setEditForm({ full_name: user.full_name, role: user.role, department: user.department }); }}
                             className="p-1.5 rounded text-gray-500 hover:text-white hover:bg-white/10" title="Editar"><Pencil size={12} /></button>
                           <button onClick={() => handleToggleActive(user)}
