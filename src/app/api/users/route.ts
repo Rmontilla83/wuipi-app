@@ -63,6 +63,7 @@ export async function POST(request: NextRequest) {
     // Create user via Supabase Admin API (sends invitation email)
     const { data: authUser, error: authError } = await sb.auth.admin.inviteUserByEmail(email, {
       data: { full_name, role },
+      redirectTo: "https://api.wuipi.net/api/auth/callback",
     });
     if (authError) {
       if (authError.message?.includes("already been registered")) {
