@@ -8,7 +8,7 @@ import {
   Brain, RefreshCw, ChevronDown, ChevronUp, Send, Sparkles,
   AlertTriangle, Lightbulb, MessageSquare, TrendingUp, TrendingDown,
   Minus, Shield, Headphones, ShoppingCart, Users, Server,
-  AlertCircle, DollarSign,
+  AlertCircle, DollarSign, SendHorizonal,
 } from "lucide-react";
 
 // ============================================
@@ -188,6 +188,11 @@ export default function SupervisorPage() {
   // Client count for header
   const [clientCount, setClientCount] = useState<number | null>(null);
 
+  // Telegram state
+  const [telegramConfig, setTelegramConfig] = useState<{ configured: boolean; channels: Record<string, boolean> } | null>(null);
+  const [sendingTelegram, setSendingTelegram] = useState(false);
+  const [telegramResult, setTelegramResult] = useState<{ sent: string[]; failed: string[] } | null>(null);
+
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chatMessages, isTyping]);
@@ -241,11 +246,15 @@ export default function SupervisorPage() {
     }
   }, []);
 
-  // Fetch client count
+  // Fetch client count + telegram config
   useEffect(() => {
     fetch("/api/supervisor/data")
       .then(r => r.json())
       .then(d => { if (d.clients?.total) setClientCount(d.clients.total); })
+      .catch(() => {});
+    fetch("/api/supervisor/telegram")
+      .then(r => r.json())
+      .then(d => setTelegramConfig(d))
       .catch(() => {});
   }, []);
 
@@ -422,6 +431,30 @@ export default function SupervisorPage() {
             </div>
           </div>
           <div className="flex items-center gap-3">
+            {telegramConfig?.configured && briefing && (
+              <button
+                onClick={async () => {
+                  setSendingTelegram(true);
+                  setTelegramResult(null);
+                  try {
+                    const res = await fetch("/api/supervisor/telegram", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ briefing }),
+                    });
+                    const data = await res.json();
+                    setTelegramResult({ sent: data.sent || [], failed: data.failed || [] });
+                    setTimeout(() => setTelegramResult(null), 5000);
+                  } catch { setTelegramResult({ sent: [], failed: ["error"] }); }
+                  finally { setSendingTelegram(false); }
+                }}
+                disabled={sendingTelegram}
+                className="flex items-center gap-2 px-3 py-1.5 bg-blue-500/10 border border-blue-500/20 rounded-lg text-xs text-blue-400 hover:text-blue-300 transition-colors disabled:opacity-50"
+              >
+                <SendHorizonal size={14} className={sendingTelegram ? "animate-pulse" : ""} />
+                {sendingTelegram ? "Enviando..." : telegramResult ? `Enviado a ${telegramResult.sent.length} canales` : "Enviar a Telegram"}
+              </button>
+            )}
             <button
               onClick={() => fetchBriefing(true)}
               disabled={refreshing}
