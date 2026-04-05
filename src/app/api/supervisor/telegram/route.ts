@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
 import { isConfigured, sendBriefingToAllChannels, getChannels } from "@/lib/integrations/telegram";
+import { gatherBusinessData } from "@/lib/supervisor/gather-data";
 import { apiServerError } from "@/lib/api-helpers";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 30;
 
-// POST: Send current briefing to Telegram channels
+// POST: Send current briefing to Telegram channels (gathers raw data for detailed formatting)
 export async function POST(request: Request) {
   try {
     if (!isConfigured()) {
@@ -19,7 +21,11 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Briefing data required" }, { status: 400 });
     }
 
-    const { sent, failed } = await sendBriefingToAllChannels(briefing);
+    // Gather raw data for detailed Operaciones channel
+    let rawData: any = {};
+    try { rawData = await gatherBusinessData(); } catch { /* best effort */ }
+
+    const { sent, failed } = await sendBriefingToAllChannels(briefing, rawData);
 
     return NextResponse.json({ ok: true, sent, failed });
   } catch (error) {

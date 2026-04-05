@@ -128,8 +128,8 @@ export async function GET(request: NextRequest) {
     briefing.generated_at = new Date().toISOString();
     briefing.sources = businessData.sources;
 
-    // 4. Send to Telegram channels
-    const { sent, failed } = await sendBriefingToAllChannels(briefing);
+    // 4. Send to Telegram channels (pass raw data for detailed formatting)
+    const { sent, failed } = await sendBriefingToAllChannels(briefing, businessData);
 
     console.log(`[Cron] Briefing sent to: ${sent.join(", ") || "none"}. Failed: ${failed.join(", ") || "none"}`);
 

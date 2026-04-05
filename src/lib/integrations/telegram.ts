@@ -126,12 +126,11 @@ export function formatSociosBriefing(briefing: any): string {
 // ============================================
 // Format for #operaciones (infra + soporte)
 // ============================================
-export function formatOperacionesBriefing(briefing: any): string {
+export function formatOperacionesBriefing(briefing: any, rawData?: any): string {
   const insights = (briefing.insights || [])
     .filter((ins: any) => ins.para === "operaciones" || ins.para === "todos" || ins.category === "infraestructura" || ins.category === "soporte")
     .slice(0, 5);
 
-  // Sanitize insights for ops: remove dollar amounts, replace with % MRR
   const sanitizedInsights = insights.map((ins: any) => ({
     ...ins,
     title: removeDollarAmounts(ins.title),
@@ -144,18 +143,70 @@ export function formatOperacionesBriefing(briefing: any): string {
     ``,
   ];
 
-  if (kpis.eficiencia_soporte) parts.push(`🎧 Soporte: <b>${kpis.eficiencia_soporte.value}</b> (${trendLabel(kpis.eficiencia_soporte.trend)})`);
-  if (kpis.riesgo_operativo) parts.push(`⚠️ Riesgo: <b>${kpis.riesgo_operativo.value}</b> (${trendLabel(kpis.riesgo_operativo.trend)})`);
+  // Infrastructure details from raw data
+  if (rawData?.infra) {
+    const i = rawData.infra;
+    parts.push(`📡 <b>RED:</b> ${i.hostsUp}/${i.totalHosts} hosts online | Health: ${i.healthScore}%`);
+    if (i.hostsDown > 0) parts.push(`🔴 <b>${i.hostsDown} hosts caidos</b>`);
+  }
+
+  // List actual down hosts / critical problems
+  if (rawData?.problems?.length > 0) {
+    const critical = rawData.problems.filter((p: any) => p.severity === "high" || p.severity === "disaster");
+    const warnings = rawData.problems.filter((p: any) => p.severity === "warning" || p.severity === "average");
+
+    if (critical.length > 0) {
+      parts.push(``, `🚨 <b>PROBLEMAS CRITICOS (${critical.length}):</b>`);
+      for (const p of critical.slice(0, 10)) {
+        const mins = Math.round(p.duration / 60);
+        const durLabel = mins > 60 ? `${Math.round(mins / 60)}h ${mins % 60}m` : `${mins}m`;
+        parts.push(`  🔴 <b>${escHtml(p.hostName)}</b> (${escHtml(p.site)})`);
+        parts.push(`     ${escHtml(p.name)} — ${durLabel}`);
+      }
+    }
+    if (warnings.length > 0) {
+      parts.push(``, `⚠️ <b>ADVERTENCIAS (${warnings.length}):</b>`);
+      for (const p of warnings.slice(0, 5)) {
+        parts.push(`  🟡 ${escHtml(p.hostName)}: ${escHtml(p.name)}`);
+      }
+      if (warnings.length > 5) parts.push(`  ... y ${warnings.length - 5} mas`);
+    }
+  }
+
+  // Mikrotik nodes with % MRR (no dollar amounts)
+  if (rawData?.mikrotik_nodes?.length > 0) {
+    const totalMrr = rawData.mikrotik_nodes.reduce((s: number, n: any) => s + (n.mrr_usd || 0), 0);
+    const nodesDown = rawData.mikrotik_nodes.filter((n: any) => n.services_suspended > 0);
+    if (nodesDown.length > 0) {
+      parts.push(``, `📊 <b>NODOS CON SUSPENSIONES:</b>`);
+      for (const n of nodesDown.slice(0, 8)) {
+        const pctMrr = totalMrr > 0 ? Math.round((n.mrr_usd / totalMrr) * 1000) / 10 : 0;
+        const pctSusp = Math.round((n.services_suspended / (n.services_active + n.services_suspended)) * 100);
+        parts.push(`  📡 <b>${escHtml(n.name)}</b>: ${n.services_active} act / ${n.services_suspended} susp (${pctSusp}%) — ${pctMrr}% del MRR`);
+      }
+    }
+  }
+
+  // Soporte summary
+  if (rawData?.soporte) {
+    const s = rawData.soporte;
+    parts.push(``, `🎧 <b>SOPORTE:</b> ${s.active} tickets activos | ${s.open} nuevos | ${s.resolved_today} resueltos hoy`);
+    if (s.by_category && Object.keys(s.by_category).length > 0) {
+      const sorted = Object.entries(s.by_category).sort((a: any, b: any) => b[1] - a[1]).slice(0, 5);
+      parts.push(`  Razones: ${sorted.map(([k, v]) => `${k}: ${v}`).join(", ")}`);
+    }
+  }
+
+  if (kpis.eficiencia_soporte) parts.push(``, `📊 Eficiencia soporte: <b>${kpis.eficiencia_soporte.value}</b> (${trendLabel(kpis.eficiencia_soporte.trend)})`);
+  if (kpis.riesgo_operativo) parts.push(`⚠️ Riesgo operativo: <b>${kpis.riesgo_operativo.value}</b> (${trendLabel(kpis.riesgo_operativo.trend)})`);
 
   if (sanitizedInsights.length > 0) {
-    parts.push(``, `📋 <b>ALERTAS:</b>`);
+    parts.push(``, `💡 <b>INSIGHTS IA:</b>`);
     for (const ins of sanitizedInsights) {
       const icon = ins.severity === "critical" ? "🔴" : ins.severity === "high" ? "🟠" : "🟡";
-      parts.push(`${icon} <b>${escHtml(ins.title)}</b>`);
+      parts.push(`${icon} ${escHtml(ins.title)}`);
       parts.push(`   ${escHtml(ins.description)}`);
     }
-  } else {
-    parts.push(``, `✅ Sin alertas operativas`);
   }
 
   const rec = briefing.recomendaciones_por_area?.operaciones;
@@ -236,7 +287,7 @@ export function formatComercialBriefing(briefing: any): string {
 // ============================================
 // Send briefing to all configured channels
 // ============================================
-export async function sendBriefingToAllChannels(briefing: any): Promise<{
+export async function sendBriefingToAllChannels(briefing: any, rawData?: any): Promise<{
   sent: string[];
   failed: string[];
 }> {
@@ -244,9 +295,9 @@ export async function sendBriefingToAllChannels(briefing: any): Promise<{
   const sent: string[] = [];
   const failed: string[] = [];
 
-  const sends: Array<{ name: string; chatId: string | null; format: (b: any) => string }> = [
+  const sends: Array<{ name: string; chatId: string | null; format: (b: any, d?: any) => string }> = [
     { name: "socios", chatId: channels.socios, format: formatSociosBriefing },
-    { name: "operaciones", chatId: channels.operaciones, format: formatOperacionesBriefing },
+    { name: "operaciones", chatId: channels.operaciones, format: (b, d) => formatOperacionesBriefing(b, d) },
     { name: "finanzas", chatId: channels.finanzas, format: formatFinanzasBriefing },
     { name: "comercial", chatId: channels.comercial, format: formatComercialBriefing },
   ];
@@ -257,7 +308,7 @@ export async function sendBriefingToAllChannels(briefing: any): Promise<{
       continue;
     }
     try {
-      const text = format(briefing);
+      const text = format(briefing, rawData);
       const ok = await sendMessage(chatId, text);
       if (ok) sent.push(name);
       else failed.push(name);
