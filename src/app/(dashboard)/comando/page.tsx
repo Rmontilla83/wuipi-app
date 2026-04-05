@@ -4,95 +4,96 @@ import { useState, useEffect, useCallback } from "react";
 import { TopBar } from "@/components/layout/topbar";
 import { Card } from "@/components/ui/card";
 import { KPICard } from "@/components/ui/kpi-card";
-import { ScoreRing, StatusBadge } from "@/components/dashboard";
 import {
-  ZabbixBanner, AlertBanner, KPIRow, MapaSitios,
-  ProblemasActivos, PeoresRed, DetalleEquipos,
+  ZabbixBanner, AlertBanner, ProblemasActivos,
 } from "@/components/comando/infra";
 import type { InfraOverview, InfraProblem, InfraHost } from "@/types/zabbix";
 import {
-  Target, DollarSign, Headphones, Radio, TrendingUp,
+  Target, DollarSign, Headphones, TrendingUp,
   RefreshCw, AlertTriangle, Clock,
-  Activity, Zap, Server, Wifi, ChevronRight, ExternalLink,
-  CreditCard, BarChart3, UserPlus,
+  Activity, Zap, Server, Wifi, Shield,
+  CreditCard, BarChart3, UserPlus, Users,
+  ArrowUpRight, ArrowDownRight, Minus,
+  Bell, ChevronRight, ExternalLink,
 } from "lucide-react";
 import Link from "next/link";
-import type { MikrotikNode } from "@/types/odoo";
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 
 // ============================================
 // TYPES
 // ============================================
-type Tab = "financiero" | "soporte" | "infraestructura" | "ventas";
+type Tab = "finanzas" | "operaciones" | "crecimiento";
 
 interface AgingBucket { count: number; total: number }
 interface TopDebtor { partner_id: number; name: string; total_due: number; invoice_count: number; oldest_due_date: string; currency: string }
-interface PlanInfo { code: string; name: string; active: number; paused: number; total: number }
-interface PlanCategory { category: string; total: number; active: number; paused: number; plans: PlanInfo[] }
-
-interface MonthlyHistoryEntry {
-  month: string;
-  label: string;
-  drafted_usd: number;
-  collected_usd: number;
-  effectiveness: number;
-}
-
-interface JournalPayment {
-  journal_id: number;
-  journal_name: string;
-  count: number;
-  total: number;
-  currency: string;
-}
+interface PlanCategory { category: string; total: number; active: number; paused: number; plans: { code: string; name: string; active: number; paused: number; total: number }[] }
+interface MonthlyHistoryEntry { month: string; label: string; drafted_usd: number; collected_usd: number; effectiveness: number }
+interface JournalPayment { journal_id: number; journal_name: string; count: number; total: number; currency: string }
 
 interface FinanceStats {
-  invoiced_ved: number;
-  collected_ved: number;
-  invoices_count_ved: number;
-  collection_rate_ved: number;
-  invoiced_usd: number;
-  collected_usd: number;
-  invoices_count_usd: number;
-  collection_rate_usd: number;
-  overdue_count: number;
-  overdue_total_ved: number;
-  overdue_total_usd: number;
-  active_subscriptions: number;
-  paused_subscriptions: number;
-  mrr_usd: number;
+  invoiced_ved: number; collected_ved: number; invoices_count_ved: number; collection_rate_ved: number;
+  invoiced_usd: number; collected_usd: number; invoices_count_usd: number; collection_rate_usd: number;
+  overdue_count: number; overdue_total_ved: number; overdue_total_usd: number;
+  active_subscriptions: number; paused_subscriptions: number; mrr_usd: number;
   aging: { bucket_0_15: AgingBucket; bucket_16_30: AgingBucket; bucket_31_60: AgingBucket; bucket_60_plus: AgingBucket };
   top_debtors: TopDebtor[];
   plan_distribution: PlanCategory[];
-  total_services: number;
-  active_services: number;
-  paused_services: number;
+  total_services: number; active_services: number; paused_services: number;
   exchange_rate: number | null;
   monthly_history?: MonthlyHistoryEntry[];
   payments_by_journal?: JournalPayment[];
+  prev_collected_ved?: number; prev_collected_usd?: number; prev_invoiced_ved?: number;
 }
 
 interface TicketStats {
-  total: number;
-  open: number;
-  in_progress: number;
-  resolved_today: number;
-  sla_breached: number;
-  critical_active: number;
-  active: number;
+  total: number; open: number; in_progress: number; resolved_today: number;
+  resolved_this_month: number; sla_breached: number; critical_active: number; active: number;
+  avg_resolution_hours: number;
+  by_category: { id: string; name: string; color: string; count: number }[];
+  by_assigned: { id: string; name: string; count: number }[];
 }
 
 interface VentasStats {
-  total: number;
-  active: number;
-  won: number;
-  lost: number;
-  pipeline_value: number;
-  conversion_rate: number;
-  created_this_week: number;
-  created_this_month: number;
-  won_this_month: number;
+  total: number; active: number; won: number; lost: number;
+  pipeline_value: number; conversion_rate: number;
+  created_this_week: number; created_this_month: number; won_this_month: number;
   by_stage: Record<string, { count: number; value: number }>;
+}
+
+interface CobranzasStats {
+  total: number; active: number; recovered: number; retired: number;
+  recovery_rate: number; active_amount: number;
+  by_stage: Record<string, { count: number; amount: number }>;
+}
+
+// ============================================
+// HELPERS
+// ============================================
+const fmt = (n: number) => n.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmtUsd = (n: number) => `$${fmt(n)}`;
+const fmtBs = (n: number) => `Bs ${fmt(n)}`;
+const fmtShort = (n: number) => n >= 1000000 ? `${(n / 1000000).toFixed(1)}M` : n >= 1000 ? `${(n / 1000).toFixed(0)}k` : n.toFixed(0);
+
+function DeltaBadge({ current, previous, suffix = "" }: { current: number; previous: number; suffix?: string }) {
+  if (!previous || previous === 0) return null;
+  const pct = Math.round(((current - previous) / previous) * 100);
+  if (pct === 0) return <span className="text-[10px] text-gray-500 flex items-center gap-0.5"><Minus size={10} /> 0%</span>;
+  const positive = pct > 0;
+  return (
+    <span className={`text-[10px] flex items-center gap-0.5 ${positive ? "text-emerald-400" : "text-red-400"}`}>
+      {positive ? <ArrowUpRight size={10} /> : <ArrowDownRight size={10} />}
+      {positive ? "+" : ""}{pct}%{suffix}
+    </span>
+  );
+}
+
+function MiniStat({ label, value, color }: { label: string; value: string; color: string }) {
+  return (
+    <div className="p-3 bg-wuipi-bg rounded-xl border border-wuipi-border">
+      <p className="text-xs text-gray-500">{label}</p>
+      <p className={`text-lg font-bold ${color}`}>{value}</p>
+    </div>
+  );
 }
 
 // ============================================
@@ -101,14 +102,13 @@ interface VentasStats {
 function TabButton({ tab, current, icon: Icon, label, color, onClick }: {
   tab: Tab; current: Tab; icon: any; label: string; color: string; onClick: (t: Tab) => void;
 }) {
-  const active = tab === current;
-  const colors: Record<string, { active: string; dot: string }> = {
-    emerald: { active: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20", dot: "bg-emerald-400" },
-    cyan: { active: "bg-cyan-500/10 text-cyan-400 border-cyan-500/20", dot: "bg-cyan-400" },
-    amber: { active: "bg-amber-500/10 text-amber-400 border-amber-500/20", dot: "bg-amber-400" },
-    violet: { active: "bg-violet-500/10 text-violet-400 border-violet-500/20", dot: "bg-violet-400" },
+  const colors: Record<string, { active: string }> = {
+    emerald: { active: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" },
+    amber: { active: "bg-amber-500/10 text-amber-400 border-amber-500/20" },
+    violet: { active: "bg-violet-500/10 text-violet-400 border-violet-500/20" },
   };
-  const c = colors[color] || colors.cyan;
+  const c = colors[color] || colors.emerald;
+  const active = tab === current;
   return (
     <button
       onClick={() => onClick(tab)}
@@ -122,73 +122,137 @@ function TabButton({ tab, current, icon: Icon, label, color, onClick }: {
 }
 
 // ============================================
-// OVERVIEW CARDS (top row, always visible)
+// EXECUTIVE OVERVIEW (always visible)
 // ============================================
-function OverviewCards({ financeStats, infraOverview, ticketStats, ventasStats }: {
-  financeStats: FinanceStats | null;
-  infraOverview: InfraOverview | null;
-  ticketStats: TicketStats | null;
-  ventasStats: VentasStats | null;
+function ExecutiveOverview({ finance, infra, tickets, cobranzas }: {
+  finance: FinanceStats | null;
+  infra: InfraOverview | null;
+  tickets: TicketStats | null;
+  cobranzas: CobranzasStats | null;
 }) {
-  const infraScore = infraOverview?.healthScore ?? 0;
-  const infraStatus = infraScore > 85 ? "operational" as const : infraScore > 60 ? "warning" as const : "critical" as const;
+  // Alerts that need action
+  const alerts: { text: string; severity: "critical" | "high" | "medium" }[] = [];
 
-  // Soporte score: based on active tickets (lower = better)
-  const soporteActive = ticketStats?.active ?? 0;
-  const soporteScore = soporteActive === 0 ? 100 : Math.max(0, 100 - soporteActive * 5);
-  const soporteStatus = soporteScore > 85 ? "operational" as const : soporteScore > 60 ? "warning" as const : "critical" as const;
+  // Network critical problems
+  const highProblems = (infra?.problemsBySeverity?.high || 0) + (infra?.problemsBySeverity?.disaster || 0);
+  if (highProblems > 0) alerts.push({ text: `${highProblems} problema${highProblems > 1 ? "s" : ""} de red high/disaster`, severity: "critical" });
 
-  // Ventas: use conversion rate as score
-  const ventasScore = ventasStats?.conversion_rate ?? 0;
-  const ventasStatus = ventasScore > 20 ? "operational" as const : ventasScore > 10 ? "warning" as const : ventasScore === 0 && (ventasStats?.total ?? 0) === 0 ? "operational" as const : "critical" as const;
+  // SLA breached tickets
+  if (tickets && tickets.sla_breached > 0) alerts.push({ text: `${tickets.sla_breached} ticket${tickets.sla_breached > 1 ? "s" : ""} SLA violado`, severity: "high" });
 
-  const modules = [
-    {
-      label: "Finanzas", icon: "💰",
-      score: financeStats ? financeStats.collection_rate_ved : 0,
-      status: financeStats
-        ? (financeStats.collection_rate_ved > 85 ? "operational" as const : financeStats.collection_rate_ved > 70 ? "warning" as const : "critical" as const)
-        : "operational" as const,
-      detail: financeStats ? `${financeStats.active_services || 0} servicios activos` : "Cargando...",
-    },
-    {
-      label: "Soporte", icon: "🎧",
-      score: soporteScore,
-      status: soporteStatus,
-      detail: ticketStats ? `${ticketStats.active} tickets activos` : "Cargando...",
-    },
-    {
-      label: "Red", icon: "📡",
-      score: infraScore,
-      status: infraStatus,
-      detail: infraOverview ? `${infraOverview.hostsUp}/${infraOverview.totalHosts} hosts online` : "Cargando...",
-    },
-    {
-      label: "Ventas", icon: "📈",
-      score: ventasScore,
-      status: ventasStatus,
-      detail: ventasStats ? `${ventasStats.created_this_week} leads esta semana` : "Cargando...",
-    },
-  ];
+  // Deuda > 60 days
+  const over60 = finance?.aging?.bucket_60_plus;
+  if (over60 && over60.count > 0) alerts.push({ text: `${over60.count} clientes con deuda >60 dias ($${fmtShort(over60.total)})`, severity: "high" });
+
+  // Critical tickets
+  if (tickets && tickets.critical_active > 0) alerts.push({ text: `${tickets.critical_active} ticket${tickets.critical_active > 1 ? "s" : ""} critico${tickets.critical_active > 1 ? "s" : ""} activo${tickets.critical_active > 1 ? "s" : ""}`, severity: "critical" });
+
+  // Cobranzas active
+  if (cobranzas && cobranzas.active > 0) alerts.push({ text: `${cobranzas.active} casos de cobranza activos ($${fmtShort(cobranzas.active_amount)})`, severity: "medium" });
+
+  const severityColor = { critical: "text-red-400", high: "text-orange-400", medium: "text-amber-400" };
+  const severityDot = { critical: "bg-red-400", high: "bg-orange-400", medium: "bg-amber-400" };
+
+  // Net services change (not available without historical data, show paused >30d from aging)
+  const pausedServices = finance?.paused_services || 0;
 
   return (
     <div className="grid grid-cols-4 gap-4">
-      {modules.map((m) => (
-        <Card key={m.label} hover className="flex items-center gap-4">
-          <ScoreRing score={m.score} size={64} />
-          <div className="min-w-0">
-            <p className="text-sm text-gray-500 mb-1">{m.icon} {m.label}</p>
-            <StatusBadge status={m.status} />
-            <p className="text-xs text-gray-400 mt-1 truncate">{m.detail}</p>
+      {/* INGRESOS */}
+      <Card className="!p-4">
+        <div className="flex items-center gap-2 mb-2">
+          <div className="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center">
+            <DollarSign size={16} className="text-emerald-400" />
           </div>
-        </Card>
-      ))}
+          <span className="text-xs text-gray-500 font-medium">Ingresos</span>
+        </div>
+        <p className="text-2xl font-bold text-white">{finance ? fmtUsd(finance.mrr_usd) : "..."}</p>
+        <p className="text-[10px] text-gray-500 mt-0.5">MRR servicios activos</p>
+        <div className="mt-2 pt-2 border-t border-wuipi-border flex items-center justify-between">
+          <span className="text-xs text-gray-400">
+            Cobrado: {finance ? fmtBs(finance.collected_ved) : "..."}
+          </span>
+          {finance?.prev_collected_ved ? (
+            <DeltaBadge current={finance.collected_ved} previous={finance.prev_collected_ved} />
+          ) : null}
+        </div>
+      </Card>
+
+      {/* RED */}
+      <Card className="!p-4">
+        <div className="flex items-center gap-2 mb-2">
+          <div className="w-8 h-8 rounded-lg bg-cyan-500/10 flex items-center justify-center">
+            <Wifi size={16} className="text-cyan-400" />
+          </div>
+          <span className="text-xs text-gray-500 font-medium">Red</span>
+        </div>
+        <p className="text-2xl font-bold text-white">
+          {infra ? `${infra.uptimePercent?.toFixed(1) || Math.round((infra.hostsUp / Math.max(infra.totalHosts, 1)) * 1000) / 10}%` : "..."}
+        </p>
+        <p className="text-[10px] text-gray-500 mt-0.5">
+          {infra ? `${infra.hostsUp}/${infra.totalHosts} hosts online` : "uptime"}
+        </p>
+        <div className="mt-2 pt-2 border-t border-wuipi-border">
+          {infra && infra.totalProblems > 0 ? (
+            <span className={`text-xs ${highProblems > 0 ? "text-red-400" : "text-amber-400"}`}>
+              {infra.totalProblems} problema{infra.totalProblems > 1 ? "s" : ""} activo{infra.totalProblems > 1 ? "s" : ""}
+              {highProblems > 0 && ` (${highProblems} high)`}
+            </span>
+          ) : (
+            <span className="text-xs text-emerald-400">Sin problemas</span>
+          )}
+        </div>
+      </Card>
+
+      {/* CLIENTES */}
+      <Card className="!p-4">
+        <div className="flex items-center gap-2 mb-2">
+          <div className="w-8 h-8 rounded-lg bg-violet-500/10 flex items-center justify-center">
+            <Users size={16} className="text-violet-400" />
+          </div>
+          <span className="text-xs text-gray-500 font-medium">Servicios</span>
+        </div>
+        <p className="text-2xl font-bold text-white">{finance ? finance.active_services.toLocaleString() : "..."}</p>
+        <p className="text-[10px] text-gray-500 mt-0.5">activos</p>
+        <div className="mt-2 pt-2 border-t border-wuipi-border flex items-center gap-3">
+          <span className="text-xs text-amber-400">{pausedServices} pausados</span>
+          {tickets && tickets.active > 0 && (
+            <span className="text-xs text-gray-500">{tickets.active} tickets</span>
+          )}
+        </div>
+      </Card>
+
+      {/* ALERTAS / ACCION */}
+      <Card className="!p-4">
+        <div className="flex items-center gap-2 mb-2">
+          <div className={`w-8 h-8 rounded-lg ${alerts.length > 0 ? "bg-red-500/10" : "bg-emerald-500/10"} flex items-center justify-center`}>
+            <Bell size={16} className={alerts.length > 0 ? "text-red-400" : "text-emerald-400"} />
+          </div>
+          <span className="text-xs text-gray-500 font-medium">Acciones</span>
+        </div>
+        {alerts.length === 0 ? (
+          <>
+            <p className="text-2xl font-bold text-emerald-400">0</p>
+            <p className="text-[10px] text-gray-500 mt-0.5">Sin alertas pendientes</p>
+          </>
+        ) : (
+          <div className="space-y-1.5 max-h-[80px] overflow-auto">
+            {alerts.slice(0, 4).map((a, i) => (
+              <div key={i} className="flex items-center gap-1.5">
+                <span className={`w-1.5 h-1.5 rounded-full ${severityDot[a.severity]} shrink-0`} />
+                <span className={`text-[10px] ${severityColor[a.severity]} leading-tight`}>{a.text}</span>
+              </div>
+            ))}
+            {alerts.length > 4 && <p className="text-[10px] text-gray-600">+{alerts.length - 4} mas</p>}
+          </div>
+        )}
+      </Card>
     </div>
   );
 }
 
 // ============================================
-// TAB: FINANCIERO
+// TAB: FINANZAS
 // ============================================
 function BankDistribution() {
   const [data, setData] = useState<JournalPayment[]>([]);
@@ -198,19 +262,13 @@ function BankDistribution() {
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
   });
 
-  // Build last 6 months options
   const monthOptions = (() => {
-    const opts: Array<{ value: string; label: string }> = [];
-    const monthNames = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
+    const opts: { value: string; label: string }[] = [];
+    const names = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
     const now = new Date();
     for (let i = 0; i < 6; i++) {
       const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      const y = d.getFullYear();
-      const m = d.getMonth() + 1;
-      opts.push({
-        value: `${y}-${String(m).padStart(2, "0")}`,
-        label: `${monthNames[m - 1]} ${y}`,
-      });
+      opts.push({ value: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`, label: `${names[d.getMonth()]} ${d.getFullYear()}` });
     }
     return opts;
   })();
@@ -220,19 +278,12 @@ function BankDistribution() {
     try {
       const [y, m] = month.split("-");
       const res = await fetch(`/api/odoo/payments-by-journal?year=${y}&month=${m}`);
-      if (res.ok) {
-        const d = await res.json();
-        setData(Array.isArray(d) ? d : []);
-      }
+      if (res.ok) { const d = await res.json(); setData(Array.isArray(d) ? d : []); }
     } catch { /* ignore */ }
     finally { setLoading(false); }
   }, []);
 
   useEffect(() => { fetchData(selectedMonth); }, [selectedMonth, fetchData]);
-
-  const fmt = (n: number) => n.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  const fmtUsd = (n: number) => `$${fmt(n)}`;
-  const fmtBs = (n: number) => `Bs ${fmt(n)}`;
 
   const maxTotal = Math.max(...data.map(j => j.total), 1);
   const grandTotal = data.reduce((s, j) => s + j.total, 0);
@@ -241,21 +292,16 @@ function BankDistribution() {
   return (
     <Card>
       <div className="flex items-center justify-between mb-4">
-        <h3 className="text-base font-bold text-white">Distribucion de Cobros por Banco</h3>
-        <select
-          value={selectedMonth}
-          onChange={(e) => setSelectedMonth(e.target.value)}
-          className="bg-wuipi-bg border border-wuipi-border rounded-lg px-2 py-1 text-xs text-gray-300 outline-none focus:border-wuipi-accent"
-        >
-          {monthOptions.map((o) => (
-            <option key={o.value} value={o.value}>{o.label}</option>
-          ))}
+        <h3 className="text-base font-bold text-white">Cobros por Banco</h3>
+        <select value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)}
+          className="bg-wuipi-bg border border-wuipi-border rounded-lg px-2 py-1 text-xs text-gray-300 outline-none focus:border-wuipi-accent">
+          {monthOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
       </div>
       {loading ? (
         <div className="flex justify-center py-8"><RefreshCw size={16} className="animate-spin text-gray-500" /></div>
       ) : data.length === 0 ? (
-        <p className="text-sm text-gray-500 text-center py-8">Sin movimientos este mes</p>
+        <p className="text-sm text-gray-500 text-center py-8">Sin movimientos</p>
       ) : (
         <div className="space-y-3">
           {data.map((j, i) => {
@@ -266,15 +312,12 @@ function BankDistribution() {
                 <div className="flex items-center justify-between text-xs mb-1">
                   <span className="text-gray-300 font-medium truncate max-w-[200px]">{j.journal_name}</span>
                   <span className="text-gray-400">
-                    {j.count} mov. — {isUsd ? fmtUsd(j.total) : fmtBs(j.total)}{" "}
-                    <span className="text-gray-600">({pct}%)</span>
+                    {j.count} mov. — {isUsd ? fmtUsd(j.total) : fmtBs(j.total)} <span className="text-gray-600">({pct}%)</span>
                   </span>
                 </div>
                 <div className="h-2.5 bg-wuipi-bg rounded-full overflow-hidden">
-                  <div
-                    className={`h-full rounded-full ${colors[i % colors.length]} transition-all`}
-                    style={{ width: `${Math.max((j.total / maxTotal) * 100, 2)}%` }}
-                  />
+                  <div className={`h-full rounded-full ${colors[i % colors.length]} transition-all`}
+                    style={{ width: `${Math.max((j.total / maxTotal) * 100, 2)}%` }} />
                 </div>
               </div>
             );
@@ -289,16 +332,25 @@ function BankDistribution() {
   );
 }
 
-function FinancieroTab({ stats, loading }: { stats: FinanceStats | null; loading: boolean }) {
-  if (loading) return <LoadingPlaceholder />;
-  if (!stats) return <EmptyState msg="No se pudieron cargar los datos financieros" />;
+const COBRANZA_STAGE_NAMES: Record<string, string> = {
+  leads_entrantes: "Entrantes", contacto_inicial: "Contacto inicial", info_enviada: "Info enviada",
+  no_clasificado: "Sin clasificar", gestion_suspendidos: "Suspendidos", gestion_pre_retiro: "Pre-retiro",
+  gestion_cobranza: "Cobranza activa", recuperado: "Recuperados", retirado_definitivo: "Retirados",
+};
+const COBRANZA_STAGE_COLORS: Record<string, string> = {
+  leads_entrantes: "bg-blue-500", contacto_inicial: "bg-cyan-500", info_enviada: "bg-violet-500",
+  no_clasificado: "bg-gray-500", gestion_suspendidos: "bg-amber-500", gestion_pre_retiro: "bg-orange-500",
+  gestion_cobranza: "bg-red-500", recuperado: "bg-emerald-500", retirado_definitivo: "bg-gray-600",
+};
 
-  const fmt = (n: number) => n.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  const fmtUsd = (n: number) => `$${fmt(n)}`;
-  const fmtBs = (n: number) => `Bs ${fmt(n)}`;
-  const fmtShort = (n: number) => n >= 1000000 ? `${(n / 1000000).toFixed(1)}M` : n >= 1000 ? `${(n / 1000).toFixed(0)}k` : n.toFixed(0);
+function FinanzasTab({ stats, cobranzas }: { stats: FinanceStats | null; cobranzas: CobranzasStats | null }) {
+  if (!stats) return <LoadingPlaceholder />;
 
-  // Aging bar helper — cartera is USD
+  const effectiveness = stats.invoiced_ved > 0
+    ? Math.round((stats.collected_ved / stats.invoiced_ved) * 1000) / 10
+    : 0;
+
+  // Aging
   const agingBuckets = [
     { label: "0-15 dias", ...stats.aging.bucket_0_15, color: "bg-emerald-500" },
     { label: "16-30 dias", ...stats.aging.bucket_16_30, color: "bg-amber-500" },
@@ -307,78 +359,40 @@ function FinancieroTab({ stats, loading }: { stats: FinanceStats | null; loading
   ];
   const maxAgingTotal = Math.max(...agingBuckets.map((b) => b.total), 1);
 
+  // MRR by plan category
+  const mrrByCategory = stats.plan_distribution.map(cat => ({
+    category: cat.category,
+    active: cat.active,
+    paused: cat.paused,
+    total: cat.total,
+  })).sort((a, b) => b.active - a.active);
+
+  // Cobranzas pipeline
+  const cobranzaStages = cobranzas ? Object.entries(cobranzas.by_stage)
+    .filter(([, v]) => v.count > 0)
+    .filter(([k]) => !["recuperado", "retirado_definitivo"].includes(k))
+    .map(([stage, data]) => ({
+      stage, label: COBRANZA_STAGE_NAMES[stage] || stage,
+      color: COBRANZA_STAGE_COLORS[stage] || "bg-gray-500", ...data,
+    })) : [];
+  const maxCobranzaCount = Math.max(...cobranzaStages.map(s => s.count), 1);
+
   return (
     <div className="space-y-4">
-      {/* Main KPIs */}
+      {/* KPIs */}
       <div className="grid grid-cols-4 gap-4">
-        <KPICard
-          label="MRR" value={fmtUsd(stats.mrr_usd)}
-          icon={DollarSign} color="cyan"
-          sub={`${stats.active_subscriptions} suscripciones activas`}
-        />
-        <KPICard
-          label="Cobrado este mes" value={fmtBs(stats.collected_ved)}
-          icon={CreditCard} color="emerald"
-          sub={`${stats.invoices_count_ved} facturas confirmadas`}
-        />
-        <KPICard
-          label="Cuentas por cobrar" value={fmtUsd(stats.overdue_total_usd)}
-          icon={BarChart3} color="amber"
-          sub={`${stats.overdue_count} clientes con deuda`}
-        />
-        <KPICard
-          label="Tasa BCV" value={stats.exchange_rate ? `Bs ${stats.exchange_rate.toFixed(2)}` : "—"}
-          icon={Activity} color="cyan"
-          sub="por 1 USD"
-        />
+        <KPICard label="MRR" value={fmtUsd(stats.mrr_usd)} icon={DollarSign} color="cyan"
+          sub={`${stats.active_subscriptions} servicios activos`} />
+        <KPICard label="Cobrado este mes" value={fmtBs(stats.collected_ved)} icon={CreditCard} color="emerald"
+          sub={`${stats.invoices_count_ved} facturas (VED) + ${stats.invoices_count_usd} (USD)`} />
+        <KPICard label="Cuentas por cobrar" value={fmtUsd(stats.overdue_total_usd)} icon={BarChart3} color="amber"
+          sub={`${stats.overdue_count} clientes con deuda`} />
+        <KPICard label="Efectividad" value={`${effectiveness}%`} icon={Activity} color={effectiveness >= 80 ? "emerald" : effectiveness >= 60 ? "amber" : "red"}
+          sub={`Cobrado vs facturado (VED)`} />
       </div>
 
-      {/* Row 2: Ingresos del mes + MRR/Suscripciones */}
-      <div className="grid grid-cols-3 gap-4">
-        <Card className="col-span-2">
-          <h3 className="text-base font-bold text-white mb-4">Ingresos del Mes (Cobrado)</h3>
-          <div className="grid grid-cols-2 gap-4">
-            <div className="p-4 bg-wuipi-bg rounded-xl border border-wuipi-border">
-              <p className="text-xs text-gray-500 mb-1">Cobrado en VED</p>
-              <p className="text-2xl font-bold text-emerald-400">{fmtBs(stats.collected_ved)}</p>
-              <p className="text-xs text-gray-500 mt-1">{stats.invoices_count_ved} facturas confirmadas</p>
-            </div>
-            <div className="p-4 bg-wuipi-bg rounded-xl border border-wuipi-border">
-              <p className="text-xs text-gray-500 mb-1">Cobrado en USD</p>
-              <p className="text-2xl font-bold text-cyan-400">{fmtUsd(stats.collected_usd)}</p>
-              <p className="text-xs text-gray-500 mt-1">{stats.invoices_count_usd} facturas confirmadas</p>
-            </div>
-          </div>
-          <div className="mt-4 grid grid-cols-4 gap-3">
-            <MiniStat label="Servicios activos" value={stats.active_services.toString()} color="text-white" />
-            <MiniStat label="Servicios pausados" value={stats.paused_services.toString()} color="text-amber-400" />
-            <MiniStat label="Total servicios" value={stats.total_services.toString()} color="text-gray-300" />
-            <MiniStat label="Clientes con deuda" value={stats.overdue_count.toString()} color="text-red-400" />
-          </div>
-        </Card>
-
-        <Card>
-          <h3 className="text-base font-bold text-white mb-4">Suscripciones</h3>
-          <div className="p-4 bg-wuipi-bg rounded-xl border border-wuipi-border mb-3">
-            <p className="text-xs text-gray-500">MRR (Ingreso Recurrente Mensual)</p>
-            <p className="text-2xl font-bold text-white mt-1">
-              {fmtUsd(stats.mrr_usd)}
-            </p>
-            <p className="text-xs text-gray-600 mt-1">{stats.active_subscriptions} activas / {stats.paused_subscriptions} pausadas</p>
-          </div>
-          <div className="p-4 bg-wuipi-bg rounded-xl border border-wuipi-border">
-            <p className="text-xs text-gray-500">Cuentas por Cobrar (Borradores)</p>
-            <p className="text-2xl font-bold text-amber-400 mt-1">
-              {fmtUsd(stats.overdue_total_usd)}
-            </p>
-            <p className="text-xs text-gray-600 mt-1">{stats.overdue_count} clientes pendientes</p>
-          </div>
-        </Card>
-      </div>
-
-      {/* Row 3: Aging + Top Morosos */}
+      {/* Aging + Cobranzas Pipeline */}
       <div className="grid grid-cols-2 gap-4">
-        {/* Aging Chart */}
         <Card>
           <h3 className="text-base font-bold text-white mb-4">Antiguedad de Cartera (USD)</h3>
           <div className="space-y-3">
@@ -389,66 +403,63 @@ function FinancieroTab({ stats, loading }: { stats: FinanceStats | null; loading
                   <span className="text-gray-300 font-medium">{b.count} clientes — {fmtUsd(b.total)}</span>
                 </div>
                 <div className="h-2 bg-wuipi-bg rounded-full overflow-hidden">
-                  <div
-                    className={`h-full rounded-full ${b.color} transition-all`}
-                    style={{ width: `${Math.max((b.total / maxAgingTotal) * 100, b.count > 0 ? 3 : 0)}%` }}
-                  />
+                  <div className={`h-full rounded-full ${b.color}`}
+                    style={{ width: `${Math.max((b.total / maxAgingTotal) * 100, b.count > 0 ? 3 : 0)}%` }} />
                 </div>
               </div>
             ))}
           </div>
+          <div className="mt-3 pt-3 border-t border-wuipi-border flex items-center justify-between text-xs">
+            <span className="text-gray-500">Tasa BCV</span>
+            <span className="text-white font-medium">{stats.exchange_rate ? `Bs ${stats.exchange_rate.toFixed(2)} / USD` : "—"}</span>
+          </div>
         </Card>
 
-        {/* Top Morosos */}
         <Card>
-          <h3 className="text-base font-bold text-white mb-4">Top 10 Deudores</h3>
-          {stats.top_debtors.length === 0 ? (
-            <p className="text-gray-500 text-sm text-center py-8">Sin deudores</p>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-base font-bold text-white">Pipeline de Cobranzas</h3>
+            {cobranzas && (
+              <span className="text-xs text-gray-500">
+                Recovery: <span className={cobranzas.recovery_rate >= 50 ? "text-emerald-400" : "text-amber-400"}>
+                  {cobranzas.recovery_rate}%
+                </span>
+              </span>
+            )}
+          </div>
+          {cobranzaStages.length === 0 ? (
+            <p className="text-sm text-gray-500 text-center py-8">Sin casos activos</p>
           ) : (
-            <div className="overflow-auto max-h-[280px]">
-              <table className="w-full text-xs">
-                <thead className="sticky top-0 bg-wuipi-card">
-                  <tr className="text-gray-500 border-b border-wuipi-border">
-                    <th className="text-left py-1.5 px-2 font-medium">#</th>
-                    <th className="text-left py-1.5 px-2 font-medium">Cliente</th>
-                    <th className="text-right py-1.5 px-2 font-medium">Fact.</th>
-                    <th className="text-right py-1.5 px-2 font-medium">Deuda</th>
-                    <th className="text-right py-1.5 px-2 font-medium">Dias</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {stats.top_debtors.map((d, i) => {
-                    const days = d.oldest_due_date
-                      ? Math.floor((Date.now() - new Date(d.oldest_due_date).getTime()) / 86400000)
-                      : 0;
-                    const dayColor = days > 60 ? "text-red-400" : days > 30 ? "text-orange-400" : "text-gray-400";
-                    return (
-                      <tr key={d.partner_id} className="border-b border-wuipi-border/50">
-                        <td className="py-1.5 px-2 text-gray-600">{i + 1}</td>
-                        <td className="py-1.5 px-2 text-white truncate max-w-[180px]">{d.name}</td>
-                        <td className="py-1.5 px-2 text-right text-gray-400">{d.invoice_count}</td>
-                        <td className="py-1.5 px-2 text-right text-amber-400 font-medium">
-                          {fmtUsd(d.total_due)}
-                        </td>
-                        <td className={`py-1.5 px-2 text-right font-medium ${dayColor}`}>{days}d</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+            <div className="space-y-2.5">
+              {cobranzaStages.map((s) => (
+                <div key={s.stage}>
+                  <div className="flex items-center justify-between text-xs mb-1">
+                    <span className="text-gray-300">{s.label}</span>
+                    <span className="text-gray-400">{s.count} — {fmtUsd(s.amount)}</span>
+                  </div>
+                  <div className="h-2 bg-wuipi-bg rounded-full overflow-hidden">
+                    <div className={`h-full rounded-full ${s.color}`}
+                      style={{ width: `${Math.max((s.count / maxCobranzaCount) * 100, 5)}%` }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          {cobranzas && (cobranzas.recovered > 0 || cobranzas.retired > 0) && (
+            <div className="mt-3 pt-3 border-t border-wuipi-border flex items-center gap-4 text-xs">
+              <span className="text-emerald-400">{cobranzas.recovered} recuperados</span>
+              <span className="text-gray-500">{cobranzas.retired} retirados</span>
             </div>
           )}
         </Card>
       </div>
 
-      {/* Row 4: Monthly History + Payment Distribution */}
+      {/* Effectiveness Chart + Top Deudores */}
       <div className="grid grid-cols-2 gap-4">
-        {/* History Chart */}
         {stats.monthly_history && stats.monthly_history.length > 0 && (
           <Card>
             <h3 className="text-base font-bold text-white mb-1">Efectividad de Cobranza</h3>
-            <p className="text-xs text-gray-500 mb-4">Deuda acumulada vs Ingreso real del mes (USD equiv.)</p>
-            <div className="h-[220px]">
+            <p className="text-xs text-gray-500 mb-4">Deuda acumulada vs Cobrado del mes (USD equiv.)</p>
+            <div className="h-[200px]">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={stats.monthly_history} barCategoryGap="20%">
                   <XAxis dataKey="label" tick={{ fill: "#9ca3af", fontSize: 11 }} axisLine={false} tickLine={false} />
@@ -456,10 +467,7 @@ function FinancieroTab({ stats, loading }: { stats: FinanceStats | null; loading
                   <Tooltip
                     contentStyle={{ backgroundColor: "#111827", border: "1px solid #1e293b", borderRadius: 12, fontSize: 12 }}
                     labelStyle={{ color: "#fff", fontWeight: 600, marginBottom: 4 }}
-                    formatter={(value: number, name: string) => [
-                      fmtUsd(value),
-                      name === "Deuda" ? "Deuda acumulada" : "Cobrado del mes",
-                    ]}
+                    formatter={(value: number, name: string) => [fmtUsd(value), name === "Deuda" ? "Deuda acumulada" : "Cobrado del mes"]}
                   />
                   <Bar dataKey="drafted_usd" name="Deuda" fill="#f59e0b" fillOpacity={0.6} radius={[4, 4, 0, 0]} barSize={20} />
                   <Bar dataKey="collected_usd" name="Cobrado" fill="#10b981" radius={[4, 4, 0, 0]} barSize={20} />
@@ -468,7 +476,7 @@ function FinancieroTab({ stats, loading }: { stats: FinanceStats | null; loading
             </div>
             <div className="flex items-center gap-4 mt-2 pt-2 border-t border-wuipi-border">
               <span className="flex items-center gap-1.5 text-[10px] text-gray-500"><span className="w-2.5 h-2.5 rounded bg-amber-500/60 inline-block" /> Deuda acumulada</span>
-              <span className="flex items-center gap-1.5 text-[10px] text-gray-500"><span className="w-2.5 h-2.5 rounded bg-emerald-500 inline-block" /> Cobrado del mes</span>
+              <span className="flex items-center gap-1.5 text-[10px] text-gray-500"><span className="w-2.5 h-2.5 rounded bg-emerald-500 inline-block" /> Cobrado</span>
             </div>
             <div className="grid grid-cols-6 gap-1 mt-2">
               {stats.monthly_history.map((m) => (
@@ -483,274 +491,245 @@ function FinancieroTab({ stats, loading }: { stats: FinanceStats | null; loading
           </Card>
         )}
 
-        <BankDistribution />
+        <Card>
+          <h3 className="text-base font-bold text-white mb-4">Top 10 Deudores</h3>
+          {stats.top_debtors.length === 0 ? (
+            <p className="text-gray-500 text-sm text-center py-8">Sin deudores</p>
+          ) : (
+            <div className="overflow-auto max-h-[320px]">
+              <table className="w-full text-xs">
+                <thead className="sticky top-0 bg-wuipi-card">
+                  <tr className="text-gray-500 border-b border-wuipi-border">
+                    <th className="text-left py-1.5 px-2 font-medium">#</th>
+                    <th className="text-left py-1.5 px-2 font-medium">Cliente</th>
+                    <th className="text-right py-1.5 px-2 font-medium">Fact.</th>
+                    <th className="text-right py-1.5 px-2 font-medium">Deuda</th>
+                    <th className="text-right py-1.5 px-2 font-medium">Dias</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {stats.top_debtors.map((d, i) => {
+                    const days = d.oldest_due_date ? Math.floor((Date.now() - new Date(d.oldest_due_date).getTime()) / 86400000) : 0;
+                    const dayColor = days > 60 ? "text-red-400" : days > 30 ? "text-orange-400" : "text-gray-400";
+                    return (
+                      <tr key={d.partner_id} className="border-b border-wuipi-border/50">
+                        <td className="py-1.5 px-2 text-gray-600">{i + 1}</td>
+                        <td className="py-1.5 px-2 text-white truncate max-w-[180px]">{d.name}</td>
+                        <td className="py-1.5 px-2 text-right text-gray-400">{d.invoice_count}</td>
+                        <td className="py-1.5 px-2 text-right text-amber-400 font-medium">{fmtUsd(d.total_due)}</td>
+                        <td className={`py-1.5 px-2 text-right font-medium ${dayColor}`}>{days}d</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Card>
       </div>
 
-      {/* Row 5: Plan Distribution */}
-      {stats.plan_distribution && stats.plan_distribution.length > 0 && (
+      {/* Cobros por banco + MRR por categoria */}
+      <div className="grid grid-cols-2 gap-4">
+        <BankDistribution />
+
         <Card>
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-base font-bold text-white">📡 Distribución de Planes</h3>
-            <span className="text-xs text-gray-500">{stats.total_services} servicios totales — {stats.active_services} activos / {stats.paused_services} pausados</span>
-          </div>
-          <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
-            {stats.plan_distribution.map((cat) => {
-              const maxPlan = Math.max(...cat.plans.map((p) => p.total), 1);
+          <h3 className="text-base font-bold text-white mb-4">MRR por Categoria</h3>
+          <div className="space-y-3">
+            {mrrByCategory.map((cat) => {
+              const maxCat = Math.max(...mrrByCategory.map(c => c.active), 1);
               return (
-                <div key={cat.category} className="p-3 bg-wuipi-bg rounded-xl border border-wuipi-border">
-                  <div className="flex items-center justify-between mb-3">
-                    <span className="text-sm font-semibold text-white">{cat.category}</span>
-                    <span className="text-xs text-gray-400">
-                      <span className="text-white font-medium">{cat.active}</span>
+                <div key={cat.category}>
+                  <div className="flex items-center justify-between text-xs mb-1">
+                    <span className="text-gray-300 font-medium">{cat.category}</span>
+                    <span className="text-gray-400">
+                      <span className="text-emerald-400">{cat.active}</span>
                       {cat.paused > 0 && <span className="text-amber-400 ml-1">+{cat.paused} pau</span>}
                     </span>
                   </div>
-                  <div className="space-y-1.5">
-                    {cat.plans.slice(0, 8).map((plan) => (
-                      <div key={plan.code} className="flex items-center gap-2">
-                        <span className="text-[10px] text-gray-500 w-[130px] truncate">{plan.name}</span>
-                        <div className="flex-1 h-1.5 bg-wuipi-card rounded-full overflow-hidden">
-                          <div className="h-full rounded-full flex">
-                            <div className="bg-emerald-500 h-full" style={{ width: `${(plan.active / maxPlan) * 100}%` }} />
-                            {plan.paused > 0 && <div className="bg-amber-500 h-full" style={{ width: `${(plan.paused / maxPlan) * 100}%` }} />}
-                          </div>
-                        </div>
-                        <span className="text-[10px] text-gray-400 w-8 text-right">{plan.total}</span>
-                      </div>
-                    ))}
+                  <div className="h-2.5 bg-wuipi-bg rounded-full overflow-hidden flex">
+                    <div className="bg-emerald-500 h-full rounded-l-full" style={{ width: `${(cat.active / maxCat) * 100}%` }} />
+                    {cat.paused > 0 && <div className="bg-amber-500 h-full" style={{ width: `${(cat.paused / maxCat) * 100}%` }} />}
                   </div>
                 </div>
               );
             })}
           </div>
-          <div className="flex items-center gap-4 mt-3 pt-3 border-t border-wuipi-border">
-            <span className="flex items-center gap-1.5 text-[10px] text-gray-500"><span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" /> Activos</span>
-            <span className="flex items-center gap-1.5 text-[10px] text-gray-500"><span className="w-2 h-2 rounded-full bg-amber-500 inline-block" /> Pausados</span>
+          <div className="mt-3 pt-3 border-t border-wuipi-border flex items-center justify-between text-xs">
+            <span className="text-gray-500">{stats.total_services} servicios totales</span>
+            <span className="text-white font-medium">{stats.active_services} activos / {stats.paused_services} pausados</span>
           </div>
         </Card>
-      )}
+      </div>
     </div>
   );
 }
 
 // ============================================
-// TAB: SOPORTE (real data)
+// TAB: OPERACIONES (Soporte + Infra + Calidad)
 // ============================================
-function SoporteTab({ stats }: { stats: TicketStats | null }) {
-  if (!stats) return <LoadingPlaceholder />;
+function OperacionesTab({ tickets, infra, problems, hosts, infraLoading }: {
+  tickets: TicketStats | null;
+  infra: InfraOverview | null;
+  problems: InfraProblem[];
+  hosts: InfraHost[];
+  infraLoading: boolean;
+}) {
+  if (!tickets && infraLoading) return <LoadingPlaceholder />;
 
-  if (stats.total === 0) {
-    return (
-      <Card>
-        <div className="text-center py-16">
-          <Headphones size={48} className="mx-auto mb-4 text-gray-600" />
-          <h3 className="text-lg font-semibold text-gray-400 mb-2">Sin tickets registrados</h3>
-          <p className="text-sm text-gray-600 max-w-md mx-auto">
-            Los tickets se registran desde el módulo de Soporte
-          </p>
-        </div>
-      </Card>
-    );
-  }
-
-  // Compute SLA score: % of non-breached
-  const slaScore = stats.total > 0 ? Math.round(((stats.total - stats.sla_breached) / stats.total) * 100) : 100;
+  const uptimePct = infra ? (infra.uptimePercent || Math.round((infra.hostsUp / Math.max(infra.totalHosts, 1)) * 1000) / 10) : 0;
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-5 gap-4">
-        <KPICard label="Total" value={stats.total.toString()} icon={Headphones} color="cyan" />
-        <KPICard label="Abiertos" value={stats.open.toString()} icon={Clock} color="amber" />
-        <KPICard label="En progreso" value={stats.in_progress.toString()} icon={Activity} color="blue" />
-        <KPICard label="Resueltos hoy" value={stats.resolved_today.toString()} icon={Zap} color="emerald" />
-        <KPICard label="SLA violado" value={stats.sla_breached.toString()} icon={AlertTriangle} color="red" />
+      {/* KPIs */}
+      <div className="grid grid-cols-4 gap-4">
+        <KPICard label="Uptime de red" value={infra ? `${uptimePct.toFixed(1)}%` : "..."} icon={Wifi} color={uptimePct >= 95 ? "emerald" : uptimePct >= 85 ? "amber" : "red"}
+          sub={infra ? `${infra.hostsUp}/${infra.totalHosts} hosts` : undefined} />
+        <KPICard label="Tickets abiertos" value={tickets ? tickets.active.toString() : "..."} icon={Headphones} color={tickets && tickets.active > 20 ? "red" : "cyan"}
+          sub={tickets && tickets.critical_active > 0 ? `${tickets.critical_active} criticos` : "0 criticos"} />
+        <KPICard label="SLA cumplido" value={tickets ? `${tickets.total > 0 ? Math.round(((tickets.total - tickets.sla_breached) / tickets.total) * 100) : 100}%` : "..."}
+          icon={Shield} color={tickets && tickets.sla_breached > 0 ? "amber" : "emerald"}
+          sub={tickets ? `${tickets.sla_breached} violados` : undefined} />
+        <KPICard label="Tiempo resolucion" value={tickets ? `${tickets.avg_resolution_hours}h` : "..."}
+          icon={Clock} color="cyan"
+          sub={tickets ? `${tickets.resolved_this_month} resueltos este mes` : undefined} />
       </div>
 
-      <div className="grid grid-cols-3 gap-4">
-        <Card>
-          <h3 className="text-base font-bold text-white mb-4">📊 Rendimiento</h3>
-          <div className="flex items-center justify-center mb-4">
-            <ScoreRing score={slaScore} size={100} />
-          </div>
-          <p className="text-center text-sm text-gray-400">SLA cumplido</p>
-          <div className="mt-4 p-3 bg-wuipi-bg rounded-xl border border-wuipi-border text-center">
-            <p className="text-xs text-gray-500">Tickets críticos activos</p>
-            <p className={`text-xl font-bold ${stats.critical_active > 0 ? "text-red-400" : "text-emerald-400"}`}>
-              {stats.critical_active}
-            </p>
-          </div>
-        </Card>
-
-        <Card className="col-span-2">
-          <h3 className="text-base font-bold text-white mb-4">📋 Resumen de Estado</h3>
-          <div className="grid grid-cols-2 gap-3">
-            <MiniStat label="Nuevos / Asignados" value={stats.open.toString()} color="text-amber-400" />
-            <MiniStat label="En progreso" value={stats.in_progress.toString()} color="text-cyan-400" />
-            <MiniStat label="Resueltos hoy" value={stats.resolved_today.toString()} color="text-emerald-400" />
-            <MiniStat label="Tickets activos" value={stats.active.toString()} color="text-white" />
-          </div>
-          <div className="mt-4 p-3 bg-wuipi-bg rounded-xl border border-wuipi-border text-center">
-            <p className="text-xs text-gray-500">Datos detallados por categoría y técnico próximamente</p>
-          </div>
-        </Card>
-      </div>
-    </div>
-  );
-}
-
-// ============================================
-// TAB: INFRAESTRUCTURA (Mikrotik nodes + Zabbix summary)
-// ============================================
-function InfraestructuraTab({ overview, problems, hosts, loading }: {
-  overview: InfraOverview | null;
-  problems: InfraProblem[];
-  hosts: InfraHost[];
-  loading: boolean;
-}) {
-  const [nodes, setNodes] = useState<MikrotikNode[]>([]);
-  const [nodesLoading, setNodesLoading] = useState(true);
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await fetch("/api/infraestructura/nodes");
-        if (res.ok) {
-          const data = await res.json();
-          setNodes(data.nodes || []);
-        }
-      } catch { /* ignore */ }
-      finally { setNodesLoading(false); }
-    })();
-  }, []);
-
-  const totalActive = nodes.reduce((s, n) => s + n.services_active, 0);
-  const totalSuspended = nodes.reduce((s, n) => s + n.services_suspended, 0);
-
-  return (
-    <div className="space-y-6">
-      {/* Zabbix alerts (compact) */}
-      {overview?.zabbixConnected === false && <ZabbixBanner />}
+      {/* Red: Problemas + Hosts down */}
+      {infra?.zabbixConnected === false && <ZabbixBanner />}
       <AlertBanner hosts={hosts} />
 
-      {/* KPIs row: Zabbix + Mikrotik combined */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-        <Card className="!p-3 text-center">
-          <p className="text-[10px] text-gray-500 uppercase">Hosts Online</p>
-          <p className="text-lg font-bold text-emerald-400">{overview?.hostsUp ?? "—"}<span className="text-gray-600 text-sm">/{overview?.totalHosts ?? "—"}</span></p>
+      <div className="grid grid-cols-2 gap-4">
+        {/* Problemas por severidad */}
+        <Card>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-base font-bold text-white">Problemas de Red</h3>
+            <Link href="/infraestructura" className="text-xs text-[#F46800] hover:underline flex items-center gap-1">
+              Monitoreo <ExternalLink size={12} />
+            </Link>
+          </div>
+          {infra && infra.totalProblems > 0 ? (
+            <>
+              <div className="grid grid-cols-3 gap-2 mb-4">
+                {[
+                  { label: "High/Disaster", count: (infra.problemsBySeverity?.high || 0) + (infra.problemsBySeverity?.disaster || 0), color: "text-red-400", bg: "bg-red-500/10" },
+                  { label: "Average", count: infra.problemsBySeverity?.average || 0, color: "text-orange-400", bg: "bg-orange-500/10" },
+                  { label: "Warning", count: (infra.problemsBySeverity?.warning || 0) + (infra.problemsBySeverity?.information || 0), color: "text-amber-400", bg: "bg-amber-500/10" },
+                ].map((s) => (
+                  <div key={s.label} className={`p-3 rounded-xl ${s.bg} text-center`}>
+                    <p className={`text-xl font-bold ${s.color}`}>{s.count}</p>
+                    <p className="text-[10px] text-gray-500">{s.label}</p>
+                  </div>
+                ))}
+              </div>
+              <ProblemasActivos problems={problems.slice(0, 5)} selectedSite={null} />
+              {problems.length > 5 && (
+                <Link href="/infraestructura" className="text-xs text-gray-500 hover:text-[#F46800] mt-2 block text-center">
+                  +{problems.length - 5} problemas mas
+                </Link>
+              )}
+            </>
+          ) : (
+            <div className="text-center py-8">
+              <Wifi size={32} className="mx-auto mb-2 text-emerald-500/50" />
+              <p className="text-sm text-emerald-400">Red estable — sin problemas</p>
+            </div>
+          )}
         </Card>
-        <Card className="!p-3 text-center">
-          <p className="text-[10px] text-gray-500 uppercase">Problemas</p>
-          <p className="text-lg font-bold text-red-400">{overview?.totalProblems ?? 0}</p>
-        </Card>
-        <Card className="!p-3 text-center">
-          <p className="text-[10px] text-gray-500 uppercase">Nodos MK</p>
-          <p className="text-lg font-bold text-purple-400">{nodesLoading ? "..." : nodes.length}</p>
-        </Card>
-        <Card className="!p-3 text-center">
-          <p className="text-[10px] text-gray-500 uppercase">Servicios Activos</p>
-          <p className="text-lg font-bold text-emerald-400">{nodesLoading ? "..." : totalActive.toLocaleString()}</p>
-        </Card>
-        <Card className="!p-3 text-center">
-          <p className="text-[10px] text-gray-500 uppercase">Suspendidos</p>
-          <p className="text-lg font-bold text-red-400">{nodesLoading ? "..." : totalSuspended.toLocaleString()}</p>
+
+        {/* Tickets por categoria */}
+        <Card>
+          <h3 className="text-base font-bold text-white mb-4">Tickets por Categoria</h3>
+          {tickets && tickets.by_category.length > 0 ? (
+            <div className="space-y-2.5">
+              {tickets.by_category.slice(0, 8).map((cat) => {
+                const maxCat = Math.max(...tickets.by_category.map(c => c.count), 1);
+                return (
+                  <div key={cat.id}>
+                    <div className="flex items-center justify-between text-xs mb-1">
+                      <span className="text-gray-300 flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: cat.color }} />
+                        {cat.name}
+                      </span>
+                      <span className="text-white font-medium">{cat.count}</span>
+                    </div>
+                    <div className="h-1.5 bg-wuipi-bg rounded-full overflow-hidden">
+                      <div className="h-full rounded-full transition-all" style={{ width: `${(cat.count / maxCat) * 100}%`, backgroundColor: cat.color }} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="text-sm text-gray-500 text-center py-8">Sin tickets activos</p>
+          )}
         </Card>
       </div>
 
-      {/* Nodos grid */}
-      {nodesLoading ? (
-        <div className="flex justify-center py-8">
-          <RefreshCw size={20} className="animate-spin text-gray-500" />
-        </div>
-      ) : (
-        <>
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm text-gray-500 font-medium">Nodos de Red ({nodes.length})</h3>
-            <Link
-              href="/infraestructura"
-              className="text-xs text-[#F46800] hover:underline flex items-center gap-1"
-            >
-              Ver todo <ExternalLink size={12} />
-            </Link>
+      {/* Carga por tecnico + Stats resumen */}
+      <div className="grid grid-cols-2 gap-4">
+        <Card>
+          <h3 className="text-base font-bold text-white mb-4">Carga por Tecnico</h3>
+          {tickets && tickets.by_assigned.length > 0 ? (
+            <div className="space-y-2">
+              {tickets.by_assigned.slice(0, 8).map((tech) => {
+                const maxTech = Math.max(...tickets.by_assigned.map(t => t.count), 1);
+                const loadColor = tech.count > 10 ? "bg-red-500" : tech.count > 5 ? "bg-amber-500" : "bg-emerald-500";
+                return (
+                  <div key={tech.id}>
+                    <div className="flex items-center justify-between text-xs mb-1">
+                      <span className="text-gray-300">{tech.name}</span>
+                      <span className="text-white font-medium">{tech.count} tickets</span>
+                    </div>
+                    <div className="h-1.5 bg-wuipi-bg rounded-full overflow-hidden">
+                      <div className={`h-full rounded-full ${loadColor}`} style={{ width: `${(tech.count / maxTech) * 100}%` }} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="text-sm text-gray-500 text-center py-8">Sin asignaciones</p>
+          )}
+        </Card>
+
+        <Card>
+          <h3 className="text-base font-bold text-white mb-4">Resumen Operativo</h3>
+          <div className="grid grid-cols-2 gap-3">
+            <MiniStat label="Nuevos / Asignados" value={tickets?.open.toString() || "0"} color="text-amber-400" />
+            <MiniStat label="En progreso" value={tickets?.in_progress.toString() || "0"} color="text-cyan-400" />
+            <MiniStat label="Resueltos hoy" value={tickets?.resolved_today.toString() || "0"} color="text-emerald-400" />
+            <MiniStat label="Hosts offline" value={infra ? infra.hostsDown.toString() : "0"} color={infra && infra.hostsDown > 0 ? "text-red-400" : "text-emerald-400"} />
           </div>
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
-            {nodes.slice(0, 15).map((node) => {
-              const pctActive = node.services_total > 0 ? (node.services_active / node.services_total) * 100 : 0;
-              return (
-                <Link key={node.id} href={`/infraestructura`}>
-                  <Card className="!p-3 cursor-pointer hover:border-[#F46800]/30 transition-colors">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-white font-bold">{node.name}</span>
-                      <ChevronRight size={12} className="text-gray-600" />
-                    </div>
-                    <div className="text-[10px] text-gray-500 mb-1.5">{node.router_name}</div>
-                    <div className="w-full h-1 bg-wuipi-border rounded-full overflow-hidden mb-1.5">
-                      <div className="h-full bg-emerald-400 rounded-full" style={{ width: `${pctActive}%` }} />
-                    </div>
-                    <div className="flex justify-between text-[10px]">
-                      <span className="text-emerald-400">{node.services_active}</span>
-                      <span className="text-red-400">{node.services_suspended}</span>
-                    </div>
-                  </Card>
-                </Link>
-              );
-            })}
-          </div>
-          {nodes.length > 15 && (
-            <div className="text-center">
-              <Link href="/infraestructura" className="text-xs text-gray-500 hover:text-[#F46800]">
-                +{nodes.length - 15} nodos más →
+          {infra && (
+            <div className="mt-3 pt-3 border-t border-wuipi-border">
+              <Link href="/infraestructura" className="text-xs text-[#F46800] hover:underline flex items-center gap-1">
+                Ver infraestructura completa <ExternalLink size={12} />
               </Link>
             </div>
           )}
-        </>
-      )}
-
-      {/* Zabbix: Problemas activos (compact) */}
-      {problems.length > 0 && (
-        <>
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm text-gray-500 font-medium">Problemas Activos ({problems.length})</h3>
-            <Link href="/infraestructura" className="text-xs text-[#F46800] hover:underline flex items-center gap-1">
-              Monitoreo completo <ExternalLink size={12} />
-            </Link>
-          </div>
-          <ProblemasActivos problems={problems} selectedSite={null} />
-        </>
-      )}
+        </Card>
+      </div>
     </div>
   );
 }
 
 // ============================================
-// TAB: VENTAS (real data)
+// TAB: CRECIMIENTO (Ventas + Retención)
 // ============================================
-function VentasTab({ stats }: { stats: VentasStats | null }) {
-  if (!stats) return <LoadingPlaceholder />;
+function CrecimientoTab({ ventas, finance, cobranzas }: {
+  ventas: VentasStats | null;
+  finance: FinanceStats | null;
+  cobranzas: CobranzasStats | null;
+}) {
+  if (!ventas) return <LoadingPlaceholder />;
 
-  if (stats.total === 0) {
-    return (
-      <Card>
-        <div className="text-center py-16">
-          <TrendingUp size={48} className="mx-auto mb-4 text-gray-600" />
-          <h3 className="text-lg font-semibold text-gray-400 mb-2">Sin leads registrados</h3>
-          <p className="text-sm text-gray-600 max-w-md mx-auto">
-            Los leads se gestionan desde el módulo de Ventas
-          </p>
-        </div>
-      </Card>
-    );
-  }
-
-  const fmt = (n: number) => n.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-
-  // Sorted pipeline stages for display
   const STAGE_ORDER = [
     "incoming", "contacto_inicial", "info_enviada", "en_instalacion",
     "prueba_actualizacion", "retirado_reactivacion", "ganado", "no_concretado", "no_factible", "no_clasificado",
   ];
   const STAGE_NAMES: Record<string, string> = {
     incoming: "Entrantes", contacto_inicial: "Contacto inicial", info_enviada: "Info enviada",
-    en_instalacion: "Instalación", prueba_actualizacion: "Prueba/Upgrade", retirado_reactivacion: "Reactivación",
+    en_instalacion: "Instalacion", prueba_actualizacion: "Prueba/Upgrade", retirado_reactivacion: "Reactivacion",
     ganado: "Ganados", no_concretado: "No concretados", no_factible: "No factibles", no_clasificado: "Sin clasificar",
   };
   const STAGE_COLORS: Record<string, string> = {
@@ -760,80 +739,117 @@ function VentasTab({ stats }: { stats: VentasStats | null }) {
   };
 
   const pipelineStages = STAGE_ORDER
-    .filter(s => stats.by_stage[s])
+    .filter(s => ventas.by_stage[s])
     .map(s => ({
-      stage: s,
-      label: STAGE_NAMES[s] || s,
-      count: stats.by_stage[s].count,
-      value: stats.by_stage[s].value,
+      stage: s, label: STAGE_NAMES[s] || s,
+      count: ventas.by_stage[s].count, value: ventas.by_stage[s].value,
       color: STAGE_COLORS[s] || "bg-gray-500",
     }));
-
   const maxCount = Math.max(...pipelineStages.map(s => s.count), 1);
+
+  // Retention metrics
+  const pausedServices = finance?.paused_services || 0;
+  const activeServices = finance?.active_services || 0;
+  const pausedPct = activeServices > 0 ? Math.round((pausedServices / (activeServices + pausedServices)) * 100) : 0;
 
   return (
     <div className="space-y-4">
+      {/* KPIs */}
       <div className="grid grid-cols-4 gap-4">
-        <KPICard label="Leads activos" value={stats.active.toString()} icon={UserPlus} color="cyan" />
-        <KPICard label="Pipeline value" value={`$${fmt(stats.pipeline_value)}`} icon={DollarSign} color="emerald" />
-        <KPICard label="Conversión" value={`${stats.conversion_rate}%`} icon={TrendingUp} color="violet" />
-        <KPICard label="Ganados este mes" value={stats.won_this_month.toString()} icon={Zap} color="emerald" sub={`${stats.created_this_month} creados`} />
+        <KPICard label="Leads activos" value={ventas.active.toString()} icon={UserPlus} color="cyan"
+          sub={`${ventas.created_this_week} esta semana`} />
+        <KPICard label="Pipeline" value={`$${fmt(ventas.pipeline_value)}`} icon={DollarSign} color="emerald"
+          sub={`${ventas.total} leads totales`} />
+        <KPICard label="Conversion" value={`${ventas.conversion_rate}%`} icon={TrendingUp} color="violet"
+          sub={`${ventas.won} ganados / ${ventas.total} total`} />
+        <KPICard label="Ganados este mes" value={ventas.won_this_month.toString()} icon={Zap} color="emerald"
+          sub={`${ventas.created_this_month} creados`} />
       </div>
 
+      {/* Pipeline + Resumen */}
       <div className="grid grid-cols-2 gap-4">
         <Card>
-          <h3 className="text-base font-bold text-white mb-4">🔄 Pipeline por Etapa</h3>
-          <div className="space-y-3">
-            {pipelineStages.map((stage) => {
-              const widthPct = Math.max((stage.count / maxCount) * 100, 15);
-              return (
-                <div key={stage.stage}>
-                  <div className="flex justify-between text-sm mb-1">
-                    <span className="text-gray-300">{stage.label}</span>
-                    <span className="text-gray-500">{stage.count} · ${stage.value.toLocaleString()}</span>
-                  </div>
-                  <div className="h-8 bg-wuipi-bg rounded-lg overflow-hidden flex items-center">
-                    <div
-                      className={`h-full ${stage.color}/30 rounded-lg flex items-center px-3`}
-                      style={{ width: `${widthPct}%` }}
-                    >
-                      <span className="text-xs font-bold text-white">{stage.count}</span>
+          <h3 className="text-base font-bold text-white mb-4">Pipeline por Etapa</h3>
+          {ventas.total === 0 ? (
+            <div className="text-center py-8">
+              <TrendingUp size={32} className="mx-auto mb-2 text-gray-600" />
+              <p className="text-sm text-gray-500">Sin leads registrados</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {pipelineStages.map((stage) => {
+                const widthPct = Math.max((stage.count / maxCount) * 100, 15);
+                return (
+                  <div key={stage.stage}>
+                    <div className="flex justify-between text-sm mb-1">
+                      <span className="text-gray-300">{stage.label}</span>
+                      <span className="text-gray-500">{stage.count} · ${stage.value.toLocaleString()}</span>
+                    </div>
+                    <div className="h-7 bg-wuipi-bg rounded-lg overflow-hidden flex items-center">
+                      <div className={`h-full ${stage.color}/30 rounded-lg flex items-center px-3`}
+                        style={{ width: `${widthPct}%` }}>
+                        <span className="text-xs font-bold text-white">{stage.count}</span>
+                      </div>
                     </div>
                   </div>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          )}
         </Card>
 
-        <Card>
-          <h3 className="text-base font-bold text-white mb-4">📊 Resumen</h3>
-          <div className="grid grid-cols-2 gap-3">
-            <MiniStat label="Total leads" value={stats.total.toString()} color="text-white" />
-            <MiniStat label="Activos" value={stats.active.toString()} color="text-cyan-400" />
-            <MiniStat label="Ganados" value={stats.won.toString()} color="text-emerald-400" />
-            <MiniStat label="Perdidos" value={stats.lost.toString()} color="text-red-400" />
-            <MiniStat label="Creados esta semana" value={stats.created_this_week.toString()} color="text-violet-400" />
-            <MiniStat label="Ganados este mes" value={stats.won_this_month.toString()} color="text-emerald-400" />
-          </div>
-        </Card>
+        <div className="space-y-4">
+          <Card>
+            <h3 className="text-base font-bold text-white mb-4">Resumen Comercial</h3>
+            <div className="grid grid-cols-2 gap-3">
+              <MiniStat label="Total leads" value={ventas.total.toString()} color="text-white" />
+              <MiniStat label="Activos" value={ventas.active.toString()} color="text-cyan-400" />
+              <MiniStat label="Ganados" value={ventas.won.toString()} color="text-emerald-400" />
+              <MiniStat label="Perdidos" value={ventas.lost.toString()} color="text-red-400" />
+            </div>
+          </Card>
+
+          {/* Retencion */}
+          <Card>
+            <h3 className="text-base font-bold text-white mb-3">Retencion</h3>
+            <div className="space-y-3">
+              <div>
+                <div className="flex items-center justify-between text-xs mb-1">
+                  <span className="text-gray-400">Servicios pausados</span>
+                  <span className={pausedPct > 20 ? "text-red-400" : pausedPct > 10 ? "text-amber-400" : "text-gray-300"}>
+                    {pausedServices} ({pausedPct}%)
+                  </span>
+                </div>
+                <div className="h-2 bg-wuipi-bg rounded-full overflow-hidden">
+                  <div className={`h-full rounded-full ${pausedPct > 20 ? "bg-red-500" : pausedPct > 10 ? "bg-amber-500" : "bg-emerald-500"}`}
+                    style={{ width: `${Math.min(pausedPct, 100)}%` }} />
+                </div>
+              </div>
+              {cobranzas && (
+                <div className="flex items-center justify-between text-xs pt-2 border-t border-wuipi-border">
+                  <span className="text-gray-400">Recovery rate (cobranzas)</span>
+                  <span className={cobranzas.recovery_rate >= 50 ? "text-emerald-400" : "text-amber-400"}>
+                    {cobranzas.recovery_rate}%
+                  </span>
+                </div>
+              )}
+              {cobranzas && cobranzas.active > 0 && (
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-gray-400">Casos activos</span>
+                  <span className="text-amber-400">{cobranzas.active} ({fmtUsd(cobranzas.active_amount)})</span>
+                </div>
+              )}
+            </div>
+          </Card>
+        </div>
       </div>
     </div>
   );
 }
 
 // ============================================
-// SHARED COMPONENTS
+// SHARED
 // ============================================
-function MiniStat({ label, value, color }: { label: string; value: string; color: string }) {
-  return (
-    <div className="p-3 bg-wuipi-bg rounded-xl border border-wuipi-border">
-      <p className="text-xs text-gray-500">{label}</p>
-      <p className={`text-lg font-bold ${color}`}>{value}</p>
-    </div>
-  );
-}
-
 function LoadingPlaceholder() {
   return (
     <div className="flex items-center justify-center py-20">
@@ -843,84 +859,65 @@ function LoadingPlaceholder() {
   );
 }
 
-function EmptyState({ msg }: { msg: string }) {
-  return (
-    <div className="flex flex-col items-center justify-center py-20 text-gray-500">
-      <AlertTriangle size={32} className="mb-3" />
-      <p>{msg}</p>
-    </div>
-  );
-}
-
 // ============================================
 // MAIN PAGE
 // ============================================
 export default function ComandoPage() {
-  const [tab, setTab] = useState<Tab>("financiero");
+  const [tab, setTab] = useState<Tab>("finanzas");
   const [financeStats, setFinanceStats] = useState<FinanceStats | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Infra state
   const [infraOverview, setInfraOverview] = useState<InfraOverview | null>(null);
   const [infraProblems, setInfraProblems] = useState<InfraProblem[]>([]);
   const [infraHosts, setInfraHosts] = useState<InfraHost[]>([]);
   const [infraLoading, setInfraLoading] = useState(true);
 
-  // Ticket + Ventas stats
   const [ticketStats, setTicketStats] = useState<TicketStats | null>(null);
   const [ventasStats, setVentasStats] = useState<VentasStats | null>(null);
+  const [cobranzasStats, setCobranzasStats] = useState<CobranzasStats | null>(null);
 
   const loadFinanceStats = useCallback(async () => {
     try {
-      // Try Odoo first, fall back to Supabase
       let res = await fetch("/api/odoo/financial-summary");
-      if (!res.ok) {
-        res = await fetch("/api/facturacion/stats");
-      }
-      if (res.ok) {
-        const data = await res.json();
-        setFinanceStats(data);
-      }
-    } catch (err) {
-      console.error("Error loading finance stats:", err);
-    } finally {
-      setLoading(false);
-    }
+      if (!res.ok) res = await fetch("/api/facturacion/stats");
+      if (res.ok) setFinanceStats(await res.json());
+    } catch (err) { console.error("Error loading finance:", err); }
+    finally { setLoading(false); }
   }, []);
 
   const loadInfraData = useCallback(async () => {
     try {
       const [overview, problems, hosts] = await Promise.all([
-        fetch("/api/infraestructura").then((r) => r.json()),
-        fetch("/api/infraestructura/problems").then((r) => r.json()),
-        fetch("/api/infraestructura/hosts").then((r) => r.json()),
+        fetch("/api/infraestructura").then(r => r.json()),
+        fetch("/api/infraestructura/problems").then(r => r.json()),
+        fetch("/api/infraestructura/hosts").then(r => r.json()),
       ]);
       setInfraOverview(overview);
       setInfraProblems(problems);
       setInfraHosts(hosts);
-    } catch (err) {
-      console.error("Error loading infra data:", err);
-    } finally {
-      setInfraLoading(false);
-    }
+    } catch (err) { console.error("Error loading infra:", err); }
+    finally { setInfraLoading(false); }
   }, []);
 
   const loadTicketStats = useCallback(async () => {
     try {
       const res = await fetch("/api/tickets/stats");
       if (res.ok) setTicketStats(await res.json());
-    } catch (err) {
-      console.error("Error loading ticket stats:", err);
-    }
+    } catch (err) { console.error("Error loading tickets:", err); }
   }, []);
 
   const loadVentasStats = useCallback(async () => {
     try {
       const res = await fetch("/api/crm-ventas/stats");
       if (res.ok) setVentasStats(await res.json());
-    } catch (err) {
-      console.error("Error loading ventas stats:", err);
-    }
+    } catch (err) { console.error("Error loading ventas:", err); }
+  }, []);
+
+  const loadCobranzasStats = useCallback(async () => {
+    try {
+      const res = await fetch("/api/cobranzas/stats");
+      if (res.ok) setCobranzasStats(await res.json());
+    } catch (err) { console.error("Error loading cobranzas:", err); }
   }, []);
 
   useEffect(() => {
@@ -928,16 +925,17 @@ export default function ComandoPage() {
     loadInfraData();
     loadTicketStats();
     loadVentasStats();
-    // Auto-refresh infra data every 60s
+    loadCobranzasStats();
     const interval = setInterval(loadInfraData, 60000);
     return () => clearInterval(interval);
-  }, [loadFinanceStats, loadInfraData, loadTicketStats, loadVentasStats]);
+  }, [loadFinanceStats, loadInfraData, loadTicketStats, loadVentasStats, loadCobranzasStats]);
 
   const refreshAll = () => {
     loadFinanceStats();
     loadInfraData();
     loadTicketStats();
     loadVentasStats();
+    loadCobranzasStats();
   };
 
   return (
@@ -946,32 +944,28 @@ export default function ComandoPage() {
         title="Centro de Comando"
         icon={<Target size={22} />}
         actions={
-          <button
-            onClick={refreshAll}
-            className="flex items-center gap-2 px-3 py-2 rounded-lg border border-wuipi-border text-gray-400 hover:text-white text-sm transition-colors"
-          >
+          <button onClick={refreshAll}
+            className="flex items-center gap-2 px-3 py-2 rounded-lg border border-wuipi-border text-gray-400 hover:text-white text-sm transition-colors">
             <RefreshCw size={14} /> Actualizar
           </button>
         }
       />
 
       <div className="flex-1 overflow-auto p-6 space-y-4">
-        {/* Overview Cards — always visible */}
-        <OverviewCards financeStats={financeStats} infraOverview={infraOverview} ticketStats={ticketStats} ventasStats={ventasStats} />
+        {/* Executive Overview — always visible */}
+        <ExecutiveOverview finance={financeStats} infra={infraOverview} tickets={ticketStats} cobranzas={cobranzasStats} />
 
         {/* Tab Selector */}
         <div className="flex gap-2 border-b border-wuipi-border pb-3">
-          <TabButton tab="financiero" current={tab} icon={DollarSign} label="Financiero" color="emerald" onClick={setTab} />
-          <TabButton tab="soporte" current={tab} icon={Headphones} label="Soporte" color="cyan" onClick={setTab} />
-          <TabButton tab="infraestructura" current={tab} icon={Radio} label="Infraestructura" color="amber" onClick={setTab} />
-          <TabButton tab="ventas" current={tab} icon={TrendingUp} label="Ventas" color="violet" onClick={setTab} />
+          <TabButton tab="finanzas" current={tab} icon={DollarSign} label="Finanzas" color="emerald" onClick={setTab} />
+          <TabButton tab="operaciones" current={tab} icon={Server} label="Operaciones" color="amber" onClick={setTab} />
+          <TabButton tab="crecimiento" current={tab} icon={TrendingUp} label="Crecimiento" color="violet" onClick={setTab} />
         </div>
 
         {/* Tab Content */}
-        {tab === "financiero" && <FinancieroTab stats={financeStats} loading={loading} />}
-        {tab === "soporte" && <SoporteTab stats={ticketStats} />}
-        {tab === "infraestructura" && <InfraestructuraTab overview={infraOverview} problems={infraProblems} hosts={infraHosts} loading={infraLoading} />}
-        {tab === "ventas" && <VentasTab stats={ventasStats} />}
+        {tab === "finanzas" && <FinanzasTab stats={financeStats} cobranzas={cobranzasStats} />}
+        {tab === "operaciones" && <OperacionesTab tickets={ticketStats} infra={infraOverview} problems={infraProblems} hosts={infraHosts} infraLoading={infraLoading} />}
+        {tab === "crecimiento" && <CrecimientoTab ventas={ventasStats} finance={financeStats} cobranzas={cobranzasStats} />}
       </div>
     </>
   );

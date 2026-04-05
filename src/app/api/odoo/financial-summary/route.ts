@@ -31,13 +31,19 @@ export async function GET() {
     const year = now.getFullYear();
     const month = now.getMonth() + 1;
 
+    // Previous month for delta comparison
+    const prevDate = new Date(year, month - 2, 1);
+    const prevYear = prevDate.getFullYear();
+    const prevMonth = prevDate.getMonth() + 1;
+
     // Fetch BCV rate first (needed for VED→USD conversions)
     const bcvRate = await fetchBCVRate().catch(() => null);
     const rate = bcvRate?.usd_to_bs || undefined;
 
     // Parallel fetch all data sources (with BCV rate for credit conversion)
-    const [invoiceSummary, subscriptions, pendingData, planDist, monthlyHistory, paymentsByJournal] = await Promise.all([
+    const [invoiceSummary, prevInvoiceSummary, subscriptions, pendingData, planDist, monthlyHistory, paymentsByJournal] = await Promise.all([
       getMonthlyInvoiceSummary(year, month),
+      getMonthlyInvoiceSummary(prevYear, prevMonth),
       getSubscriptionSummary(),
       getPendingByCustomer({ bcvRate: rate }),
       getPlanDistribution(),
@@ -141,6 +147,11 @@ export async function GET() {
 
       // Payment distribution by bank journal (current month)
       payments_by_journal: paymentsByJournal,
+
+      // Previous month for delta comparison
+      prev_collected_ved: prevInvoiceSummary.ved.collected,
+      prev_collected_usd: prevInvoiceSummary.usd.collected,
+      prev_invoiced_ved: prevInvoiceSummary.ved.invoiced,
 
       // Exchange rate
       exchange_rate: bcvRate?.usd_to_bs ?? null,

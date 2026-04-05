@@ -170,7 +170,7 @@ export async function addTicketComment(comment: {
 export async function getTicketStats() {
   const { data: tickets, error } = await supabase()
     .from("tickets")
-    .select("id, status, priority, sla_breached, created_at, resolved_at, assigned_to")
+    .select("id, status, priority, sla_breached, created_at, resolved_at, assigned_to, category_id")
     .eq("is_deleted", false);
 
   if (error) throw new Error(error.message);
@@ -178,21 +178,86 @@ export async function getTicketStats() {
 
   const now = new Date();
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
 
+  const active = all.filter(t => !["resolved", "closed"].includes(t.status));
   const open = all.filter(t => t.status === "new" || t.status === "assigned");
   const inProgress = all.filter(t => t.status === "in_progress" || t.status === "waiting_client");
   const resolvedToday = all.filter(t => t.status === "resolved" && t.resolved_at && new Date(t.resolved_at) >= todayStart);
   const breached = all.filter(t => t.sla_breached && !["resolved", "closed"].includes(t.status));
   const critical = all.filter(t => t.priority === "critical" && !["resolved", "closed"].includes(t.status));
 
+  // Resolved this month with resolution time
+  const resolvedThisMonth = all.filter(t =>
+    t.status === "resolved" && t.resolved_at && new Date(t.resolved_at) >= monthStart
+  );
+  let avgResolutionHours = 0;
+  if (resolvedThisMonth.length > 0) {
+    const totalHours = resolvedThisMonth.reduce((sum, t) => {
+      const created = new Date(t.created_at).getTime();
+      const resolved = new Date(t.resolved_at!).getTime();
+      return sum + (resolved - created) / (1000 * 60 * 60);
+    }, 0);
+    avgResolutionHours = Math.round((totalHours / resolvedThisMonth.length) * 10) / 10;
+  }
+
+  // By category (active tickets only)
+  const byCategory: Record<string, number> = {};
+  for (const t of active) {
+    const cat = t.category_id || "sin_categoria";
+    byCategory[cat] = (byCategory[cat] || 0) + 1;
+  }
+
+  // By assigned technician (active tickets only)
+  const byAssigned: Record<string, number> = {};
+  for (const t of active) {
+    const tech = t.assigned_to || "sin_asignar";
+    byAssigned[tech] = (byAssigned[tech] || 0) + 1;
+  }
+
   return {
     total: all.length,
     open: open.length,
     in_progress: inProgress.length,
     resolved_today: resolvedToday.length,
+    resolved_this_month: resolvedThisMonth.length,
     sla_breached: breached.length,
     critical_active: critical.length,
-    active: all.filter(t => !["resolved", "closed"].includes(t.status)).length,
+    active: active.length,
+    avg_resolution_hours: avgResolutionHours,
+    by_category: byCategory,
+    by_assigned: byAssigned,
+  };
+}
+
+export async function getTicketStatsEnriched() {
+  const [stats, categories, technicians] = await Promise.all([
+    getTicketStats(),
+    getTicketCategories(),
+    getTechnicians(),
+  ]);
+
+  // Map category IDs to names
+  const catMap = new Map(categories.map((c: any) => [c.id, { name: c.name, color: c.color }]));
+  const enrichedByCategory = Object.entries(stats.by_category).map(([id, count]) => ({
+    id,
+    name: catMap.get(id)?.name || "Sin categoría",
+    color: catMap.get(id)?.color || "#6b7280",
+    count,
+  })).sort((a, b) => b.count - a.count);
+
+  // Map technician IDs to names
+  const techMap = new Map(technicians.map((t: any) => [t.id, t.full_name]));
+  const enrichedByAssigned = Object.entries(stats.by_assigned).map(([id, count]) => ({
+    id,
+    name: techMap.get(id) || "Sin asignar",
+    count,
+  })).sort((a, b) => b.count - a.count);
+
+  return {
+    ...stats,
+    by_category: enrichedByCategory,
+    by_assigned: enrichedByAssigned,
   };
 }
 
