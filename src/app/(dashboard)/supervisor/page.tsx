@@ -25,6 +25,7 @@ interface BriefingInsight {
   title: string;
   description: string;
   category: "infraestructura" | "soporte" | "ventas" | "clientes" | "finanzas";
+  para?: "operaciones" | "finanzas" | "comercial" | "todos";
 }
 
 interface BriefingData {
@@ -39,8 +40,14 @@ interface BriefingData {
   };
   summary: string;
   insights: BriefingInsight[];
+  recomendaciones_por_area?: {
+    operaciones?: string;
+    finanzas?: string;
+    comercial?: string;
+  };
   generated_at: string;
   engine: string;
+  engines_used?: { analysis: string | null; strategy: string | null };
   sources: Record<string, boolean>;
 }
 
@@ -64,6 +71,13 @@ const CATEGORY_ICONS: Record<string, typeof Server> = {
 
 // Engine badge styles
 function EngineBadge({ engine }: { engine: string }) {
+  if (engine === "dual") {
+    return (
+      <span className="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase bg-gradient-to-r from-emerald-500/10 to-violet-500/10 text-cyan-400">
+        GEMINI + CLAUDE
+      </span>
+    );
+  }
   const isGemini = engine === "gemini";
   return (
     <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${
@@ -73,6 +87,13 @@ function EngineBadge({ engine }: { engine: string }) {
     </span>
   );
 }
+
+const PARA_LABELS: Record<string, { label: string; color: string }> = {
+  operaciones: { label: "Gte. Operaciones", color: "bg-amber-500/10 text-amber-400" },
+  finanzas: { label: "Gte. Finanzas", color: "bg-emerald-500/10 text-emerald-400" },
+  comercial: { label: "Gte. Comercial", color: "bg-violet-500/10 text-violet-400" },
+  todos: { label: "Todos", color: "bg-cyan-500/10 text-cyan-400" },
+};
 
 const SUGGESTED_QUESTIONS = [
   "Dame un resumen ejecutivo",
@@ -107,11 +128,15 @@ function InsightCard({ insight, expanded, onToggle, engine }: {
         <span className={`w-2.5 h-2.5 rounded-full mt-1.5 shrink-0 ${sc.dot} ${sc.glow ? "shadow-[0_0_8px] shadow-red-400" : ""}`} />
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1 flex-wrap">
-            <EngineBadge engine={engine || "gemini"} />
             <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${sc.bg} ${sc.accent}`}>{sc.label}</span>
             <span className="flex items-center gap-1 text-[10px] text-gray-600">
               <CatIcon size={10} /> {insight.category}
             </span>
+            {insight.para && PARA_LABELS[insight.para] && (
+              <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${PARA_LABELS[insight.para].color}`}>
+                {PARA_LABELS[insight.para].label}
+              </span>
+            )}
           </div>
           <p className="text-sm font-semibold text-white leading-tight">{insight.title}</p>
           {expanded && (
@@ -315,7 +340,7 @@ export default function SupervisorPage() {
           <Card className="space-y-4">
             <div className="flex items-center gap-3">
               <Sparkles size={20} className="animate-pulse text-violet-400" />
-              <span className="text-sm text-gray-400">Generando briefing con Claude — analizando datos de infraestructura, soporte, ventas y clientes...</span>
+              <span className="text-sm text-gray-400">Generando briefing dual — Gemini analiza datos, Claude correlaciona y recomienda...</span>
             </div>
             <div className="grid grid-cols-5 gap-3">
               {[1, 2, 3, 4, 5].map(i => (
@@ -445,10 +470,14 @@ export default function SupervisorPage() {
 
               {/* Summary */}
               <div className="p-4 bg-wuipi-bg rounded-lg border border-wuipi-border">
-                <div className="flex items-center gap-2 mb-2">
+                <div className="flex items-center gap-2 mb-2 flex-wrap">
                   <EngineBadge engine={briefing.engine} />
                   <span className="text-[10px] text-gray-600">Generado a las {generatedTime}</span>
-                  {/* Source badges */}
+                  {briefing.engines_used && (
+                    <span className="text-[10px] text-gray-600">
+                      (Analisis: {briefing.engines_used.analysis || "—"}, Estrategia: {briefing.engines_used.strategy || "—"})
+                    </span>
+                  )}
                   {briefing.sources && Object.entries(briefing.sources).map(([key, ok]) => (
                     <span key={key} className={`px-1.5 py-0.5 rounded text-[10px] ${ok ? "bg-emerald-500/10 text-emerald-500" : "bg-red-500/10 text-red-400"}`}>
                       {key}
@@ -457,6 +486,30 @@ export default function SupervisorPage() {
                 </div>
                 <p className="text-sm text-gray-300 leading-relaxed">{briefing.summary}</p>
               </div>
+
+              {/* Recommendations per area */}
+              {briefing.recomendaciones_por_area && (
+                <div className="grid grid-cols-3 gap-3">
+                  {briefing.recomendaciones_por_area.operaciones && (
+                    <div className="p-3 bg-wuipi-bg rounded-lg border border-amber-500/20">
+                      <p className="text-[10px] font-bold text-amber-400 mb-1">Gte. Operaciones</p>
+                      <p className="text-xs text-gray-300 leading-relaxed">{briefing.recomendaciones_por_area.operaciones}</p>
+                    </div>
+                  )}
+                  {briefing.recomendaciones_por_area.finanzas && (
+                    <div className="p-3 bg-wuipi-bg rounded-lg border border-emerald-500/20">
+                      <p className="text-[10px] font-bold text-emerald-400 mb-1">Gte. Finanzas</p>
+                      <p className="text-xs text-gray-300 leading-relaxed">{briefing.recomendaciones_por_area.finanzas}</p>
+                    </div>
+                  )}
+                  {briefing.recomendaciones_por_area.comercial && (
+                    <div className="p-3 bg-wuipi-bg rounded-lg border border-violet-500/20">
+                      <p className="text-[10px] font-bold text-violet-400 mb-1">Gte. Comercial</p>
+                      <p className="text-xs text-gray-300 leading-relaxed">{briefing.recomendaciones_por_area.comercial}</p>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </Card>

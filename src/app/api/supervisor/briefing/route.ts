@@ -1,16 +1,64 @@
 import { NextResponse } from "next/server";
-import { apiServerError } from "@/lib/api-helpers";
-import { generateBriefing, isAnyEngineConfigured } from "@/lib/ai/model-router";
+import { generateDualBriefing, isAnyEngineConfigured } from "@/lib/ai/model-router";
 import { gatherBusinessData } from "@/lib/supervisor/gather-data";
 
 export const dynamic = "force-dynamic";
 
-const BRIEFING_SYSTEM_PROMPT = `Eres el Supervisor IA de Wuipi Telecomunicaciones, un ISP en Venezuela (Anzoategui).
-Tu rol es ser un COO virtual que analiza datos operativos y genera insights accionables.
+// Step 1: Gemini Flash — Data analysis + anomaly detection
+const GEMINI_PROMPT = `Eres un analista de datos de Wuipi Telecomunicaciones, un ISP en Venezuela.
+Tu trabajo es analizar los datos operativos y producir un resumen estructurado con anomalias detectadas.
 
-Analiza los datos proporcionados y genera un briefing ejecutivo en formato JSON con esta estructura exacta:
+Analiza los datos y genera un JSON con esta estructura exacta:
 {
-  "score": number (0-100, salud general del negocio basada en los datos disponibles),
+  "score": number (0-100, salud general basada en datos),
+  "score_trend": "stable" | "improving" | "declining",
+  "areas": {
+    "infraestructura": { "score": number, "resumen": string, "anomalias": [string] },
+    "soporte": { "score": number, "resumen": string, "anomalias": [string] },
+    "finanzas": { "score": number, "resumen": string, "anomalias": [string] },
+    "ventas": { "score": number, "resumen": string, "anomalias": [string] },
+    "cobranzas": { "score": number, "resumen": string, "anomalias": [string] }
+  },
+  "datos_clave": {
+    "mrr_usd": number,
+    "servicios_activos": number,
+    "servicios_pausados": number,
+    "tasa_cobranza_ved": number,
+    "deuda_total_usd": number,
+    "hosts_caidos": number,
+    "tickets_activos": number,
+    "leads_activos": number,
+    "recovery_rate": number
+  }
+}
+
+Reglas:
+- Scores: infraestructura basado en uptime y problemas, soporte en tickets abiertos y SLA, finanzas en tasa cobranza y deuda, ventas en conversion y pipeline, cobranzas en recovery rate
+- Anomalias: lista especifica con numeros, nombres de nodos/equipos, montos exactos
+- Si tasa cobranza < 85%, es anomalia financiera
+- Si hosts caidos > 0, listar cuales
+- Si tickets sin atender > 10, es anomalia de soporte
+- Si hay nodos con muchos servicios suspendidos (>20% del total), listarlos
+- Responde SOLO con JSON, sin texto adicional ni backticks
+- No inventes datos — si falta una fuente, pon score 50 y "datos no disponibles"`;
+
+// Step 2: Claude — Correlation + strategic recommendations
+const CLAUDE_PROMPT = `Eres el Supervisor IA de Wuipi Telecomunicaciones, un ISP en Venezuela (Anzoategui).
+Tu rol es ser un CEO multidisciplinario virtual con vision constante en todas las areas del negocio.
+
+Se te proporcionan dos cosas:
+1. Un analisis previo generado por Gemini Flash con scores por area y anomalias detectadas
+2. Los datos originales del negocio en tiempo real
+
+Tu trabajo es ir mas alla del analisis numerico:
+- CORRELACIONAR problemas entre areas (nodo con problemas + tickets + deuda = patron critico)
+- PRIORIZAR que debe atenderse primero y por que
+- RECOMENDAR acciones especificas para cada gerente (Operaciones, Finanzas, Comercial)
+- DETECTAR riesgos que no son evidentes mirando un solo modulo
+
+Genera un JSON con esta estructura exacta:
+{
+  "score": number (0-100, tu evaluacion como CEO — puede diferir del analisis previo si ves correlaciones),
   "score_trend": "stable" | "improving" | "declining",
   "kpis": {
     "salud_general": { "value": string, "label": string, "trend": "up" | "down" | "stable" },
@@ -19,31 +67,31 @@ Analiza los datos proporcionados y genera un briefing ejecutivo en formato JSON 
     "crecimiento": { "value": string, "label": string, "trend": "up" | "down" | "stable" },
     "salud_financiera": { "value": string, "label": string, "trend": "up" | "down" | "stable" }
   },
-  "summary": string (parrafo ejecutivo de 3-4 oraciones, directo y accionable, en espanol),
+  "summary": string (parrafo ejecutivo de 3-4 oraciones como CEO hablando a los socios, directo y accionable),
   "insights": [
     {
       "severity": "critical" | "high" | "medium" | "low",
-      "title": string (corto, max 60 chars),
-      "description": string (1-2 oraciones explicando el hallazgo y recomendacion),
-      "category": "infraestructura" | "soporte" | "ventas" | "clientes" | "finanzas"
+      "title": string (max 60 chars),
+      "description": string (1-2 oraciones con hallazgo + recomendacion concreta),
+      "category": "infraestructura" | "soporte" | "ventas" | "clientes" | "finanzas",
+      "para": "operaciones" | "finanzas" | "comercial" | "todos"
     }
-  ]
+  ],
+  "recomendaciones_por_area": {
+    "operaciones": string (1-2 oraciones para el Gte. de Operaciones),
+    "finanzas": string (1-2 oraciones para el Gte. de Finanzas),
+    "comercial": string (1-2 oraciones para el Gte. Comercial)
+  }
 }
 
 Reglas:
-- Se directo y accionable, no generico
-- Si hay equipos caidos, menciona cuales y cuanto tiempo llevan
-- Si hay tickets sin asignar o con SLA violado, senalalo como riesgo
-- Correlaciona datos: si un nodo tiene muchos problemas Y muchos tickets, es un insight critico
-- Analiza la salud financiera: tasa de cobranza, morosos top, MRR, y tendencias de facturacion
-- Si la tasa de cobranza es menor al 90%, es un insight high o critical
-- Si hay clientes con deuda mayor a 60 dias, priorizalos como riesgo financiero
-- Los insights deben ser maximo 7, priorizados por impacto
-- Si no hay datos de alguna fuente, no inventes — menciona que falta esa visibilidad
-- Habla en espanol
-- No uses emojis en el summary ni en las descripciones
-- Se especifico con numeros y nombres de nodos/equipos
-- Responde SOLO con el JSON, sin texto adicional ni backticks`;
+- Max 7 insights, priorizados por impacto real
+- El campo "para" indica a que gerente va dirigido el insight
+- Correlaciona: si un nodo tiene problemas Y sus clientes tienen deuda, es mas critico
+- Si la tasa de cobranza es menor al 85%, es insight high o critical
+- Habla como CEO — directo, con numeros, sin rodeos
+- No uses emojis
+- Responde SOLO con JSON, sin texto adicional ni backticks`;
 
 export async function POST() {
   try {
@@ -54,7 +102,7 @@ export async function POST() {
       );
     }
 
-    // 1. Gather business data (direct call, no HTTP self-fetch)
+    // 1. Gather business data
     let businessData: any = {};
     try {
       businessData = await gatherBusinessData();
@@ -65,21 +113,24 @@ export async function POST() {
     // 2. Build context
     const context = buildContext(businessData);
 
-    // 3. Generate briefing (Gemini Flash preferred, Claude fallback)
-    const { content: rawText, engine } = await generateBriefing(BRIEFING_SYSTEM_PROMPT, context);
+    // 3. Generate dual briefing (Gemini analyzes → Claude correlates)
+    const { content: rawText, engine, engines_used } = await generateDualBriefing(
+      GEMINI_PROMPT,
+      CLAUDE_PROMPT,
+      context,
+    );
 
     // 4. Parse JSON from response
     let briefing;
     try {
-      // Try direct parse first (Gemini JSON mode returns clean JSON)
       briefing = JSON.parse(rawText);
     } catch {
-      // Fallback: strip markdown/thinking and extract JSON object
       try {
         const cleaned = rawText
           .replace(/```(?:json)?\s*/gi, "")
           .replace(/```/g, "")
           .replace(/<think>[\s\S]*?<\/think>/gi, "")
+          .replace(/<antThinking>[\s\S]*?<\/antThinking>/gi, "")
           .trim();
         const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
         briefing = JSON.parse(jsonMatch ? jsonMatch[0] : cleaned);
@@ -96,6 +147,7 @@ export async function POST() {
       ...briefing,
       generated_at: new Date().toISOString(),
       engine,
+      engines_used,
       sources: businessData.sources || {},
     });
   } catch (error) {
@@ -116,14 +168,13 @@ function buildContext(data: any): string {
 - Uptime: ${i.uptimePercent}%
 - Problemas activos: ${i.totalProblems}
 - Por severidad: ${JSON.stringify(i.problemsBySeverity)}
-- Sitios: ${i.sites?.map((s: any) => `${s.code}: ${s.hostsUp}/${s.totalHosts} online${s.avgLatency ? `, latencia ${s.avgLatency}ms` : ""}`).join(" | ")}`);
+- Sitios: ${i.sites?.map((s: any) => `${s.code}: ${s.hostsUp}/${s.totalHosts} online${s.avgLatency ? `, lat ${s.avgLatency}ms` : ""}`).join(" | ")}`);
   }
 
   if (data.problems?.length > 0) {
     const critical = data.problems.filter((p: any) => p.severity === "high" || p.severity === "disaster");
     if (critical.length > 0) {
-      parts.push(`PROBLEMAS CRITICOS:
-${critical.map((p: any) => `- [${p.severity}] ${p.name} en ${p.hostName} (${p.site}) — ${Math.round(p.duration / 60)} min`).join("\n")}`);
+      parts.push(`PROBLEMAS CRITICOS:\n${critical.map((p: any) => `- [${p.severity}] ${p.name} en ${p.hostName} (${p.site}) — ${Math.round(p.duration / 60)} min`).join("\n")}`);
     }
     const warnings = data.problems.filter((p: any) => p.severity === "warning" || p.severity === "average");
     if (warnings.length > 0) {
@@ -131,13 +182,12 @@ ${critical.map((p: any) => `- [${p.severity}] ${p.name} en ${p.hostName} (${p.si
     }
   }
 
-  if (data.tickets) {
-    const t = data.tickets;
-    parts.push(`SOPORTE (Tickets):
-- Total: ${t.total}, Abiertos: ${t.open}, En progreso: ${t.in_progress}
+  if (data.soporte) {
+    const t = data.soporte;
+    parts.push(`SOPORTE (Kommo — ultimos 30 dias):
+- Total tickets: ${t.total}, Activos: ${t.active}, Nuevos sin atender: ${t.open}, En progreso: ${t.in_progress}
 - Resueltos hoy: ${t.resolved_today}
-- SLA violado: ${t.sla_breached}, Criticos activos: ${t.critical_active}
-- Activos totales: ${t.active}`);
+- Razones de atencion: ${Object.entries(t.by_category || {}).map(([k, v]) => `${k}: ${v}`).join(", ")}`);
   }
 
   if (data.leads) {
@@ -160,41 +210,60 @@ ${critical.map((p: any) => `- [${p.severity}] ${p.name} en ${p.hostName} (${p.si
 - Por tecnologia: ${JSON.stringify(c.by_technology)}`);
   }
 
-  if (data.nodes?.length > 0) {
-    parts.push(`NODOS DE RED: ${data.nodes.map((n: any) => `${n.code} (${n.name})`).join(", ")}`);
+  if (data.mikrotik_nodes?.length > 0) {
+    const topNodes = data.mikrotik_nodes
+      .filter((n: any) => n.services_active > 0)
+      .slice(0, 15);
+    parts.push(`NODOS MIKROTIK (servicios + MRR):
+${topNodes.map((n: any) => `- ${n.name} (${n.router}): ${n.services_active} activos, ${n.services_suspended} susp, MRR $${n.mrr_usd}`).join("\n")}`);
+  }
+
+  if (data.cobranzas) {
+    const cb = data.cobranzas;
+    parts.push(`COBRANZAS:
+- Total casos: ${cb.total}, Activos: ${cb.active}, Recuperados: ${cb.recovered}
+- Monto activo: $${cb.active_amount}
+- Recovery rate: ${cb.recovery_rate}%`);
   }
 
   if (data.finance) {
     const f = data.finance;
-    const financeParts: string[] = ["FINANZAS (Odoo):"];
+    const fp: string[] = ["FINANZAS (Odoo):"];
+
+    if (f.exchange_rate) fp.push(`- Tasa BCV: Bs ${f.exchange_rate} / USD`);
 
     if (f.monthly) {
-      financeParts.push(`- Facturacion del mes (${f.monthly.period}): Bs ${f.monthly.ved_invoiced.toLocaleString()} facturado, Bs ${f.monthly.ved_collected.toLocaleString()} cobrado (${f.monthly.ved_collection_rate}% tasa cobranza VED)`);
-      financeParts.push(`- USD: $${f.monthly.usd_invoiced.toLocaleString()} facturado, $${f.monthly.usd_collected.toLocaleString()} cobrado (${f.monthly.usd_collection_rate}% tasa cobranza USD)`);
+      fp.push(`- Facturacion del mes (${f.monthly.period}): Bs ${f.monthly.ved_invoiced.toLocaleString()} facturado, Bs ${f.monthly.ved_collected.toLocaleString()} cobrado (${f.monthly.ved_collection_rate}% tasa cobranza VED)`);
+      fp.push(`- USD: $${f.monthly.usd_invoiced.toLocaleString()} facturado, $${f.monthly.usd_collected.toLocaleString()} cobrado (${f.monthly.usd_collection_rate}% tasa cobranza USD)`);
     }
 
     if (f.subscriptions) {
-      financeParts.push(`- Suscripciones: ${f.subscriptions.active} activas, ${f.subscriptions.paused} pausadas`);
-      financeParts.push(`- MRR (Monthly Recurring Revenue): $${f.subscriptions.mrr_usd.toLocaleString()} USD`);
+      fp.push(`- Servicios: ${f.subscriptions.active} activos, ${f.subscriptions.paused} pausados`);
+      fp.push(`- MRR: $${f.subscriptions.mrr_usd.toLocaleString()} USD`);
     }
 
     if (f.accounts_receivable) {
       const ar = f.accounts_receivable;
-      financeParts.push(`- Cartera pendiente: ${ar.total_customers_with_debt} clientes con deuda, total: $${ar.total_pending_amount.toLocaleString()}`);
+      fp.push(`- Cartera pendiente: ${ar.total_customers_with_debt} clientes con deuda, total $${ar.total_pending_amount.toLocaleString()}`);
       if (ar.top_debtors?.length > 0) {
-        financeParts.push(`- Top 10 morosos: ${ar.top_debtors.map((d: any) => `${d.name}: $${d.amount.toLocaleString()}`).join(" | ")}`);
+        fp.push(`- Top 10 morosos: ${ar.top_debtors.map((d: any) => `${d.name}: $${d.amount.toLocaleString()}`).join(" | ")}`);
       }
     }
 
-    parts.push(financeParts.join("\n"));
+    if (f.monthly_history?.length > 0) {
+      fp.push(`- Efectividad historica: ${f.monthly_history.map((m: any) => `${m.label}: ${m.effectiveness}%`).join(", ")}`);
+    }
+
+    parts.push(fp.join("\n"));
   }
 
   const missing: string[] = [];
   if (!data.sources?.zabbix) missing.push("Zabbix (infraestructura)");
-  if (!data.sources?.tickets) missing.push("Tickets (soporte)");
+  if (!data.sources?.soporte) missing.push("Kommo (soporte)");
   if (!data.sources?.ventas) missing.push("CRM Ventas");
   if (!data.sources?.clients) missing.push("Base de clientes");
-  if (!data.sources?.odoo) missing.push("Odoo (finanzas/facturacion)");
+  if (!data.sources?.odoo) missing.push("Odoo (finanzas)");
+  if (!data.sources?.cobranzas) missing.push("Cobranzas");
   if (missing.length > 0) {
     parts.push(`FUENTES NO DISPONIBLES: ${missing.join(", ")} — no se pueden analizar estos datos.`);
   }

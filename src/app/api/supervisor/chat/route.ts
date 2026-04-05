@@ -19,7 +19,7 @@ export async function POST(request: NextRequest) {
       return apiError("Message required", 400);
     }
 
-    // 1. Gather business data (direct call, no HTTP self-fetch)
+    // 1. Gather business data
     let businessData: any = {};
     try {
       businessData = await gatherBusinessData();
@@ -31,28 +31,26 @@ export async function POST(request: NextRequest) {
     const contextText = buildChatContext(businessData);
 
     const systemPrompt = `Eres el Supervisor IA de Wuipi Telecomunicaciones, un ISP en Venezuela (Anzoategui).
-El usuario es el gerente/dueno de la empresa. Tienes acceso a datos en tiempo real de:
+El usuario es el CEO/socio de la empresa. Tienes acceso a datos en tiempo real de:
 - Infraestructura de red (Zabbix): estado de equipos, problemas, latencia
-- Soporte (tickets): tickets abiertos, prioridades, tiempos de resolucion
+- Soporte (Kommo CRM): tickets reales, razones de atencion, carga por tecnico
 - Ventas (CRM): leads, pipeline, conversiones
-- Clientes: base de clientes, distribucion por nodo y tecnologia
-- Finanzas (Odoo): facturacion mensual, cobranza, MRR, cartera pendiente, morosos
+- Finanzas (Odoo): facturacion, cobranza, MRR, cartera pendiente, morosos
+- Cobranzas: casos activos, recovery rate, montos en gestion
+- Servicios Mikrotik: MRR por nodo, servicios activos/suspendidos
 
 Datos actuales del negocio:
 ${contextText}
 
-Responde en espanol, se directo y especifico con numeros.
+Responde como un CEO multidisciplinario — directo, con numeros, accionable.
 Si te preguntan algo que no tienes datos para responder, dilo honestamente.
-No inventes datos.
-Puedes hacer recomendaciones basadas en los datos disponibles.
-Formatea con markdown basico (bold, listas) para legibilidad.`;
+No inventes datos. Puedes hacer recomendaciones basadas en los datos disponibles.
+Cuando des recomendaciones, indica a que gerente va dirigida (Operaciones, Finanzas, Comercial).
+Formatea con markdown basico (bold, listas) para legibilidad.
+Responde en espanol.`;
 
-    // 3. Route to best model (Gemini Flash for simple, Claude for complex)
-    const { content, engine } = await chatWithSupervisor(
-      systemPrompt,
-      message,
-      history || [],
-    );
+    // 3. Route to best model
+    const { content, engine } = await chatWithSupervisor(systemPrompt, message, history || []);
 
     return NextResponse.json({ content, engine });
   } catch (error) {
@@ -74,9 +72,9 @@ function buildChatContext(data: any): string {
     parts.push(`PROBLEMAS ACTIVOS: ${top.map((p: any) => `${p.hostName}[${p.severity}]: ${p.name} (${Math.round(p.duration / 60)}min)`).join("; ")}`);
   }
 
-  if (data.tickets) {
-    const t = data.tickets;
-    parts.push(`SOPORTE: ${t.total} tickets total, ${t.open} abiertos, ${t.in_progress} en progreso, ${t.sla_breached} SLA violado, ${t.critical_active} criticos`);
+  if (data.soporte) {
+    const t = data.soporte;
+    parts.push(`SOPORTE (Kommo 30d): ${t.total} tickets, ${t.active} activos, ${t.open} nuevos, ${t.in_progress} progreso, resueltos hoy: ${t.resolved_today}. Razones: ${Object.entries(t.by_category || {}).map(([k, v]) => `${k}:${v}`).join(", ")}`);
   }
 
   if (data.leads) {
@@ -85,25 +83,31 @@ function buildChatContext(data: any): string {
   }
 
   if (data.clients) {
-    const c = data.clients;
-    parts.push(`CLIENTES: ${c.total} total. Estado: ${JSON.stringify(c.by_status)}. Nodos: ${JSON.stringify(c.by_node)}. Tech: ${JSON.stringify(c.by_technology)}`);
+    parts.push(`CLIENTES: ${data.clients.total} total. Estado: ${JSON.stringify(data.clients.by_status)}`);
   }
 
-  if (data.nodes?.length > 0) {
-    parts.push(`NODOS: ${data.nodes.map((n: any) => `${n.code}(${n.name})`).join(", ")}`);
+  if (data.mikrotik_nodes?.length > 0) {
+    const top = data.mikrotik_nodes.filter((n: any) => n.services_active > 0).slice(0, 10);
+    parts.push(`NODOS MK: ${top.map((n: any) => `${n.name}(${n.services_active}act/$${n.mrr_usd})`).join(", ")}`);
+  }
+
+  if (data.cobranzas) {
+    const cb = data.cobranzas;
+    parts.push(`COBRANZAS: ${cb.total} casos, ${cb.active} activos ($${cb.active_amount}), recovery ${cb.recovery_rate}%`);
   }
 
   if (data.finance) {
     const f = data.finance;
     const fp: string[] = [];
+    if (f.exchange_rate) fp.push(`BCV: Bs${f.exchange_rate}/USD`);
     if (f.monthly) {
-      fp.push(`Facturacion ${f.monthly.period}: VED Bs${f.monthly.ved_invoiced.toLocaleString()} (${f.monthly.ved_collection_rate}% cobrado), USD $${f.monthly.usd_invoiced.toLocaleString()} (${f.monthly.usd_collection_rate}% cobrado)`);
+      fp.push(`Fact ${f.monthly.period}: VED Bs${f.monthly.ved_invoiced.toLocaleString()} (${f.monthly.ved_collection_rate}% cobrado), USD $${f.monthly.usd_invoiced.toLocaleString()} (${f.monthly.usd_collection_rate}% cobrado)`);
     }
     if (f.subscriptions) {
-      fp.push(`Suscripciones: ${f.subscriptions.active} activas, ${f.subscriptions.paused} pausadas, MRR $${f.subscriptions.mrr_usd.toLocaleString()}`);
+      fp.push(`Servicios: ${f.subscriptions.active} act, ${f.subscriptions.paused} pau, MRR $${f.subscriptions.mrr_usd.toLocaleString()}`);
     }
     if (f.accounts_receivable) {
-      fp.push(`Cartera: ${f.accounts_receivable.total_customers_with_debt} clientes con deuda, total $${f.accounts_receivable.total_pending_amount.toLocaleString()}`);
+      fp.push(`Cartera: ${f.accounts_receivable.total_customers_with_debt} con deuda, $${f.accounts_receivable.total_pending_amount.toLocaleString()}`);
       if (f.accounts_receivable.top_debtors?.length > 0) {
         fp.push(`Top morosos: ${f.accounts_receivable.top_debtors.slice(0, 5).map((d: any) => `${d.name}($${d.amount})`).join(", ")}`);
       }
@@ -112,7 +116,7 @@ function buildChatContext(data: any): string {
   }
 
   if (!data.sources?.zabbix) parts.push("NOTA: Zabbix no disponible");
-  if (!data.sources?.tickets) parts.push("NOTA: Tickets no disponibles");
+  if (!data.sources?.soporte) parts.push("NOTA: Kommo (soporte) no disponible");
   if (!data.sources?.odoo) parts.push("NOTA: Odoo (finanzas) no disponible");
 
   return parts.join("\n");
