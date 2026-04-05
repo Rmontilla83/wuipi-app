@@ -127,8 +127,12 @@ export function formatSociosBriefing(briefing: any): string {
 // Format for #operaciones (infra + soporte)
 // ============================================
 export function formatOperacionesBriefing(briefing: any, rawData?: any): string {
+  // Strict filter: only insights explicitly for operaciones, or infra/soporte without specific "para"
   const insights = (briefing.insights || [])
-    .filter((ins: any) => ins.para === "operaciones" || ins.para === "todos" || ins.category === "infraestructura" || ins.category === "soporte")
+    .filter((ins: any) =>
+      ins.para === "operaciones" ||
+      (!ins.para && (ins.category === "infraestructura" || ins.category === "soporte"))
+    )
     .slice(0, 5);
 
   const sanitizedInsights = insights.map((ins: any) => ({
@@ -220,8 +224,12 @@ export function formatOperacionesBriefing(briefing: any, rawData?: any): string 
 // Format for #finanzas (cobranza + MRR + CxC)
 // ============================================
 export function formatFinanzasBriefing(briefing: any): string {
+  // Strict filter: only insights explicitly for finanzas, or finanzas category without specific "para"
   const insights = (briefing.insights || [])
-    .filter((ins: any) => ins.para === "finanzas" || ins.para === "todos" || ins.category === "finanzas")
+    .filter((ins: any) =>
+      ins.para === "finanzas" ||
+      (!ins.para && ins.category === "finanzas")
+    )
     .slice(0, 5);
 
   const kpis = briefing.kpis || {};
@@ -254,8 +262,12 @@ export function formatFinanzasBriefing(briefing: any): string {
 // Format for #comercial (ventas + CxC + churn)
 // ============================================
 export function formatComercialBriefing(briefing: any): string {
+  // Strict filter: only insights explicitly for comercial, or ventas/clientes category without specific "para"
   const insights = (briefing.insights || [])
-    .filter((ins: any) => ins.para === "comercial" || ins.para === "todos" || ins.category === "ventas" || ins.category === "clientes")
+    .filter((ins: any) =>
+      ins.para === "comercial" ||
+      (!ins.para && (ins.category === "ventas" || ins.category === "clientes"))
+    )
     .slice(0, 5);
 
   const kpis = briefing.kpis || {};
