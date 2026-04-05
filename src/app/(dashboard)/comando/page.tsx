@@ -53,6 +53,13 @@ interface TicketStats {
   by_assigned: { id: string; name: string; count: number }[];
 }
 
+interface SoporteData {
+  total_leads: number; tickets_open: number; tickets_in_progress: number;
+  tickets_pending: number; tickets_resolved_today: number; active_tickets: number;
+  by_category: { category: string; label: string; count: number; percentage: number }[];
+  by_technician: { id: string; name: string; tickets_total: number; tickets_resolved: number; tickets_open: number; sla_compliance: number }[];
+}
+
 interface VentasStats {
   total: number; active: number; won: number; lost: number;
   pipeline_value: number; conversion_rate: number;
@@ -124,10 +131,11 @@ function TabButton({ tab, current, icon: Icon, label, color, onClick }: {
 // ============================================
 // EXECUTIVE OVERVIEW (always visible)
 // ============================================
-function ExecutiveOverview({ finance, infra, tickets, cobranzas }: {
+function ExecutiveOverview({ finance, infra, tickets, soporte, cobranzas }: {
   finance: FinanceStats | null;
   infra: InfraOverview | null;
   tickets: TicketStats | null;
+  soporte: SoporteData | null;
   cobranzas: CobranzasStats | null;
 }) {
   // Alerts that need action
@@ -137,15 +145,15 @@ function ExecutiveOverview({ finance, infra, tickets, cobranzas }: {
   const highProblems = (infra?.problemsBySeverity?.high || 0) + (infra?.problemsBySeverity?.disaster || 0);
   if (highProblems > 0) alerts.push({ text: `${highProblems} problema${highProblems > 1 ? "s" : ""} de red high/disaster`, severity: "critical" });
 
-  // SLA breached tickets
-  if (tickets && tickets.sla_breached > 0) alerts.push({ text: `${tickets.sla_breached} ticket${tickets.sla_breached > 1 ? "s" : ""} SLA violado`, severity: "high" });
+  // Tickets open (from Kommo soporte)
+  if (soporte && soporte.tickets_open > 10) alerts.push({ text: `${soporte.tickets_open} tickets sin atender`, severity: "high" });
 
   // Deuda > 60 days
   const over60 = finance?.aging?.bucket_60_plus;
   if (over60 && over60.count > 0) alerts.push({ text: `${over60.count} clientes con deuda >60 dias ($${fmtShort(over60.total)})`, severity: "high" });
 
-  // Critical tickets
-  if (tickets && tickets.critical_active > 0) alerts.push({ text: `${tickets.critical_active} ticket${tickets.critical_active > 1 ? "s" : ""} critico${tickets.critical_active > 1 ? "s" : ""} activo${tickets.critical_active > 1 ? "s" : ""}`, severity: "critical" });
+  // SLA breached (from Supabase tickets if available)
+  if (tickets && tickets.sla_breached > 0) alerts.push({ text: `${tickets.sla_breached} ticket${tickets.sla_breached > 1 ? "s" : ""} SLA violado`, severity: "high" });
 
   // Cobranzas active
   if (cobranzas && cobranzas.active > 0) alerts.push({ text: `${cobranzas.active} casos de cobranza activos ($${fmtShort(cobranzas.active_amount)})`, severity: "medium" });
@@ -216,8 +224,8 @@ function ExecutiveOverview({ finance, infra, tickets, cobranzas }: {
         <p className="text-[10px] text-gray-500 mt-0.5">activos</p>
         <div className="mt-2 pt-2 border-t border-wuipi-border flex items-center gap-3">
           <span className="text-xs text-amber-400">{pausedServices} pausados</span>
-          {tickets && tickets.active > 0 && (
-            <span className="text-xs text-gray-500">{tickets.active} tickets</span>
+          {soporte && soporte.active_tickets > 0 && (
+            <span className="text-xs text-gray-500">{soporte.active_tickets} tickets</span>
           )}
         </div>
       </Card>
@@ -567,16 +575,24 @@ function FinanzasTab({ stats, cobranzas }: { stats: FinanceStats | null; cobranz
 // ============================================
 // TAB: OPERACIONES (Soporte + Infra + Calidad)
 // ============================================
-function OperacionesTab({ tickets, infra, problems, hosts, infraLoading }: {
-  tickets: TicketStats | null;
+function OperacionesTab({ soporte, infra, problems, hosts, infraLoading }: {
+  soporte: SoporteData | null;
   infra: InfraOverview | null;
   problems: InfraProblem[];
   hosts: InfraHost[];
   infraLoading: boolean;
 }) {
-  if (!tickets && infraLoading) return <LoadingPlaceholder />;
+  if (!soporte && infraLoading) return <LoadingPlaceholder />;
 
   const uptimePct = infra ? (infra.uptimePercent || Math.round((infra.hostsUp / Math.max(infra.totalHosts, 1)) * 1000) / 10) : 0;
+
+  // Category colors
+  const CAT_COLORS: Record<string, string> = {
+    sin_servicio: "#ef4444", lentitud_intermitencia: "#f59e0b", red_interna: "#8b5cf6",
+    infraestructura: "#06b6d4", gestion: "#3b82f6", cableado: "#f97316",
+    desincorporacion: "#6b7280", administrativo: "#a78bfa", visita_l2c: "#10b981",
+    bot_reactivado: "#ec4899", sin_clasificar: "#9ca3af",
+  };
 
   return (
     <div className="space-y-4">
@@ -584,14 +600,12 @@ function OperacionesTab({ tickets, infra, problems, hosts, infraLoading }: {
       <div className="grid grid-cols-4 gap-4">
         <KPICard label="Uptime de red" value={infra ? `${uptimePct.toFixed(1)}%` : "..."} icon={Wifi} color={uptimePct >= 95 ? "emerald" : uptimePct >= 85 ? "amber" : "red"}
           sub={infra ? `${infra.hostsUp}/${infra.totalHosts} hosts` : undefined} />
-        <KPICard label="Tickets abiertos" value={tickets ? tickets.active.toString() : "..."} icon={Headphones} color={tickets && tickets.active > 20 ? "red" : "cyan"}
-          sub={tickets && tickets.critical_active > 0 ? `${tickets.critical_active} criticos` : "0 criticos"} />
-        <KPICard label="SLA cumplido" value={tickets ? `${tickets.total > 0 ? Math.round(((tickets.total - tickets.sla_breached) / tickets.total) * 100) : 100}%` : "..."}
-          icon={Shield} color={tickets && tickets.sla_breached > 0 ? "amber" : "emerald"}
-          sub={tickets ? `${tickets.sla_breached} violados` : undefined} />
-        <KPICard label="Tiempo resolucion" value={tickets ? `${tickets.avg_resolution_hours}h` : "..."}
-          icon={Clock} color="cyan"
-          sub={tickets ? `${tickets.resolved_this_month} resueltos este mes` : undefined} />
+        <KPICard label="Tickets abiertos" value={soporte ? soporte.active_tickets.toString() : "..."} icon={Headphones}
+          color={soporte && soporte.active_tickets > 30 ? "red" : "cyan"}
+          sub={soporte ? `${soporte.tickets_open} nuevos, ${soporte.tickets_pending} pendientes` : undefined} />
+        <KPICard label="En progreso" value={soporte ? soporte.tickets_in_progress.toString() : "..."} icon={Activity} color="amber"
+          sub={soporte ? `de ${soporte.total_leads} totales (30d)` : undefined} />
+        <KPICard label="Resueltos hoy" value={soporte ? soporte.tickets_resolved_today.toString() : "..."} icon={Zap} color="emerald" />
       </div>
 
       {/* Red: Problemas + Hosts down */}
@@ -636,31 +650,40 @@ function OperacionesTab({ tickets, infra, problems, hosts, infraLoading }: {
           )}
         </Card>
 
-        {/* Tickets por categoria */}
+        {/* Razones de atencion (from Kommo) */}
         <Card>
-          <h3 className="text-base font-bold text-white mb-4">Tickets por Categoria</h3>
-          {tickets && tickets.by_category.length > 0 ? (
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-base font-bold text-white">Razones de Atencion</h3>
+            <Link href="/soporte" className="text-xs text-[#F46800] hover:underline flex items-center gap-1">
+              Soporte <ExternalLink size={12} />
+            </Link>
+          </div>
+          {soporte && soporte.by_category.length > 0 ? (
             <div className="space-y-2.5">
-              {tickets.by_category.slice(0, 8).map((cat) => {
-                const maxCat = Math.max(...tickets.by_category.map(c => c.count), 1);
+              {soporte.by_category.slice(0, 8).map((cat) => {
+                const maxCat = Math.max(...soporte.by_category.map(c => c.count), 1);
+                const color = CAT_COLORS[cat.category] || "#6b7280";
                 return (
-                  <div key={cat.id}>
+                  <div key={cat.category}>
                     <div className="flex items-center justify-between text-xs mb-1">
                       <span className="text-gray-300 flex items-center gap-1.5">
-                        <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: cat.color }} />
-                        {cat.name}
+                        <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: color }} />
+                        {cat.label}
                       </span>
-                      <span className="text-white font-medium">{cat.count}</span>
+                      <span className="text-gray-400">
+                        <span className="text-white font-medium">{cat.count}</span>
+                        <span className="ml-1">({cat.percentage}%)</span>
+                      </span>
                     </div>
                     <div className="h-1.5 bg-wuipi-bg rounded-full overflow-hidden">
-                      <div className="h-full rounded-full transition-all" style={{ width: `${(cat.count / maxCat) * 100}%`, backgroundColor: cat.color }} />
+                      <div className="h-full rounded-full transition-all" style={{ width: `${(cat.count / maxCat) * 100}%`, backgroundColor: color }} />
                     </div>
                   </div>
                 );
               })}
             </div>
           ) : (
-            <p className="text-sm text-gray-500 text-center py-8">Sin tickets activos</p>
+            <p className="text-sm text-gray-500 text-center py-8">Sin datos de soporte</p>
           )}
         </Card>
       </div>
@@ -669,19 +692,22 @@ function OperacionesTab({ tickets, infra, problems, hosts, infraLoading }: {
       <div className="grid grid-cols-2 gap-4">
         <Card>
           <h3 className="text-base font-bold text-white mb-4">Carga por Tecnico</h3>
-          {tickets && tickets.by_assigned.length > 0 ? (
+          {soporte && soporte.by_technician.length > 0 ? (
             <div className="space-y-2">
-              {tickets.by_assigned.slice(0, 8).map((tech) => {
-                const maxTech = Math.max(...tickets.by_assigned.map(t => t.count), 1);
-                const loadColor = tech.count > 10 ? "bg-red-500" : tech.count > 5 ? "bg-amber-500" : "bg-emerald-500";
+              {soporte.by_technician.slice(0, 8).map((tech) => {
+                const maxTech = Math.max(...soporte.by_technician.map(t => t.tickets_total), 1);
+                const loadColor = tech.tickets_open > 10 ? "bg-red-500" : tech.tickets_open > 5 ? "bg-amber-500" : "bg-emerald-500";
                 return (
                   <div key={tech.id}>
                     <div className="flex items-center justify-between text-xs mb-1">
                       <span className="text-gray-300">{tech.name}</span>
-                      <span className="text-white font-medium">{tech.count} tickets</span>
+                      <span className="text-gray-400">
+                        <span className="text-white font-medium">{tech.tickets_total}</span> total
+                        {tech.tickets_open > 0 && <span className="text-amber-400 ml-1">({tech.tickets_open} abiertos)</span>}
+                      </span>
                     </div>
                     <div className="h-1.5 bg-wuipi-bg rounded-full overflow-hidden">
-                      <div className={`h-full rounded-full ${loadColor}`} style={{ width: `${(tech.count / maxTech) * 100}%` }} />
+                      <div className={`h-full rounded-full ${loadColor}`} style={{ width: `${(tech.tickets_total / maxTech) * 100}%` }} />
                     </div>
                   </div>
                 );
@@ -695,9 +721,9 @@ function OperacionesTab({ tickets, infra, problems, hosts, infraLoading }: {
         <Card>
           <h3 className="text-base font-bold text-white mb-4">Resumen Operativo</h3>
           <div className="grid grid-cols-2 gap-3">
-            <MiniStat label="Nuevos / Asignados" value={tickets?.open.toString() || "0"} color="text-amber-400" />
-            <MiniStat label="En progreso" value={tickets?.in_progress.toString() || "0"} color="text-cyan-400" />
-            <MiniStat label="Resueltos hoy" value={tickets?.resolved_today.toString() || "0"} color="text-emerald-400" />
+            <MiniStat label="Tickets nuevos" value={soporte?.tickets_open.toString() || "0"} color="text-amber-400" />
+            <MiniStat label="En progreso" value={soporte?.tickets_in_progress.toString() || "0"} color="text-cyan-400" />
+            <MiniStat label="Resueltos hoy" value={soporte?.tickets_resolved_today.toString() || "0"} color="text-emerald-400" />
             <MiniStat label="Hosts offline" value={infra ? infra.hostsDown.toString() : "0"} color={infra && infra.hostsDown > 0 ? "text-red-400" : "text-emerald-400"} />
           </div>
           {infra && (
@@ -873,6 +899,7 @@ export default function ComandoPage() {
   const [infraLoading, setInfraLoading] = useState(true);
 
   const [ticketStats, setTicketStats] = useState<TicketStats | null>(null);
+  const [soporteData, setSoporteData] = useState<SoporteData | null>(null);
   const [ventasStats, setVentasStats] = useState<VentasStats | null>(null);
   const [cobranzasStats, setCobranzasStats] = useState<CobranzasStats | null>(null);
 
@@ -906,6 +933,13 @@ export default function ComandoPage() {
     } catch (err) { console.error("Error loading tickets:", err); }
   }, []);
 
+  const loadSoporteData = useCallback(async () => {
+    try {
+      const res = await fetch("/api/soporte?period=30d");
+      if (res.ok) setSoporteData(await res.json());
+    } catch (err) { console.error("Error loading soporte:", err); }
+  }, []);
+
   const loadVentasStats = useCallback(async () => {
     try {
       const res = await fetch("/api/crm-ventas/stats");
@@ -924,16 +958,18 @@ export default function ComandoPage() {
     loadFinanceStats();
     loadInfraData();
     loadTicketStats();
+    loadSoporteData();
     loadVentasStats();
     loadCobranzasStats();
     const interval = setInterval(loadInfraData, 60000);
     return () => clearInterval(interval);
-  }, [loadFinanceStats, loadInfraData, loadTicketStats, loadVentasStats, loadCobranzasStats]);
+  }, [loadFinanceStats, loadInfraData, loadTicketStats, loadSoporteData, loadVentasStats, loadCobranzasStats]);
 
   const refreshAll = () => {
     loadFinanceStats();
     loadInfraData();
     loadTicketStats();
+    loadSoporteData();
     loadVentasStats();
     loadCobranzasStats();
   };
@@ -953,7 +989,7 @@ export default function ComandoPage() {
 
       <div className="flex-1 overflow-auto p-6 space-y-4">
         {/* Executive Overview — always visible */}
-        <ExecutiveOverview finance={financeStats} infra={infraOverview} tickets={ticketStats} cobranzas={cobranzasStats} />
+        <ExecutiveOverview finance={financeStats} infra={infraOverview} tickets={ticketStats} soporte={soporteData} cobranzas={cobranzasStats} />
 
         {/* Tab Selector */}
         <div className="flex gap-2 border-b border-wuipi-border pb-3">
@@ -964,7 +1000,7 @@ export default function ComandoPage() {
 
         {/* Tab Content */}
         {tab === "finanzas" && <FinanzasTab stats={financeStats} cobranzas={cobranzasStats} />}
-        {tab === "operaciones" && <OperacionesTab tickets={ticketStats} infra={infraOverview} problems={infraProblems} hosts={infraHosts} infraLoading={infraLoading} />}
+        {tab === "operaciones" && <OperacionesTab soporte={soporteData} infra={infraOverview} problems={infraProblems} hosts={infraHosts} infraLoading={infraLoading} />}
         {tab === "crecimiento" && <CrecimientoTab ventas={ventasStats} finance={financeStats} cobranzas={cobranzasStats} />}
       </div>
     </>
