@@ -8,8 +8,9 @@ import {
   Brain, RefreshCw, ChevronDown, ChevronUp, Send, Sparkles,
   AlertTriangle, Lightbulb, MessageSquare, TrendingUp, TrendingDown,
   Minus, Shield, Headphones, ShoppingCart, Users, Server,
-  AlertCircle, DollarSign, SendHorizonal,
+  AlertCircle, DollarSign, SendHorizonal, History, Calendar,
 } from "lucide-react";
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
 
 // ============================================
 // TYPES
@@ -193,6 +194,11 @@ export default function SupervisorPage() {
   const [sendingTelegram, setSendingTelegram] = useState(false);
   const [telegramResult, setTelegramResult] = useState<{ sent: string[]; failed: string[] } | null>(null);
 
+  // History state
+  const [historyData, setHistoryData] = useState<any[]>([]);
+  const [historyExpanded, setHistoryExpanded] = useState(false);
+  const [selectedBriefing, setSelectedBriefing] = useState<any | null>(null);
+
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chatMessages, isTyping]);
@@ -246,7 +252,7 @@ export default function SupervisorPage() {
     }
   }, []);
 
-  // Fetch client count + telegram config
+  // Fetch client count + telegram config + history
   useEffect(() => {
     fetch("/api/supervisor/data")
       .then(r => r.json())
@@ -255,6 +261,10 @@ export default function SupervisorPage() {
     fetch("/api/supervisor/telegram")
       .then(r => r.json())
       .then(d => setTelegramConfig(d))
+      .catch(() => {});
+    fetch("/api/supervisor/history?limit=30")
+      .then(r => r.json())
+      .then(d => { if (d.briefings) setHistoryData(d.briefings); })
       .catch(() => {});
   }, []);
 
@@ -664,6 +674,149 @@ export default function SupervisorPage() {
             </div>
           </Card>
         </div>
+
+        {/* Briefing History */}
+        <Card>
+          <button onClick={() => setHistoryExpanded(!historyExpanded)} className="w-full flex items-center justify-between text-left">
+            <div className="flex items-center gap-3">
+              <History size={18} className="text-cyan-400" />
+              <div>
+                <p className="text-base font-bold text-white">Historial de Briefings</p>
+                <p className="text-xs text-gray-500">{historyData.length} briefings registrados</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              {historyData.length > 1 && (() => {
+                const latest = historyData[0]?.score;
+                const prev = historyData[1]?.score;
+                if (latest == null || prev == null) return null;
+                const delta = latest - prev;
+                return (
+                  <span className={`text-xs font-bold ${delta > 0 ? "text-emerald-400" : delta < 0 ? "text-red-400" : "text-gray-500"}`}>
+                    {delta > 0 ? "+" : ""}{delta} vs anterior
+                  </span>
+                );
+              })()}
+              {historyExpanded ? <ChevronUp size={18} className="text-gray-500" /> : <ChevronDown size={18} className="text-gray-500" />}
+            </div>
+          </button>
+
+          {historyExpanded && (
+            <div className="mt-4 pt-4 border-t border-wuipi-border space-y-4 animate-fade-in">
+              {/* Score trend chart */}
+              {historyData.length > 0 && (
+                <div>
+                  <p className="text-xs text-gray-500 mb-3">Tendencia del Score (ultimos {historyData.length} briefings)</p>
+                  <div className="h-[180px]">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={[...historyData].reverse().map(b => ({
+                        date: new Date(b.created_at).toLocaleDateString("es-VE", { day: "2-digit", month: "short", timeZone: "America/Caracas" }),
+                        score: b.score,
+                        id: b.id,
+                      }))}>
+                        <XAxis dataKey="date" tick={{ fill: "#9ca3af", fontSize: 10 }} axisLine={false} tickLine={false} />
+                        <YAxis domain={[0, 100]} tick={{ fill: "#6b7280", fontSize: 10 }} axisLine={false} tickLine={false} width={30} />
+                        <Tooltip
+                          contentStyle={{ backgroundColor: "#111827", border: "1px solid #1e293b", borderRadius: 12, fontSize: 12 }}
+                          labelStyle={{ color: "#fff", fontWeight: 600 }}
+                          formatter={(value: number) => [`${value}/100`, "Score"]}
+                        />
+                        <Bar dataKey="score" radius={[4, 4, 0, 0]} barSize={24} cursor="pointer"
+                          onClick={(entry: any) => {
+                            const found = historyData.find(b => b.id === entry.id);
+                            if (found) setSelectedBriefing(selectedBriefing?.id === found.id ? null : found);
+                          }}>
+                          {[...historyData].reverse().map((b, i) => (
+                            <Cell key={i} fill={b.score >= 80 ? "#10b981" : b.score >= 50 ? "#f59e0b" : "#ef4444"}
+                              fillOpacity={selectedBriefing?.id === b.id ? 1 : 0.6} />
+                          ))}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <p className="text-[10px] text-gray-600 text-center mt-1">Click en una barra para ver el detalle</p>
+                </div>
+              )}
+
+              {/* Selected briefing detail */}
+              {selectedBriefing && (
+                <div className="p-4 bg-wuipi-bg rounded-xl border border-cyan-500/20 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Calendar size={14} className="text-cyan-400" />
+                      <span className="text-sm font-bold text-white">
+                        {new Date(selectedBriefing.created_at).toLocaleDateString("es-VE", { weekday: "long", day: "numeric", month: "long", timeZone: "America/Caracas" })}
+                      </span>
+                      <span className="text-xs text-gray-500">
+                        {new Date(selectedBriefing.created_at).toLocaleTimeString("es-VE", { hour: "2-digit", minute: "2-digit", timeZone: "America/Caracas" })}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className={`text-lg font-extrabold ${selectedBriefing.score >= 80 ? "text-emerald-400" : selectedBriefing.score >= 50 ? "text-amber-400" : "text-red-400"}`}>
+                        {selectedBriefing.score}/100
+                      </span>
+                      <EngineBadge engine={selectedBriefing.engine} />
+                    </div>
+                  </div>
+
+                  {/* KPIs */}
+                  {selectedBriefing.kpis && (
+                    <div className="grid grid-cols-5 gap-2">
+                      {selectedBriefing.kpis.salud_general && <KPICard kpi={selectedBriefing.kpis.salud_general} icon="🏢" />}
+                      {selectedBriefing.kpis.riesgo_operativo && <KPICard kpi={selectedBriefing.kpis.riesgo_operativo} icon="⚠️" />}
+                      {selectedBriefing.kpis.eficiencia_soporte && <KPICard kpi={selectedBriefing.kpis.eficiencia_soporte} icon="🎧" />}
+                      {selectedBriefing.kpis.crecimiento && <KPICard kpi={selectedBriefing.kpis.crecimiento} icon="📈" />}
+                      {selectedBriefing.kpis.salud_financiera && <KPICard kpi={selectedBriefing.kpis.salud_financiera} icon="💰" />}
+                    </div>
+                  )}
+
+                  {/* Summary */}
+                  {selectedBriefing.summary && (
+                    <p className="text-sm text-gray-300 leading-relaxed">{selectedBriefing.summary}</p>
+                  )}
+
+                  {/* Insights */}
+                  {selectedBriefing.insights?.length > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-xs text-gray-500 font-medium">Insights ({selectedBriefing.insights.length})</p>
+                      {selectedBriefing.insights.map((ins: any, i: number) => {
+                        const sc = SEVERITY_CONFIG[ins.severity as keyof typeof SEVERITY_CONFIG] || SEVERITY_CONFIG.low;
+                        return (
+                          <div key={i} className="flex items-start gap-2 text-xs">
+                            <span className={`w-2 h-2 rounded-full mt-1 shrink-0 ${sc.dot}`} />
+                            <div>
+                              <span className="text-white font-medium">{ins.title}</span>
+                              <span className="text-gray-500 ml-1">— {ins.description}</span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {/* Telegram status */}
+                  {(selectedBriefing.telegram_sent?.length > 0 || selectedBriefing.telegram_failed?.length > 0) && (
+                    <div className="flex items-center gap-3 text-[10px]">
+                      {selectedBriefing.telegram_sent?.length > 0 && (
+                        <span className="text-emerald-400">Telegram: {selectedBriefing.telegram_sent.join(", ")}</span>
+                      )}
+                      {selectedBriefing.telegram_failed?.length > 0 && (
+                        <span className="text-red-400">Falló: {selectedBriefing.telegram_failed.join(", ")}</span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {historyData.length === 0 && (
+                <div className="text-center py-8">
+                  <History size={32} className="mx-auto mb-2 text-gray-600" />
+                  <p className="text-sm text-gray-500">Sin historial aun. Los briefings se guardan automaticamente.</p>
+                </div>
+              )}
+            </div>
+          )}
+        </Card>
 
         <style>{`@keyframes pulse { 0%,100%{opacity:.3;transform:scale(.8)} 50%{opacity:1;transform:scale(1.1)} }`}</style>
       </div>
