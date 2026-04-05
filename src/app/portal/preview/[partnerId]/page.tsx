@@ -84,7 +84,7 @@ const SOPORTIN_SUGGESTED = [
 ];
 
 function SoportinChat({ partnerId, customerName }: { partnerId: number; customerName: string }) {
-  const [messages, setMessages] = useState<Array<{ id: string; role: "user" | "assistant"; content: string }>>([]);
+  const [messages, setMessages] = useState<Array<{ id: string; role: "user" | "assistant"; content: string; whatsapp?: { department: string; url: string } | null }>>([]);
   const [input, setInput] = useState("");
   const [typing, setTyping] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
@@ -104,7 +104,7 @@ function SoportinChat({ partnerId, customerName }: { partnerId: number; customer
         body: JSON.stringify({ message: msg, partnerId, history: messages.slice(-10) }),
       });
       const data = await res.json();
-      setMessages(prev => [...prev, { id: `a-${Date.now()}`, role: "assistant", content: data.content || "Error, intenta de nuevo." }]);
+      setMessages(prev => [...prev, { id: `a-${Date.now()}`, role: "assistant", content: data.content || "Error, intenta de nuevo.", whatsapp: data.whatsapp || null }]);
     } catch {
       setMessages(prev => [...prev, { id: `e-${Date.now()}`, role: "assistant", content: "No pude conectar. Intenta de nuevo." }]);
     } finally { setTyping(false); }
@@ -148,6 +148,12 @@ function SoportinChat({ partnerId, customerName }: { partnerId: number; customer
             }`}>
               {msg.role === "assistant" && <div className="flex items-center gap-1 mb-1"><Bot size={10} className="text-[#0F71F2]" /><span className="text-[10px] text-[#0F71F2] font-medium">Soportin</span></div>}
               <p className="whitespace-pre-wrap leading-relaxed">{msg.content}</p>
+              {msg.whatsapp && (
+                <a href={msg.whatsapp.url} target="_blank" rel="noopener noreferrer"
+                  className="mt-2 flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[#25D366]/10 border border-[#25D366]/20 text-[#25D366] text-xs font-medium hover:bg-[#25D366]/20 transition-colors w-fit">
+                  Contactar {msg.whatsapp.department} por WhatsApp
+                </a>
+              )}
             </div>
           </div>
         ))}
