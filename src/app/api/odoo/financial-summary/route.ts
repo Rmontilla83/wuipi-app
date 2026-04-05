@@ -11,6 +11,7 @@ import {
 import { fetchBCVRate } from "@/lib/integrations/bcv";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 30; // Vercel Pro: multiple Odoo RPC calls
 
 // In-memory cache (2 minutes)
 let cache: { data: any; ts: number } | null = null;

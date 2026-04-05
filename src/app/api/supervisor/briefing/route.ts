@@ -3,6 +3,7 @@ import { generateDualBriefing, isAnyEngineConfigured } from "@/lib/ai/model-rout
 import { gatherBusinessData } from "@/lib/supervisor/gather-data";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60; // Vercel Pro: 60s for dual AI calls
 
 // Step 1: Gemini Flash — Data analysis + anomaly detection
 const GEMINI_PROMPT = `Eres un analista de datos de Wuipi Telecomunicaciones, un ISP en Venezuela.
@@ -93,6 +94,46 @@ Reglas:
 - No uses emojis
 - Responde SOLO con JSON, sin texto adicional ni backticks`;
 
+// Single-engine fallback: outputs FINAL format directly (when only one engine available)
+const SINGLE_PROMPT = `Eres el Supervisor IA de Wuipi Telecomunicaciones, un ISP en Venezuela (Anzoategui).
+Tu rol es ser un CEO multidisciplinario virtual. Analiza los datos operativos y genera un briefing ejecutivo.
+
+Genera un JSON con esta estructura exacta:
+{
+  "score": number (0-100, salud general del negocio),
+  "score_trend": "stable" | "improving" | "declining",
+  "kpis": {
+    "salud_general": { "value": string, "label": string, "trend": "up" | "down" | "stable" },
+    "riesgo_operativo": { "value": string, "label": string, "trend": "up" | "down" | "stable" },
+    "eficiencia_soporte": { "value": string, "label": string, "trend": "up" | "down" | "stable" },
+    "crecimiento": { "value": string, "label": string, "trend": "up" | "down" | "stable" },
+    "salud_financiera": { "value": string, "label": string, "trend": "up" | "down" | "stable" }
+  },
+  "summary": string (parrafo ejecutivo de 3-4 oraciones, directo y accionable),
+  "insights": [
+    {
+      "severity": "critical" | "high" | "medium" | "low",
+      "title": string (max 60 chars),
+      "description": string (1-2 oraciones con hallazgo y recomendacion),
+      "category": "infraestructura" | "soporte" | "ventas" | "clientes" | "finanzas",
+      "para": "operaciones" | "finanzas" | "comercial" | "todos"
+    }
+  ],
+  "recomendaciones_por_area": {
+    "operaciones": string,
+    "finanzas": string,
+    "comercial": string
+  }
+}
+
+Reglas:
+- Se directo, con numeros, sin rodeos
+- Max 7 insights priorizados por impacto
+- Correlaciona datos entre areas
+- Si tasa cobranza < 85%, es insight high/critical
+- No inventes datos — si falta una fuente, mencionalo
+- Responde SOLO con JSON, sin texto adicional ni backticks`;
+
 export async function POST() {
   try {
     if (!isAnyEngineConfigured()) {
@@ -113,10 +154,11 @@ export async function POST() {
     // 2. Build context
     const context = buildContext(businessData);
 
-    // 3. Generate dual briefing (Gemini analyzes → Claude correlates)
+    // 3. Generate dual briefing (Gemini analyzes → Claude correlates → fallback to single)
     const { content: rawText, engine, engines_used } = await generateDualBriefing(
       GEMINI_PROMPT,
       CLAUDE_PROMPT,
+      SINGLE_PROMPT,
       context,
     );
 

@@ -170,6 +170,7 @@ export interface DualBriefingResponse {
 export async function generateDualBriefing(
   geminiPrompt: string,
   claudePrompt: string,
+  singleFallbackPrompt: string,
   context: string,
 ): Promise<DualBriefingResponse> {
   const engines = getAvailableEngines();
@@ -199,15 +200,17 @@ export async function generateDualBriefing(
       return { content: claudeResult, engine: "dual", engines_used: { analysis: "gemini", strategy: "claude" } };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.error("[AI Router] Dual briefing failed:", msg);
+      console.error("[AI Router] Dual briefing failed, falling back to single:", msg);
       errors.push(`Dual: ${msg}`);
+      // Fall through to single mode
     }
   }
 
-  // SINGLE MODE: Use whichever is available
+  // SINGLE MODE: Use the FINAL format prompt (not the step-1 analysis prompt)
   if (engines.gemini) {
     try {
-      const content = await callGeminiFlash(geminiPrompt, userContent, 4096, true);
+      console.log("[AI Router] Single mode: Gemini with full prompt...");
+      const content = await callGeminiFlash(singleFallbackPrompt, userContent, 4096, true);
       return { content, engine: "gemini", engines_used: { analysis: "gemini", strategy: null } };
     } catch (err) {
       errors.push(`Gemini: ${err instanceof Error ? err.message : String(err)}`);
@@ -216,7 +219,8 @@ export async function generateDualBriefing(
 
   if (engines.claude) {
     try {
-      const content = await callClaudeSonnet(claudePrompt, [{ role: "user", content: userContent }], 4096);
+      console.log("[AI Router] Single mode: Claude with full prompt...");
+      const content = await callClaudeSonnet(singleFallbackPrompt, [{ role: "user", content: userContent }], 4096);
       return { content, engine: "claude", engines_used: { analysis: null, strategy: "claude" } };
     } catch (err) {
       errors.push(`Claude: ${err instanceof Error ? err.message : String(err)}`);
@@ -227,15 +231,6 @@ export async function generateDualBriefing(
     throw new Error("No AI engine configured. Add GEMINI_API_KEY or ANTHROPIC_API_KEY.");
   }
   throw new Error(`All AI engines failed: ${errors.join(" | ")}`);
-}
-
-// Legacy single-engine briefing (kept for backward compat)
-export async function generateBriefing(
-  systemPrompt: string,
-  context: string,
-): Promise<AIResponse> {
-  const result = await generateDualBriefing(systemPrompt, systemPrompt, context);
-  return { content: result.content, engine: result.engine === "dual" ? "claude" : result.engine };
 }
 
 // ============================================

@@ -4,6 +4,7 @@ import { chatWithSupervisor, isAnyEngineConfigured } from "@/lib/ai/model-router
 import { gatherBusinessData } from "@/lib/supervisor/gather-data";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60; // Vercel Pro: 60s for AI + data gathering
 
 export async function POST(request: NextRequest) {
   try {
