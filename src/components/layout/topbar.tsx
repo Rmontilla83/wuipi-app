@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { useRouter, usePathname } from "next/navigation";
 import { formatTime } from "@/lib/utils";
-import { Wifi, Brain } from "lucide-react";
+import { Wifi, Brain, ArrowLeft } from "lucide-react";
 
 interface ServiceStats {
   total: number;
@@ -15,9 +16,14 @@ interface TopBarProps {
   subtitle?: string;
   icon?: React.ReactNode;
   actions?: React.ReactNode;
+  showBack?: boolean;
 }
 
-export function TopBar({ title, subtitle, icon, actions }: TopBarProps) {
+export function TopBar({ title, subtitle, icon, actions, showBack }: TopBarProps) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const isHome = pathname === "/comando";
+  const shouldShowBack = showBack ?? !isHome;
   const [time, setTime] = useState(new Date());
   const [services, setServices] = useState<ServiceStats | null>(null);
   const [aiStatus, setAiStatus] = useState<{ ai: boolean; gemini: boolean; claude: boolean } | null>(null);
@@ -51,6 +57,12 @@ export function TopBar({ title, subtitle, icon, actions }: TopBarProps) {
   return (
     <header className="h-16 px-7 flex items-center justify-between border-b border-wuipi-border bg-wuipi-sidebar shrink-0">
       <div className="flex items-center gap-3">
+        {shouldShowBack && (
+          <button onClick={() => router.back()}
+            className="flex items-center justify-center w-8 h-8 rounded-lg border border-wuipi-border text-gray-400 hover:text-white hover:border-wuipi-accent/40 transition-all">
+            <ArrowLeft size={16} />
+          </button>
+        )}
         <h1 className="text-xl font-bold text-white flex items-center gap-2">
           {icon}
           {title}

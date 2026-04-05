@@ -659,23 +659,30 @@ function OperacionesTab({ infra, problems, hosts, infraLoading }: {
         <KPICard label="Resueltos hoy" value={soporte ? soporte.tickets_resolved_today.toString() : "..."} icon={Zap} color="emerald" />
       </div>
 
-      {/* Period filter */}
-      <div className="flex items-center gap-2">
-        <span className="text-xs text-gray-500">Periodo soporte:</span>
-        <div className="flex gap-1">
-          {PERIOD_OPTIONS.map((opt) => (
-            <button key={opt.value} onClick={() => setPeriod(opt.value)}
-              className={`px-3 py-1 rounded-lg text-xs font-medium transition-all ${
-                period === opt.value
-                  ? "bg-amber-500/10 text-amber-400 border border-amber-500/20"
-                  : "text-gray-500 hover:text-gray-300 border border-transparent"
-              }`}>
-              {opt.label}
-            </button>
-          ))}
+      {/* Period filter bar */}
+      <Card className="!p-3 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <span className="text-sm font-medium text-white">Soporte</span>
+          <div className="flex gap-1 bg-wuipi-bg rounded-lg p-0.5">
+            {PERIOD_OPTIONS.map((opt) => (
+              <button key={opt.value} onClick={() => setPeriod(opt.value)}
+                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+                  period === opt.value
+                    ? "bg-amber-500/15 text-amber-400 shadow-sm"
+                    : "text-gray-500 hover:text-gray-300"
+                }`}>
+                {opt.label}
+              </button>
+            ))}
+          </div>
+          {soporteLoading && <RefreshCw size={12} className="animate-spin text-gray-500" />}
         </div>
-        {soporteLoading && <RefreshCw size={12} className="animate-spin text-gray-500" />}
-      </div>
+        {soporte && (
+          <span className="text-xs text-gray-500">
+            {soporte.total_leads} tickets en periodo — {soporte.active_tickets} activos
+          </span>
+        )}
+      </Card>
 
       {/* Red: Problemas + Hosts down */}
       {infra?.zabbixConnected === false && <ZabbixBanner />}
