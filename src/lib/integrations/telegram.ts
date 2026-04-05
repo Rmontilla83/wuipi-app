@@ -131,6 +131,13 @@ export function formatOperacionesBriefing(briefing: any): string {
     .filter((ins: any) => ins.para === "operaciones" || ins.para === "todos" || ins.category === "infraestructura" || ins.category === "soporte")
     .slice(0, 5);
 
+  // Sanitize insights for ops: remove dollar amounts, replace with % MRR
+  const sanitizedInsights = insights.map((ins: any) => ({
+    ...ins,
+    title: removeDollarAmounts(ins.title),
+    description: removeDollarAmounts(ins.description),
+  }));
+
   const kpis = briefing.kpis || {};
   const parts = [
     `⚙️ <b>OPERACIONES — Briefing Diario</b>`,
@@ -140,9 +147,9 @@ export function formatOperacionesBriefing(briefing: any): string {
   if (kpis.eficiencia_soporte) parts.push(`🎧 Soporte: <b>${kpis.eficiencia_soporte.value}</b> (${trendLabel(kpis.eficiencia_soporte.trend)})`);
   if (kpis.riesgo_operativo) parts.push(`⚠️ Riesgo: <b>${kpis.riesgo_operativo.value}</b> (${trendLabel(kpis.riesgo_operativo.trend)})`);
 
-  if (insights.length > 0) {
+  if (sanitizedInsights.length > 0) {
     parts.push(``, `📋 <b>ALERTAS:</b>`);
-    for (const ins of insights) {
+    for (const ins of sanitizedInsights) {
       const icon = ins.severity === "critical" ? "🔴" : ins.severity === "high" ? "🟠" : "🟡";
       parts.push(`${icon} <b>${escHtml(ins.title)}</b>`);
       parts.push(`   ${escHtml(ins.description)}`);
@@ -152,7 +159,7 @@ export function formatOperacionesBriefing(briefing: any): string {
   }
 
   const rec = briefing.recomendaciones_por_area?.operaciones;
-  if (rec) parts.push(``, `🎯 <b>Recomendacion:</b> ${escHtml(rec)}`);
+  if (rec) parts.push(``, `🎯 <b>Recomendacion:</b> ${escHtml(removeDollarAmounts(rec))}`);
 
   parts.push(``, `🤖 Supervisor IA | ${timeNow()}`);
   return parts.join("\n");
@@ -266,6 +273,11 @@ export async function sendBriefingToAllChannels(briefing: any): Promise<{
 // ============================================
 // Helpers
 // ============================================
+function removeDollarAmounts(text: string): string {
+  // Remove dollar amounts like $79,764 or $1,234.56 — ops shouldn't see financial figures
+  return text.replace(/\$[\d,]+(?:\.\d+)?/g, "[monto]");
+}
+
 function escHtml(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }

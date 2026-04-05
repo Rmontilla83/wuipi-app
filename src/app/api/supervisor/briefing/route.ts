@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { generateDualBriefing, isAnyEngineConfigured } from "@/lib/ai/model-router";
 import { gatherBusinessData } from "@/lib/supervisor/gather-data";
+import { BUSINESS_RULES, getBillingCycleContext } from "@/lib/supervisor/business-rules";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60; // Vercel Pro: 60s for dual AI calls
@@ -201,6 +202,10 @@ export async function POST() {
 
 function buildContext(data: any): string {
   const parts: string[] = [];
+
+  // Business rules and billing cycle context
+  parts.push(BUSINESS_RULES);
+  parts.push(`CONTEXTO TEMPORAL: ${getBillingCycleContext()}`);
 
   if (data.infra) {
     const i = data.infra;

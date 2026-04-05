@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { generateDualBriefing, isAnyEngineConfigured } from "@/lib/ai/model-router";
 import { gatherBusinessData } from "@/lib/supervisor/gather-data";
 import { isConfigured as isTelegramConfigured, sendBriefingToAllChannels } from "@/lib/integrations/telegram";
+import { BUSINESS_RULES, getBillingCycleContext } from "@/lib/supervisor/business-rules";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60; // Vercel Pro: dual AI + Telegram sends
@@ -43,6 +44,9 @@ const SINGLE_PROMPT = CLAUDE_PROMPT;
 // Build context (same logic as briefing route)
 function buildContext(data: any): string {
   const parts: string[] = [];
+
+  parts.push(BUSINESS_RULES);
+  parts.push(`CONTEXTO TEMPORAL: ${getBillingCycleContext()}`);
 
   if (data.infra) {
     const i = data.infra;

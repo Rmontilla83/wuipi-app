@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { apiError, apiServerError } from "@/lib/api-helpers";
 import { chatWithSupervisor, isAnyEngineConfigured } from "@/lib/ai/model-router";
 import { gatherBusinessData } from "@/lib/supervisor/gather-data";
+import { BUSINESS_RULES, getBillingCycleContext } from "@/lib/supervisor/business-rules";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60; // Vercel Pro: 60s for AI + data gathering
@@ -32,7 +33,13 @@ export async function POST(request: NextRequest) {
     const contextText = buildChatContext(businessData);
 
     const systemPrompt = `Eres el Supervisor IA de Wuipi Telecomunicaciones, un ISP en Venezuela (Anzoategui).
-El usuario es el CEO/socio de la empresa. Tienes acceso a datos en tiempo real de:
+El usuario es el CEO/socio de la empresa.
+
+${BUSINESS_RULES}
+
+CONTEXTO TEMPORAL: ${getBillingCycleContext()}
+
+Tienes acceso a datos en tiempo real de:
 - Infraestructura de red (Zabbix): estado de equipos, problemas, latencia
 - Soporte (Kommo CRM): tickets reales, razones de atencion, carga por tecnico
 - Ventas (CRM): leads, pipeline, conversiones
