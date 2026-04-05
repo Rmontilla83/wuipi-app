@@ -1219,24 +1219,77 @@ export async function getMikrotikNodes(): Promise<MikrotikNode[]> {
     searchRead("mikrotik.service", [
       ["state", "in", ["progress", "suspended"]],
     ], {
-      fields: ["node_id", "state"],
+      fields: ["node_id", "state", "subscription_id"],
       limit: 5000,
     }),
   ]);
 
-  // Count services per node
-  const nodeCounts = new Map<number, { active: number; suspended: number }>();
+  // Collect subscription IDs from active services to get MRR
+  const subIds = new Set<number>();
+  const serviceSubMap = new Map<number, number>(); // service.id → subscription_id
+  for (const s of rawServices) {
+    if (s.state === "progress" && s.subscription_id?.[0]) {
+      subIds.add(s.subscription_id[0]);
+      serviceSubMap.set(s.id, s.subscription_id[0]);
+    }
+  }
+
+  // Get subscription line prices grouped by subscription
+  const subMrr = new Map<number, number>(); // subscription_id → recurring_monthly
+  if (subIds.size > 0) {
+    const subs = await searchRead("sale.order", [
+      ["id", "in", Array.from(subIds)],
+    ], {
+      fields: ["recurring_monthly", "order_line"],
+      limit: 3000,
+    });
+    // Get per-line prices for more accurate per-service MRR
+    const allLineIds: number[] = [];
+    for (const sub of subs) {
+      if (sub.order_line) allLineIds.push(...sub.order_line);
+    }
+    const linePrices = new Map<number, number>();
+    if (allLineIds.length > 0) {
+      const lines = await searchRead("sale.order.line", [
+        ["id", "in", allLineIds],
+        ["product_id", "!=", false],
+      ], {
+        fields: ["order_id", "price_subtotal"],
+        limit: 10000,
+      });
+      // Average price per line per subscription
+      const subLineCounts = new Map<number, { total: number; count: number }>();
+      for (const l of lines) {
+        const sid = l.order_id[0];
+        if (!subLineCounts.has(sid)) subLineCounts.set(sid, { total: 0, count: 0 });
+        const entry = subLineCounts.get(sid)!;
+        entry.total += l.price_subtotal || 0;
+        entry.count++;
+      }
+      for (const [sid, data] of subLineCounts) {
+        subMrr.set(sid, data.count > 0 ? data.total / data.count : 0);
+      }
+    }
+  }
+
+  // Count services per node + MRR
+  const nodeCounts = new Map<number, { active: number; suspended: number; mrr: number }>();
   for (const s of rawServices) {
     const nid = s.node_id?.[0];
     if (!nid) continue;
-    if (!nodeCounts.has(nid)) nodeCounts.set(nid, { active: 0, suspended: 0 });
+    if (!nodeCounts.has(nid)) nodeCounts.set(nid, { active: 0, suspended: 0, mrr: 0 });
     const c = nodeCounts.get(nid)!;
-    if (s.state === "progress") c.active++;
-    else if (s.state === "suspended") c.suspended++;
+    if (s.state === "progress") {
+      c.active++;
+      const sid = s.subscription_id?.[0];
+      if (sid && subMrr.has(sid)) c.mrr += subMrr.get(sid)!;
+    } else if (s.state === "suspended") {
+      c.suspended++;
+    }
   }
 
   return rawNodes.map((n: any) => {
-    const counts = nodeCounts.get(n.id) || { active: 0, suspended: 0 };
+    const counts = nodeCounts.get(n.id) || { active: 0, suspended: 0, mrr: 0 };
     return {
       id: n.id,
       name: n.name || "",
@@ -1246,6 +1299,7 @@ export async function getMikrotikNodes(): Promise<MikrotikNode[]> {
       services_active: counts.active,
       services_suspended: counts.suspended,
       services_total: counts.active + counts.suspended,
+      mrr_usd: Math.round(counts.mrr * 100) / 100,
     };
   }).sort((a, b) => b.services_total - a.services_total);
 }

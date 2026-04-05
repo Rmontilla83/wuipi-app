@@ -183,6 +183,7 @@ export interface MikrotikNode {
   services_active: number;
   services_suspended: number;
   services_total: number;
+  mrr_usd: number;
 }
 
 export interface MikrotikRouter {

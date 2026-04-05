@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { TopBar } from "@/components/layout/topbar";
 import { Card } from "@/components/ui/card";
 import { KPICard } from "@/components/ui/kpi-card";
@@ -8,6 +9,7 @@ import {
   ZabbixBanner, AlertBanner, ProblemasActivos,
 } from "@/components/comando/infra";
 import type { InfraOverview, InfraProblem, InfraHost } from "@/types/zabbix";
+import type { MikrotikNode } from "@/types/odoo";
 import {
   Target, DollarSign, Headphones, TrendingUp,
   RefreshCw, AlertTriangle, Clock,
@@ -351,7 +353,7 @@ const COBRANZA_STAGE_COLORS: Record<string, string> = {
   gestion_cobranza: "bg-red-500", recuperado: "bg-emerald-500", retirado_definitivo: "bg-gray-600",
 };
 
-function FinanzasTab({ stats, cobranzas }: { stats: FinanceStats | null; cobranzas: CobranzasStats | null }) {
+function FinanzasTab({ stats, cobranzas, nodes }: { stats: FinanceStats | null; cobranzas: CobranzasStats | null; nodes: MikrotikNode[] }) {
   if (!stats) return <LoadingPlaceholder />;
 
   const effectiveness = stats.invoiced_ved > 0
@@ -536,38 +538,66 @@ function FinanzasTab({ stats, cobranzas }: { stats: FinanceStats | null; cobranz
         </Card>
       </div>
 
-      {/* Cobros por banco + MRR por categoria */}
+      {/* Cobros por banco + MRR por Nodo */}
       <div className="grid grid-cols-2 gap-4">
         <BankDistribution />
 
         <Card>
-          <h3 className="text-base font-bold text-white mb-4">MRR por Categoria</h3>
-          <div className="space-y-3">
-            {mrrByCategory.map((cat) => {
-              const maxCat = Math.max(...mrrByCategory.map(c => c.active), 1);
-              return (
-                <div key={cat.category}>
-                  <div className="flex items-center justify-between text-xs mb-1">
-                    <span className="text-gray-300 font-medium">{cat.category}</span>
-                    <span className="text-gray-400">
-                      <span className="text-emerald-400">{cat.active}</span>
-                      {cat.paused > 0 && <span className="text-amber-400 ml-1">+{cat.paused} pau</span>}
-                    </span>
-                  </div>
-                  <div className="h-2.5 bg-wuipi-bg rounded-full overflow-hidden flex">
-                    <div className="bg-emerald-500 h-full rounded-l-full" style={{ width: `${(cat.active / maxCat) * 100}%` }} />
-                    {cat.paused > 0 && <div className="bg-amber-500 h-full" style={{ width: `${(cat.paused / maxCat) * 100}%` }} />}
-                  </div>
-                </div>
-              );
-            })}
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-base font-bold text-white">MRR por Nodo</h3>
+            <Link href="/infraestructura" className="text-xs text-[#F46800] hover:underline flex items-center gap-1">
+              Nodos <ExternalLink size={12} />
+            </Link>
           </div>
-          <div className="mt-3 pt-3 border-t border-wuipi-border flex items-center justify-between text-xs">
-            <span className="text-gray-500">{stats.total_services} servicios totales</span>
-            <span className="text-white font-medium">{stats.active_services} activos / {stats.paused_services} pausados</span>
-          </div>
+          {nodes.length > 0 ? (
+            <>
+              <div className="space-y-2 max-h-[280px] overflow-auto">
+                {nodes.filter(n => n.mrr_usd > 0).slice(0, 15).map((node) => {
+                  const maxMrr = Math.max(...nodes.map(n => n.mrr_usd), 1);
+                  return (
+                    <div key={node.id}>
+                      <div className="flex items-center justify-between text-xs mb-1">
+                        <span className="text-gray-300 font-medium">{node.name}</span>
+                        <span className="text-gray-400">
+                          <span className="text-emerald-400 font-medium">{fmtUsd(node.mrr_usd)}</span>
+                          <span className="ml-1 text-gray-600">({node.services_active} act)</span>
+                        </span>
+                      </div>
+                      <div className="h-1.5 bg-wuipi-bg rounded-full overflow-hidden">
+                        <div className="bg-emerald-500 h-full rounded-full" style={{ width: `${(node.mrr_usd / maxMrr) * 100}%` }} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="mt-3 pt-3 border-t border-wuipi-border flex items-center justify-between text-xs">
+                <span className="text-gray-500">{nodes.length} nodos</span>
+                <span className="text-white font-medium">
+                  MRR total: {fmtUsd(nodes.reduce((s, n) => s + n.mrr_usd, 0))}
+                </span>
+              </div>
+            </>
+          ) : (
+            <p className="text-sm text-gray-500 text-center py-8">Cargando nodos...</p>
+          )}
         </Card>
       </div>
+
+      {/* Servicios por categoria (compact) */}
+      {mrrByCategory.length > 0 && (
+        <Card>
+          <h3 className="text-base font-bold text-white mb-3">Servicios por Categoria</h3>
+          <div className="grid grid-cols-3 lg:grid-cols-6 gap-3">
+            {mrrByCategory.map((cat) => (
+              <div key={cat.category} className="p-3 bg-wuipi-bg rounded-xl border border-wuipi-border text-center">
+                <p className="text-xs text-gray-500 mb-1">{cat.category}</p>
+                <p className="text-lg font-bold text-white">{cat.active}</p>
+                {cat.paused > 0 && <p className="text-[10px] text-amber-400">+{cat.paused} pau</p>}
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
     </div>
   );
 }
@@ -575,16 +605,37 @@ function FinanzasTab({ stats, cobranzas }: { stats: FinanceStats | null; cobranz
 // ============================================
 // TAB: OPERACIONES (Soporte + Infra + Calidad)
 // ============================================
-function OperacionesTab({ soporte, infra, problems, hosts, infraLoading }: {
-  soporte: SoporteData | null;
+function OperacionesTab({ infra, problems, hosts, infraLoading }: {
   infra: InfraOverview | null;
   problems: InfraProblem[];
   hosts: InfraHost[];
   infraLoading: boolean;
 }) {
+  const [soporte, setSoporte] = useState<SoporteData | null>(null);
+  const [period, setPeriod] = useState("30d");
+  const [soporteLoading, setSoporteLoading] = useState(true);
+
+  const fetchSoporte = useCallback(async (p: string) => {
+    setSoporteLoading(true);
+    try {
+      const res = await fetch(`/api/soporte?period=${p}`);
+      if (res.ok) setSoporte(await res.json());
+    } catch { /* ignore */ }
+    finally { setSoporteLoading(false); }
+  }, []);
+
+  useEffect(() => { fetchSoporte(period); }, [period, fetchSoporte]);
+
   if (!soporte && infraLoading) return <LoadingPlaceholder />;
 
   const uptimePct = infra ? (infra.uptimePercent || Math.round((infra.hostsUp / Math.max(infra.totalHosts, 1)) * 1000) / 10) : 0;
+
+  const PERIOD_OPTIONS = [
+    { value: "today", label: "Hoy" },
+    { value: "7d", label: "7 dias" },
+    { value: "30d", label: "30 dias" },
+    { value: "90d", label: "90 dias" },
+  ];
 
   // Category colors
   const CAT_COLORS: Record<string, string> = {
@@ -606,6 +657,24 @@ function OperacionesTab({ soporte, infra, problems, hosts, infraLoading }: {
         <KPICard label="En progreso" value={soporte ? soporte.tickets_in_progress.toString() : "..."} icon={Activity} color="amber"
           sub={soporte ? `de ${soporte.total_leads} totales (30d)` : undefined} />
         <KPICard label="Resueltos hoy" value={soporte ? soporte.tickets_resolved_today.toString() : "..."} icon={Zap} color="emerald" />
+      </div>
+
+      {/* Period filter */}
+      <div className="flex items-center gap-2">
+        <span className="text-xs text-gray-500">Periodo soporte:</span>
+        <div className="flex gap-1">
+          {PERIOD_OPTIONS.map((opt) => (
+            <button key={opt.value} onClick={() => setPeriod(opt.value)}
+              className={`px-3 py-1 rounded-lg text-xs font-medium transition-all ${
+                period === opt.value
+                  ? "bg-amber-500/10 text-amber-400 border border-amber-500/20"
+                  : "text-gray-500 hover:text-gray-300 border border-transparent"
+              }`}>
+              {opt.label}
+            </button>
+          ))}
+        </div>
+        {soporteLoading && <RefreshCw size={12} className="animate-spin text-gray-500" />}
       </div>
 
       {/* Red: Problemas + Hosts down */}
@@ -889,7 +958,18 @@ function LoadingPlaceholder() {
 // MAIN PAGE
 // ============================================
 export default function ComandoPage() {
-  const [tab, setTab] = useState<Tab>("finanzas");
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const tabFromUrl = searchParams.get("tab") as Tab | null;
+  const [tab, setTabState] = useState<Tab>(tabFromUrl && ["finanzas", "operaciones", "crecimiento"].includes(tabFromUrl) ? tabFromUrl : "finanzas");
+
+  const setTab = useCallback((t: Tab) => {
+    setTabState(t);
+    const url = new URL(window.location.href);
+    url.searchParams.set("tab", t);
+    router.replace(url.pathname + url.search, { scroll: false });
+  }, [router]);
+
   const [financeStats, setFinanceStats] = useState<FinanceStats | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -902,6 +982,7 @@ export default function ComandoPage() {
   const [soporteData, setSoporteData] = useState<SoporteData | null>(null);
   const [ventasStats, setVentasStats] = useState<VentasStats | null>(null);
   const [cobranzasStats, setCobranzasStats] = useState<CobranzasStats | null>(null);
+  const [mikrotikNodes, setMikrotikNodes] = useState<MikrotikNode[]>([]);
 
   const loadFinanceStats = useCallback(async () => {
     try {
@@ -954,6 +1035,13 @@ export default function ComandoPage() {
     } catch (err) { console.error("Error loading cobranzas:", err); }
   }, []);
 
+  const loadMikrotikNodes = useCallback(async () => {
+    try {
+      const res = await fetch("/api/infraestructura/nodes");
+      if (res.ok) { const data = await res.json(); setMikrotikNodes(data.nodes || []); }
+    } catch (err) { console.error("Error loading nodes:", err); }
+  }, []);
+
   useEffect(() => {
     loadFinanceStats();
     loadInfraData();
@@ -961,9 +1049,10 @@ export default function ComandoPage() {
     loadSoporteData();
     loadVentasStats();
     loadCobranzasStats();
+    loadMikrotikNodes();
     const interval = setInterval(loadInfraData, 60000);
     return () => clearInterval(interval);
-  }, [loadFinanceStats, loadInfraData, loadTicketStats, loadSoporteData, loadVentasStats, loadCobranzasStats]);
+  }, [loadFinanceStats, loadInfraData, loadTicketStats, loadSoporteData, loadVentasStats, loadCobranzasStats, loadMikrotikNodes]);
 
   const refreshAll = () => {
     loadFinanceStats();
@@ -972,6 +1061,7 @@ export default function ComandoPage() {
     loadSoporteData();
     loadVentasStats();
     loadCobranzasStats();
+    loadMikrotikNodes();
   };
 
   return (
@@ -999,8 +1089,8 @@ export default function ComandoPage() {
         </div>
 
         {/* Tab Content */}
-        {tab === "finanzas" && <FinanzasTab stats={financeStats} cobranzas={cobranzasStats} />}
-        {tab === "operaciones" && <OperacionesTab soporte={soporteData} infra={infraOverview} problems={infraProblems} hosts={infraHosts} infraLoading={infraLoading} />}
+        {tab === "finanzas" && <FinanzasTab stats={financeStats} cobranzas={cobranzasStats} nodes={mikrotikNodes} />}
+        {tab === "operaciones" && <OperacionesTab infra={infraOverview} problems={infraProblems} hosts={infraHosts} infraLoading={infraLoading} />}
         {tab === "crecimiento" && <CrecimientoTab ventas={ventasStats} finance={financeStats} cobranzas={cobranzasStats} />}
       </div>
     </>
