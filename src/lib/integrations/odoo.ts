@@ -652,26 +652,30 @@ export interface SubscriptionSummary {
 }
 
 /**
- * Get subscription counts and real MRR from sale.order subscriptions.
+ * Get service (line) counts and real MRR from sale.order.line.
+ * MRR = sum of price_subtotal for lines with service_state = "progress".
+ * Counts are based on individual service lines, not parent subscriptions.
  */
 export async function getSubscriptionSummary(): Promise<SubscriptionSummary> {
-  const subs = await searchRead("sale.order", [
-    ["is_subscription", "=", true],
-    ["subscription_state", "in", ["3_progress", "4_paused"]],
+  const lines = await searchRead("sale.order.line", [
+    ["order_id.is_subscription", "=", true],
+    ["order_id.subscription_state", "in", ["3_progress", "4_paused"]],
+    ["product_id", "!=", false],
   ], {
-    fields: ["subscription_state", "recurring_monthly"],
-    limit: 5000,
+    fields: ["price_subtotal", "service_state"],
+    limit: 10000,
   });
 
   let active = 0;
   let paused = 0;
   let mrr = 0;
 
-  for (const s of subs) {
-    if (s.subscription_state === "3_progress") {
+  for (const l of lines) {
+    const state = l.service_state || "";
+    if (state === "progress") {
       active++;
-      mrr += s.recurring_monthly || 0;
-    } else {
+      mrr += l.price_subtotal || 0;
+    } else if (state === "suspended" || state === "paused") {
       paused++;
     }
   }
@@ -848,57 +852,36 @@ export async function getOdooClients(options?: {
     }),
   ]);
 
-  // Get subscriptions for these clients to extract main plans and MRR
+  // Get service lines for these clients to extract main plans and MRR
   const partnerIds = rawClients.map((c: any) => c.id);
   const subsByPartner = new Map<number, { plans: string[]; mrr: number; serviceCount: number; servicesActive: number; servicesSuspended: number }>();
 
   if (partnerIds.length > 0) {
-    const subs = await searchRead("sale.order", [
-      ["partner_id", "in", partnerIds],
-      ["is_subscription", "=", true],
-      ["subscription_state", "in", ["3_progress", "4_paused"]],
+    const lines = await searchRead("sale.order.line", [
+      ["order_partner_id", "in", partnerIds],
+      ["order_id.is_subscription", "=", true],
+      ["order_id.subscription_state", "in", ["3_progress", "4_paused"]],
+      ["product_id", "!=", false],
     ], {
-      fields: ["partner_id", "recurring_monthly", "order_line"],
-      limit: 5000,
+      fields: ["order_partner_id", "product_id", "price_subtotal", "service_state"],
+      limit: 10000,
     });
 
-    // Get all order line IDs
-    const allLineIds: number[] = [];
-    for (const s of subs) {
-      if (s.order_line) allLineIds.push(...s.order_line);
-    }
-
-    // Get product names and service_state from lines
-    const lineData = new Map<number, { name: string; state: string }>();
-    if (allLineIds.length > 0) {
-      const lines = await searchRead("sale.order.line", [
-        ["id", "in", allLineIds],
-        ["product_id", "!=", false],
-      ], {
-        fields: ["id", "product_id", "service_state"],
-        limit: 10000,
-      });
-      for (const l of lines) {
-        const name = l.product_id?.[1]?.replace(/\[.*?\]\s*/, "") || "";
-        if (name) lineData.set(l.id, { name, state: l.service_state || "" });
-      }
-    }
-
-    // Group by partner
-    for (const s of subs) {
-      const pid = s.partner_id[0];
+    for (const l of lines) {
+      const pid = l.order_partner_id[0];
       if (!subsByPartner.has(pid)) subsByPartner.set(pid, { plans: [], mrr: 0, serviceCount: 0, servicesActive: 0, servicesSuspended: 0 });
       const entry = subsByPartner.get(pid)!;
-      entry.mrr += s.recurring_monthly || 0;
-      for (const lineId of (s.order_line || [])) {
-        const ld = lineData.get(lineId);
-        if (ld) {
-          entry.serviceCount++;
-          if (ld.state === "progress") entry.servicesActive++;
-          else if (ld.state === "suspended") entry.servicesSuspended++;
-          if (!entry.plans.includes(ld.name)) entry.plans.push(ld.name);
-        }
+      const name = l.product_id?.[1]?.replace(/\[.*?\]\s*/, "") || "";
+      const state = l.service_state || "";
+
+      entry.serviceCount++;
+      if (state === "progress") {
+        entry.servicesActive++;
+        entry.mrr += l.price_subtotal || 0;
+      } else if (state === "suspended") {
+        entry.servicesSuspended++;
       }
+      if (name && !entry.plans.includes(name)) entry.plans.push(name);
     }
   }
 
