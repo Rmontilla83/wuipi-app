@@ -106,19 +106,29 @@ export default function PortalSoporte() {
         )}
       </div>
 
-      {/* Soportin placeholder */}
-      <Card className="!p-4 border-wuipi-purple/20 bg-wuipi-purple/5">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-wuipi-purple/20 flex items-center justify-center shrink-0">
-            <Bot size={20} className="text-wuipi-purple" />
+      {/* Soportin IA */}
+      <Card className="!p-4 border-[#0F71F2]/20 bg-[#0F71F2]/5">
+        <div className="flex items-center gap-4">
+          <div className="w-12 h-12 rounded-xl bg-[#0F71F2]/20 flex items-center justify-center shrink-0">
+            <Bot size={24} className="text-[#0F71F2]" />
           </div>
-          <div>
-            <p className="text-white text-sm font-medium">Soportin IA</p>
-            <p className="text-gray-500 text-xs">Tu asistente virtual 24/7 estara disponible pronto</p>
+          <div className="flex-1">
+            <p className="text-white text-sm font-bold">Soportin IA</p>
+            <p className="text-gray-400 text-xs mt-0.5">
+              Asistente virtual con inteligencia artificial disponible 24/7.
+              Te ayuda con consultas sobre tu servicio, facturacion, problemas tecnicos
+              y te conecta con el equipo de soporte cuando lo necesites.
+            </p>
           </div>
-          <span className="ml-auto px-2 py-0.5 rounded-full text-[10px] font-medium text-amber-400 bg-amber-400/10">
-            <Clock size={10} className="inline mr-1" />Pronto
-          </span>
+          <a
+            href="https://www.wuipi.net/soporte"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#0F71F2] text-white text-sm font-semibold hover:bg-[#0F71F2]/90 transition-colors shrink-0"
+          >
+            <MessageSquare size={16} />
+            Hablar con Soportin
+          </a>
         </div>
       </Card>
 
