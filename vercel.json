@@ -3,6 +3,14 @@
     {
       "path": "/api/cron/supervisor-briefing",
       "schedule": "0 11 * * *"
+    },
+    {
+      "path": "/api/cron/bcv-alert",
+      "schedule": "0 13,19 * * *"
+    },
+    {
+      "path": "/api/cron/drafts-alert",
+      "schedule": "0 14 27-31 * *"
     }
   ]
 }

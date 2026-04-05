@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { generateDualBriefing, isAnyEngineConfigured } from "@/lib/ai/model-router";
 import { gatherBusinessData } from "@/lib/supervisor/gather-data";
 import { BUSINESS_RULES, getBillingCycleContext } from "@/lib/supervisor/business-rules";
+import { createAdminSupabase } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60; // Vercel Pro: 60s for dual AI calls
@@ -188,13 +189,31 @@ export async function POST() {
       }
     }
 
-    return NextResponse.json({
+    const result = {
       ...briefing,
       generated_at: new Date().toISOString(),
       engine,
       engines_used,
       sources: businessData.sources || {},
+    };
+
+    // Save to history (fire and forget)
+    const supabase = createAdminSupabase();
+    supabase.from("briefing_history").insert({
+      score: briefing.score || 0,
+      score_trend: briefing.score_trend || "stable",
+      engine,
+      engines_used,
+      kpis: briefing.kpis || null,
+      summary: briefing.summary || null,
+      insights: briefing.insights || null,
+      recomendaciones_por_area: briefing.recomendaciones_por_area || null,
+      sources: businessData.sources || null,
+    }).then(({ error }) => {
+      if (error) console.error("[Supervisor] Failed to save history:", error.message);
     });
+
+    return NextResponse.json(result);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Error desconocido";
     console.error("[Supervisor Briefing] Error:", message);

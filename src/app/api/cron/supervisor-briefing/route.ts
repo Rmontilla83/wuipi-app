@@ -3,6 +3,7 @@ import { generateDualBriefing, isAnyEngineConfigured } from "@/lib/ai/model-rout
 import { gatherBusinessData } from "@/lib/supervisor/gather-data";
 import { isConfigured as isTelegramConfigured, sendBriefingToAllChannels } from "@/lib/integrations/telegram";
 import { BUSINESS_RULES, getBillingCycleContext } from "@/lib/supervisor/business-rules";
+import { createAdminSupabase } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60; // Vercel Pro: dual AI + Telegram sends
@@ -136,6 +137,25 @@ export async function GET(request: NextRequest) {
 
     // 4. Send to Telegram channels (pass raw data for detailed formatting)
     const { sent, failed } = await sendBriefingToAllChannels(briefing, businessData);
+
+    // 5. Save to briefing history
+    const supabase = createAdminSupabase();
+    await supabase.from("briefing_history").insert({
+      score: briefing.score || 0,
+      score_trend: briefing.score_trend || "stable",
+      engine,
+      engines_used,
+      kpis: briefing.kpis || null,
+      summary: briefing.summary || null,
+      insights: briefing.insights || null,
+      recomendaciones_por_area: briefing.recomendaciones_por_area || null,
+      sources: businessData.sources || null,
+      telegram_sent: sent,
+      telegram_failed: failed,
+    }).then(({ error }) => {
+      if (error) console.error("[Cron] Failed to save briefing history:", error.message);
+      else console.log("[Cron] Briefing saved to history");
+    });
 
     console.log(`[Cron] Briefing sent to: ${sent.join(", ") || "none"}. Failed: ${failed.join(", ") || "none"}`);
 
