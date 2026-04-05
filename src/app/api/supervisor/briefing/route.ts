@@ -176,7 +176,9 @@ export async function POST() {
           .replace(/<antThinking>[\s\S]*?<\/antThinking>/gi, "")
           .trim();
         const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-        briefing = JSON.parse(jsonMatch ? jsonMatch[0] : cleaned);
+        let jsonStr = jsonMatch ? jsonMatch[0] : cleaned;
+        jsonStr = jsonStr.replace(/,\s*([\]}])/g, "$1");
+        briefing = JSON.parse(jsonStr);
       } catch {
         console.error(`[Supervisor] Failed to parse ${engine} JSON. Raw:`, rawText.slice(0, 300));
         return NextResponse.json(

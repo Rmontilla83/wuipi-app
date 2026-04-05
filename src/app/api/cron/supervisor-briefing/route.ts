@@ -112,15 +112,21 @@ export async function GET(request: NextRequest) {
       GEMINI_PROMPT, CLAUDE_PROMPT, SINGLE_PROMPT, context,
     );
 
-    // 3. Parse JSON
+    // 3. Parse JSON (with repair for trailing commas, comments, etc.)
     let briefing;
     try {
       briefing = JSON.parse(rawText);
     } catch {
-      const cleaned = rawText.replace(/```(?:json)?\s*/gi, "").replace(/```/g, "")
-        .replace(/<think>[\s\S]*?<\/think>/gi, "").replace(/<antThinking>[\s\S]*?<\/antThinking>/gi, "").trim();
+      let cleaned = rawText
+        .replace(/```(?:json)?\s*/gi, "").replace(/```/g, "")
+        .replace(/<think>[\s\S]*?<\/think>/gi, "")
+        .replace(/<antThinking>[\s\S]*?<\/antThinking>/gi, "")
+        .trim();
       const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-      briefing = JSON.parse(jsonMatch ? jsonMatch[0] : cleaned);
+      cleaned = jsonMatch ? jsonMatch[0] : cleaned;
+      // Fix trailing commas before } or ]
+      cleaned = cleaned.replace(/,\s*([\]}])/g, "$1");
+      briefing = JSON.parse(cleaned);
     }
 
     briefing.engine = engine;
