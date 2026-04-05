@@ -4,6 +4,7 @@ import { gatherBusinessData } from "@/lib/supervisor/gather-data";
 import { isConfigured as isTelegramConfigured, sendBriefingToAllChannels } from "@/lib/integrations/telegram";
 import { BUSINESS_RULES, getBillingCycleContext } from "@/lib/supervisor/business-rules";
 import { createAdminSupabase } from "@/lib/supabase/server";
+import { saveBriefingToCache } from "@/lib/supervisor/briefing-cache";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60; // Vercel Pro: dual AI + Telegram sends
@@ -135,10 +136,15 @@ export async function GET(request: NextRequest) {
     briefing.generated_at = new Date().toISOString();
     briefing.sources = businessData.sources;
 
-    // 4. Send to Telegram channels (pass raw data for detailed formatting)
+    // 4. Save to cache
+    const engineInfo = { engine, engines_used, sources: businessData.sources || {} };
+    await saveBriefingToCache(briefing, businessData, engineInfo);
+    console.log("[Cron] Fresh briefing generated and cached");
+
+    // 5. Send to Telegram channels (pass raw data for detailed formatting)
     const { sent, failed } = await sendBriefingToAllChannels(briefing, businessData);
 
-    // 5. Save to briefing history
+    // 6. Save to briefing history
     const supabase = createAdminSupabase();
     await supabase.from("briefing_history").insert({
       score: briefing.score || 0,

@@ -1,8 +1,9 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { generateDualBriefing, isAnyEngineConfigured } from "@/lib/ai/model-router";
 import { gatherBusinessData } from "@/lib/supervisor/gather-data";
 import { BUSINESS_RULES, getBillingCycleContext } from "@/lib/supervisor/business-rules";
 import { createAdminSupabase } from "@/lib/supabase/server";
+import { getCachedBriefing, saveBriefingToCache } from "@/lib/supervisor/briefing-cache";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60; // Vercel Pro: 60s for dual AI calls
@@ -136,13 +137,31 @@ Reglas:
 - No inventes datos — si falta una fuente, mencionalo
 - Responde SOLO con JSON, sin texto adicional ni backticks`;
 
-export async function POST() {
+export async function POST(request: NextRequest) {
   try {
     if (!isAnyEngineConfigured()) {
       return NextResponse.json(
         { error: "No hay modelo IA configurado. Agregar GEMINI_API_KEY o ANTHROPIC_API_KEY.", configured: false },
         { status: 503 }
       );
+    }
+
+    const force = request.nextUrl.searchParams.get("force") === "true";
+
+    // Check cache first (unless force refresh)
+    if (!force) {
+      const cached = await getCachedBriefing();
+      if (cached) {
+        console.log("[Briefing] Served from cache, generated at:", cached.generated_at);
+        const res = NextResponse.json({
+          ...cached.briefing,
+          generated_at: cached.generated_at,
+          ...cached.engine_info,
+          source: "cache",
+        });
+        res.headers.set("X-Briefing-Source", "cache");
+        return res;
+      }
     }
 
     // 1. Gather business data
@@ -189,15 +208,14 @@ export async function POST() {
       }
     }
 
-    const result = {
-      ...briefing,
-      generated_at: new Date().toISOString(),
-      engine,
-      engines_used,
-      sources: businessData.sources || {},
-    };
+    const engineInfo = { engine, engines_used, sources: businessData.sources || {} };
+    const result = { ...briefing, generated_at: new Date().toISOString(), ...engineInfo, source: "fresh" };
 
-    // Save to history (fire and forget)
+    // Save to cache + history (fire and forget)
+    saveBriefingToCache(briefing, businessData, engineInfo).then(() => {
+      console.log("[Briefing] Generated fresh, saved to cache");
+    });
+
     const supabase = createAdminSupabase();
     supabase.from("briefing_history").insert({
       score: briefing.score || 0,
@@ -213,7 +231,9 @@ export async function POST() {
       if (error) console.error("[Supervisor] Failed to save history:", error.message);
     });
 
-    return NextResponse.json(result);
+    const res = NextResponse.json(result);
+    res.headers.set("X-Briefing-Source", "fresh");
+    return res;
   } catch (error) {
     const message = error instanceof Error ? error.message : "Error desconocido";
     console.error("[Supervisor Briefing] Error:", message);

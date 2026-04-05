@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
 import { isConfigured, sendBriefingToAllChannels, getChannels } from "@/lib/integrations/telegram";
 import { gatherBusinessData } from "@/lib/supervisor/gather-data";
+import { isCacheRecent } from "@/lib/supervisor/briefing-cache";
 import { apiServerError } from "@/lib/api-helpers";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 30;
+export const maxDuration = 15;
 
-// POST: Send current briefing to Telegram channels (gathers raw data for detailed formatting)
+// POST: Send current briefing to Telegram channels (uses cache if recent)
 export async function POST(request: Request) {
   try {
     if (!isConfigured()) {
@@ -21,9 +22,15 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Briefing data required" }, { status: 400 });
     }
 
-    // Gather raw data for detailed Operaciones channel
+    // Try cache for raw data (avoids re-gathering from all sources)
     let rawData: any = {};
-    try { rawData = await gatherBusinessData(); } catch { /* best effort */ }
+    const cached = await isCacheRecent(30);
+    if (cached?.raw_data) {
+      console.log("[Telegram] Using cached raw data from", cached.generated_at);
+      rawData = cached.raw_data;
+    } else {
+      try { rawData = await gatherBusinessData(); } catch { /* best effort */ }
+    }
 
     const { sent, failed } = await sendBriefingToAllChannels(briefing, rawData);
 

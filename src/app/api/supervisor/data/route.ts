@@ -2,7 +2,7 @@ import { apiSuccess, apiServerError } from "@/lib/api-helpers";
 import { gatherBusinessData } from "@/lib/supervisor/gather-data";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 30; // Vercel Pro: data gathering from multiple sources
+export const maxDuration = 15; // Vercel Pro: data gathering (no AI)
 
 export async function GET() {
   try {

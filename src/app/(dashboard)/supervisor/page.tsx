@@ -213,20 +213,9 @@ export default function SupervisorPage() {
       setError(null);
 
       // Check sessionStorage cache
-      if (!isRefresh) {
-        const cached = sessionStorage.getItem("supervisor_briefing");
-        if (cached) {
-          const parsed = JSON.parse(cached);
-          // Use cache if less than 10 min old
-          if (Date.now() - parsed._cachedAt < 10 * 60 * 1000) {
-            setBriefing(parsed);
-            setLoading(false);
-            return;
-          }
-        }
-      }
-
-      const res = await fetch("/api/supervisor/briefing", { method: "POST" });
+      // Server-side cache handles caching now — no client sessionStorage needed
+      const url = isRefresh ? "/api/supervisor/briefing?force=true" : "/api/supervisor/briefing";
+      const res = await fetch(url, { method: "POST" });
 
       if (res.status === 503) {
         setError("not_configured");
@@ -240,9 +229,6 @@ export default function SupervisorPage() {
 
       const data = await res.json();
       setBriefing(data);
-
-      // Cache in session
-      sessionStorage.setItem("supervisor_briefing", JSON.stringify({ ...data, _cachedAt: Date.now() }));
     } catch (err: any) {
       console.error("[Supervisor] Briefing error:", err);
       setError(err.message || "Error desconocido");
@@ -515,10 +501,15 @@ export default function SupervisorPage() {
               <div className="p-4 bg-wuipi-bg rounded-lg border border-wuipi-border">
                 <div className="flex items-center gap-2 mb-2 flex-wrap">
                   <EngineBadge engine={briefing.engine} />
-                  <span className="text-[10px] text-gray-600">Generado a las {generatedTime}</span>
-                  {briefing.engines_used && (
-                    <span className="text-[10px] text-gray-600">
-                      (Analisis: {briefing.engines_used.analysis || "—"}, Estrategia: {briefing.engines_used.strategy || "—"})
+                  <span className="text-[10px] text-gray-600">
+                    Generado a las {generatedTime}
+                    {briefing.generated_at && ` (hace ${Math.round((Date.now() - new Date(briefing.generated_at).getTime()) / 60000)} min)`}
+                  </span>
+                  {(briefing as any).source && (
+                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                      (briefing as any).source === "cache" ? "bg-cyan-500/10 text-cyan-400" : "bg-emerald-500/10 text-emerald-400"
+                    }`}>
+                      {(briefing as any).source === "cache" ? "cache" : "en vivo"}
                     </span>
                   )}
                   {briefing.sources && Object.entries(briefing.sources).map(([key, ok]) => (
