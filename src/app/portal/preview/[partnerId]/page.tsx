@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useParams } from "next/navigation";
 import { Card } from "@/components/ui/card";
-import { RefreshCw, Eye, ArrowLeft, FileText, Package, HelpCircle, ChevronDown, ChevronUp, CreditCard } from "lucide-react";
+import { RefreshCw, Eye, ArrowLeft, FileText, Package, HelpCircle, ChevronDown, ChevronUp, CreditCard, Bot, MessageSquare } from "lucide-react";
 import type { OdooClientDetail, OdooInvoiceDetail } from "@/types/odoo";
 import Link from "next/link";
 
@@ -277,10 +277,32 @@ export default function PortalPreview() {
         )}
 
         {tab === "soporte" && (
-          <Card className="text-center py-12">
-            <HelpCircle size={32} className="mx-auto mb-3 text-gray-600" />
-            <p className="text-gray-400 text-sm">Seccion de soporte del cliente</p>
-          </Card>
+          <div className="space-y-4">
+            <Card className="!p-4 border-[#0F71F2]/20 bg-[#0F71F2]/5">
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 rounded-xl bg-[#0F71F2]/20 flex items-center justify-center shrink-0">
+                  <Bot size={24} className="text-[#0F71F2]" />
+                </div>
+                <div className="flex-1">
+                  <p className="text-white text-sm font-bold">Soportin IA</p>
+                  <p className="text-gray-400 text-xs mt-0.5">
+                    Asistente virtual con inteligencia artificial disponible 24/7.
+                    Te ayuda con consultas sobre tu servicio, facturacion, problemas tecnicos
+                    y te conecta con el equipo de soporte cuando lo necesites.
+                  </p>
+                </div>
+                <a
+                  href="https://www.wuipi.net/soporte"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#0F71F2] text-white text-sm font-semibold hover:bg-[#0F71F2]/90 transition-colors shrink-0"
+                >
+                  <MessageSquare size={16} />
+                  Hablar con Soportin
+                </a>
+              </div>
+            </Card>
+          </div>
         )}
       </main>
     </div>
