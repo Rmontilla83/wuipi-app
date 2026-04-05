@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useParams } from "next/navigation";
 import { Card } from "@/components/ui/card";
-import { RefreshCw, Eye, ArrowLeft, FileText, Package, HelpCircle, ChevronDown, ChevronUp, CreditCard, Bot, MessageSquare } from "lucide-react";
+import { RefreshCw, Eye, ArrowLeft, FileText, Package, HelpCircle, ChevronDown, ChevronUp, CreditCard, Bot, MessageSquare, Send } from "lucide-react";
 import type { OdooClientDetail, OdooInvoiceDetail } from "@/types/odoo";
 import Link from "next/link";
 
@@ -75,6 +75,99 @@ function ExpandableInvoice({ inv, defaultExpanded }: { inv: OdooInvoiceDetail; d
           )}
         </div>
       )}
+    </Card>
+  );
+}
+
+const SOPORTIN_SUGGESTED = [
+  "Cuanto debo?", "Explicame mis facturas", "Que plan tengo?", "Problemas con internet", "Cambiar de plan",
+];
+
+function SoportinChat({ partnerId, customerName }: { partnerId: number; customerName: string }) {
+  const [messages, setMessages] = useState<Array<{ id: string; role: "user" | "assistant"; content: string }>>([]);
+  const [input, setInput] = useState("");
+  const [typing, setTyping] = useState(false);
+  const endRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, typing]);
+
+  const send = async (text?: string) => {
+    const msg = text || input;
+    if (!msg.trim() || typing) return;
+    const userMsg = { id: `u-${Date.now()}`, role: "user" as const, content: msg };
+    setMessages(prev => [...prev, userMsg]);
+    setInput("");
+    setTyping(true);
+    try {
+      const res = await fetch("/api/portal/soportin", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: msg, partnerId, history: messages.slice(-10) }),
+      });
+      const data = await res.json();
+      setMessages(prev => [...prev, { id: `a-${Date.now()}`, role: "assistant", content: data.content || "Error, intenta de nuevo." }]);
+    } catch {
+      setMessages(prev => [...prev, { id: `e-${Date.now()}`, role: "assistant", content: "No pude conectar. Intenta de nuevo." }]);
+    } finally { setTyping(false); }
+  };
+
+  return (
+    <Card className="!p-0 border-[#0F71F2]/20 overflow-hidden">
+      <div className="px-4 py-3 bg-[#0F71F2]/10 border-b border-[#0F71F2]/20 flex items-center gap-3">
+        <div className="w-9 h-9 rounded-full bg-[#0F71F2]/20 flex items-center justify-center">
+          <Bot size={18} className="text-[#0F71F2]" />
+        </div>
+        <div className="flex-1">
+          <p className="text-white text-sm font-bold">Soportin IA</p>
+          <p className="text-gray-400 text-[10px]">Asistente virtual — conoce la cuenta de este cliente</p>
+        </div>
+        <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium text-emerald-400 bg-emerald-400/10">
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" /> En linea
+        </span>
+      </div>
+      <div className="h-[320px] overflow-auto p-4 space-y-3">
+        {messages.length === 0 && (
+          <div className="text-center py-6">
+            <Bot size={36} className="mx-auto mb-2 text-[#0F71F2]/40" />
+            <p className="text-sm text-white mb-1">Hola! Soy Soportin</p>
+            <p className="text-xs text-gray-500 mb-3">Tengo acceso a las facturas, servicios y pagos de {customerName?.split(" ")[0]}.</p>
+            <div className="flex flex-wrap gap-2 justify-center">
+              {SOPORTIN_SUGGESTED.map(q => (
+                <button key={q} onClick={() => send(q)}
+                  className="px-2.5 py-1 bg-wuipi-bg border border-wuipi-border rounded-lg text-[11px] text-gray-400 hover:text-[#0F71F2] hover:border-[#0F71F2]/30 transition-colors">
+                  {q}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        {messages.map(msg => (
+          <div key={msg.id} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+            <div className={`max-w-[85%] p-3 rounded-2xl text-sm ${
+              msg.role === "user" ? "bg-[#0F71F2]/10 border border-[#0F71F2]/20 rounded-br-sm text-gray-200"
+                : "bg-wuipi-bg border border-wuipi-border rounded-bl-sm text-gray-200"
+            }`}>
+              {msg.role === "assistant" && <div className="flex items-center gap-1 mb-1"><Bot size={10} className="text-[#0F71F2]" /><span className="text-[10px] text-[#0F71F2] font-medium">Soportin</span></div>}
+              <p className="whitespace-pre-wrap leading-relaxed">{msg.content}</p>
+            </div>
+          </div>
+        ))}
+        {typing && (
+          <div className="flex justify-start">
+            <div className="px-4 py-3 bg-wuipi-bg border border-wuipi-border rounded-2xl rounded-bl-sm flex items-center gap-2">
+              <span className="text-[10px] text-gray-500">Revisando cuenta...</span>
+            </div>
+          </div>
+        )}
+        <div ref={endRef} />
+      </div>
+      <div className="px-4 py-3 border-t border-wuipi-border flex gap-2">
+        <input value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => e.key === "Enter" && send()}
+          placeholder="Escribe tu consulta..." className="flex-1 px-3 py-2 bg-wuipi-bg border border-wuipi-border rounded-xl text-sm text-white outline-none focus:border-[#0F71F2]/50 placeholder:text-gray-600" />
+        <button onClick={() => send()} disabled={!input.trim() || typing}
+          className="px-3 py-2 bg-[#0F71F2] rounded-xl text-white disabled:opacity-30 hover:opacity-90">
+          <Send size={16} />
+        </button>
+      </div>
     </Card>
   );
 }
@@ -277,32 +370,7 @@ export default function PortalPreview() {
         )}
 
         {tab === "soporte" && (
-          <div className="space-y-4">
-            <Card className="!p-4 border-[#0F71F2]/20 bg-[#0F71F2]/5">
-              <div className="flex items-center gap-4">
-                <div className="w-12 h-12 rounded-xl bg-[#0F71F2]/20 flex items-center justify-center shrink-0">
-                  <Bot size={24} className="text-[#0F71F2]" />
-                </div>
-                <div className="flex-1">
-                  <p className="text-white text-sm font-bold">Soportin IA</p>
-                  <p className="text-gray-400 text-xs mt-0.5">
-                    Asistente virtual con inteligencia artificial disponible 24/7.
-                    Te ayuda con consultas sobre tu servicio, facturacion, problemas tecnicos
-                    y te conecta con el equipo de soporte cuando lo necesites.
-                  </p>
-                </div>
-                <a
-                  href="https://www.wuipi.net/soporte"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#0F71F2] text-white text-sm font-semibold hover:bg-[#0F71F2]/90 transition-colors shrink-0"
-                >
-                  <MessageSquare size={16} />
-                  Hablar con Soportin
-                </a>
-              </div>
-            </Card>
-          </div>
+          <SoportinChat partnerId={parseInt(partnerId)} customerName={data?.name || ""} />
         )}
       </main>
     </div>

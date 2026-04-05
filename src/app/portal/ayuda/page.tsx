@@ -1,12 +1,19 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { usePortal } from "@/lib/portal/context";
 import { Card } from "@/components/ui/card";
 import {
   RefreshCw, Headphones, Send, Bot, Clock, CheckCircle2,
   AlertCircle, MessageSquare, ChevronDown,
 } from "lucide-react";
+
+interface ChatMessage {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  timestamp: string;
+}
 
 interface PortalTicket {
   id: string;
@@ -22,6 +29,14 @@ const CATEGORIES = [
   { value: "facturacion", label: "Facturacion" },
   { value: "cambio_plan", label: "Cambio de plan" },
   { value: "general", label: "Consulta general" },
+];
+
+const SUGGESTED = [
+  "Cuanto debo actualmente?",
+  "Explicame mis facturas pendientes",
+  "Que plan tengo contratado?",
+  "Tengo problemas con mi internet",
+  "Quiero cambiar de plan",
 ];
 
 function StatusBadge({ status }: { status: string }) {
@@ -45,6 +60,16 @@ export default function PortalSoporte() {
   const [description, setDescription] = useState("");
   const [sending, setSending] = useState(false);
 
+  // Chat state
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatInput, setChatInput] = useState("");
+  const [isTyping, setIsTyping] = useState(false);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [chatMessages, isTyping]);
+
   const fetchTickets = useCallback(async () => {
     try {
       const res = await fetch(`/api/portal/tickets?partner_id=${partnerId}`);
@@ -60,6 +85,49 @@ export default function PortalSoporte() {
   }, [partnerId]);
 
   useEffect(() => { fetchTickets(); }, [fetchTickets]);
+
+  const handleSend = async (text?: string) => {
+    const msg = text || chatInput;
+    if (!msg.trim() || isTyping) return;
+
+    const userMsg: ChatMessage = {
+      id: `u-${Date.now()}`,
+      role: "user",
+      content: msg,
+      timestamp: new Date().toISOString(),
+    };
+    setChatMessages(prev => [...prev, userMsg]);
+    setChatInput("");
+    setIsTyping(true);
+
+    try {
+      const res = await fetch("/api/portal/soportin", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: msg,
+          partnerId,
+          history: chatMessages.slice(-10),
+        }),
+      });
+      const data = await res.json();
+      setChatMessages(prev => [...prev, {
+        id: `a-${Date.now()}`,
+        role: "assistant",
+        content: data.content || "Lo siento, hubo un error. Intenta de nuevo.",
+        timestamp: new Date().toISOString(),
+      }]);
+    } catch {
+      setChatMessages(prev => [...prev, {
+        id: `e-${Date.now()}`,
+        role: "assistant",
+        content: "No pude conectar con el asistente. Intenta de nuevo en un momento.",
+        timestamp: new Date().toISOString(),
+      }]);
+    } finally {
+      setIsTyping(false);
+    }
+  };
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -106,31 +174,98 @@ export default function PortalSoporte() {
         )}
       </div>
 
-      {/* Soportin IA */}
-      <Card className="!p-4 border-[#0F71F2]/20 bg-[#0F71F2]/5">
-        <div className="flex items-center gap-4">
-          <div className="w-12 h-12 rounded-xl bg-[#0F71F2]/20 flex items-center justify-center shrink-0">
-            <Bot size={24} className="text-[#0F71F2]" />
+      {/* Soportin Chat */}
+      <Card className="!p-0 border-[#0F71F2]/20 overflow-hidden">
+        {/* Header */}
+        <div className="px-4 py-3 bg-[#0F71F2]/10 border-b border-[#0F71F2]/20 flex items-center gap-3">
+          <div className="w-9 h-9 rounded-full bg-[#0F71F2]/20 flex items-center justify-center">
+            <Bot size={18} className="text-[#0F71F2]" />
           </div>
           <div className="flex-1">
             <p className="text-white text-sm font-bold">Soportin IA</p>
-            <p className="text-gray-400 text-xs mt-0.5">
-              Asistente virtual con inteligencia artificial disponible 24/7.
-              Te ayuda con consultas sobre tu servicio, facturacion, problemas tecnicos
-              y te conecta con el equipo de soporte cuando lo necesites.
-            </p>
+            <p className="text-gray-400 text-[10px]">Asistente virtual 24/7 — conoce tu cuenta y servicios</p>
           </div>
-          <a
-            href="https://www.wuipi.net/soporte"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#0F71F2] text-white text-sm font-semibold hover:bg-[#0F71F2]/90 transition-colors shrink-0"
+          <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium text-emerald-400 bg-emerald-400/10">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+            En linea
+          </span>
+        </div>
+
+        {/* Messages */}
+        <div className="h-[350px] overflow-auto p-4 space-y-3">
+          {chatMessages.length === 0 && (
+            <div className="text-center py-6">
+              <Bot size={40} className="mx-auto mb-3 text-[#0F71F2]/40" />
+              <p className="text-sm font-medium text-white mb-1">Hola {customerName?.split(" ")[0] || ""}! Soy Soportin</p>
+              <p className="text-xs text-gray-500 mb-4">
+                Tengo acceso a tu cuenta, facturas y servicios. Preguntame lo que necesites.
+              </p>
+              <div className="flex flex-wrap gap-2 justify-center">
+                {SUGGESTED.map(q => (
+                  <button key={q} onClick={() => handleSend(q)}
+                    className="px-3 py-1.5 bg-wuipi-bg border border-wuipi-border rounded-lg text-xs text-gray-400 hover:text-[#0F71F2] hover:border-[#0F71F2]/30 transition-colors">
+                    {q}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {chatMessages.map(msg => (
+            <div key={msg.id} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+              <div className={`max-w-[85%] p-3 rounded-2xl ${
+                msg.role === "user"
+                  ? "bg-[#0F71F2]/10 border border-[#0F71F2]/20 rounded-br-sm"
+                  : "bg-wuipi-bg border border-wuipi-border rounded-bl-sm"
+              }`}>
+                {msg.role === "assistant" && (
+                  <div className="flex items-center gap-1.5 mb-1">
+                    <Bot size={12} className="text-[#0F71F2]" />
+                    <span className="text-[10px] text-[#0F71F2] font-medium">Soportin</span>
+                  </div>
+                )}
+                <p className="text-sm text-gray-200 whitespace-pre-wrap leading-relaxed">{msg.content}</p>
+              </div>
+            </div>
+          ))}
+
+          {isTyping && (
+            <div className="flex justify-start">
+              <div className="px-4 py-3 bg-wuipi-bg border border-wuipi-border rounded-2xl rounded-bl-sm flex items-center gap-2">
+                <div className="flex gap-1">
+                  {[0, 1, 2].map(i => (
+                    <span key={i} className="w-1.5 h-1.5 rounded-full bg-[#0F71F2]" style={{
+                      animation: `soportinPulse 1.2s ease-in-out ${i * 0.2}s infinite`,
+                    }} />
+                  ))}
+                </div>
+                <span className="text-[10px] text-gray-500">Revisando tu cuenta...</span>
+              </div>
+            </div>
+          )}
+          <div ref={chatEndRef} />
+        </div>
+
+        {/* Input */}
+        <div className="px-4 py-3 border-t border-wuipi-border flex gap-2">
+          <input
+            value={chatInput}
+            onChange={e => setChatInput(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && handleSend()}
+            placeholder="Escribe tu consulta..."
+            className="flex-1 px-3 py-2 bg-wuipi-bg border border-wuipi-border rounded-xl text-sm text-white outline-none focus:border-[#0F71F2]/50 placeholder:text-gray-600"
+          />
+          <button
+            onClick={() => handleSend()}
+            disabled={!chatInput.trim() || isTyping}
+            className="px-3 py-2 bg-[#0F71F2] rounded-xl text-white disabled:opacity-30 hover:opacity-90 transition-opacity"
           >
-            <MessageSquare size={16} />
-            Hablar con Soportin
-          </a>
+            <Send size={16} />
+          </button>
         </div>
       </Card>
+
+      <style>{`@keyframes soportinPulse { 0%,100%{opacity:.3;transform:scale(.8)} 50%{opacity:1;transform:scale(1.1)} }`}</style>
 
       {/* Create ticket form */}
       {showForm && (
@@ -192,14 +327,9 @@ export default function PortalSoporte() {
       {/* Tickets list */}
       {loading ? (
         <div className="flex justify-center py-12"><RefreshCw size={20} className="animate-spin text-gray-500" /></div>
-      ) : tickets.length === 0 && !showForm ? (
-        <Card className="text-center py-12">
-          <Headphones size={32} className="mx-auto mb-3 text-gray-600" />
-          <p className="text-gray-400 text-sm">No tienes tickets de soporte</p>
-          <p className="text-gray-600 text-xs mt-1">Crea uno si necesitas ayuda</p>
-        </Card>
-      ) : (
+      ) : tickets.length > 0 && (
         <div className="space-y-2">
+          <h3 className="text-sm font-medium text-gray-400">Tickets anteriores</h3>
           {tickets.map((t) => (
             <Card key={t.id} className="!p-4">
               <div className="flex items-start justify-between">
