@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getOdooClientDetail } from "@/lib/integrations/odoo";
+import { getOdooClientDetail, getMikrotikServiceByPartner } from "@/lib/integrations/odoo";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -82,7 +82,7 @@ REGLAS:
 - Solo temas relacionados con Wuipi y sus servicios.
 - Sea directo con los números: montos exactos, fechas, nombres de planes.`;
 
-function buildClientContext(detail: any): string {
+function buildClientContext(detail: any, services: any[]): string {
   const parts: string[] = [];
 
   // Basic info
@@ -96,19 +96,27 @@ function buildClientContext(detail: any): string {
   parts.push(`- Deuda total: $${detail.total_due || 0} USD`);
   if (detail.credit < 0) parts.push(`- Saldo a favor: Bs ${Math.abs(detail.credit).toFixed(2)}`);
 
-  // Subscriptions / Services
-  if (detail.subscriptions?.length > 0) {
-    parts.push(`\nSERVICIOS (${detail.subscriptions.length} suscripcion${detail.subscriptions.length > 1 ? "es" : ""}):`);
+  // Plans / Services (from Mikrotik — shows plan name + address)
+  if (services.length > 0) {
+    parts.push(`\nPLANES CONTRATADOS (${services.length}):`);
+    for (const svc of services) {
+      const estado = svc.state === "progress" ? "Activo" : svc.state === "suspended" ? "Suspendido" : svc.state === "closed" ? "Cerrado" : svc.state;
+      parts.push(`- Plan: ${svc.product_name} [${estado}]`);
+      if (svc.address) parts.push(`  Direccion: ${svc.address}`);
+      if (svc.node_name) parts.push(`  Nodo: ${svc.node_name} (${svc.router_name || ""})`);
+      if (svc.ip_cpe) parts.push(`  IP CPE: ${svc.ip_cpe}`);
+    }
+  } else if (detail.subscriptions?.length > 0) {
+    // Fallback to subscriptions if no Mikrotik services
+    parts.push(`\nPLANES CONTRATADOS:`);
     for (const sub of detail.subscriptions) {
       const state = sub.state === "3_progress" ? "Activo" : sub.state === "4_paused" ? "Pausado" : sub.state;
-      parts.push(`- ${sub.name} (${state})`);
+      parts.push(`- ${sub.name} (${state}) — $${sub.recurring_monthly}/mes`);
       if (sub.lines?.length > 0) {
         for (const line of sub.lines) {
-          parts.push(`  · ${line.product_name}: $${line.price_unit}/mes${line.service_state === "suspended" ? " [SUSPENDIDO]" : ""}`);
+          parts.push(`  · ${line.product_name}: $${line.price_unit}/mes`);
         }
       }
-      parts.push(`  Recurrente mensual: $${sub.recurring_monthly}`);
-      if (sub.next_invoice_date) parts.push(`  Proxima factura: ${sub.next_invoice_date}`);
     }
   }
 
@@ -155,11 +163,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "AI not configured" }, { status: 503 });
     }
 
-    // Fetch client data from Odoo
+    // Fetch client data from Odoo (detail + Mikrotik services in parallel)
     let clientContext = "No se pudieron cargar los datos del cliente.";
     try {
-      const detail = await getOdooClientDetail(partnerId);
-      clientContext = buildClientContext(detail);
+      const [detail, mkServices] = await Promise.all([
+        getOdooClientDetail(partnerId),
+        getMikrotikServiceByPartner(partnerId).catch(() => []),
+      ]);
+      clientContext = buildClientContext(detail, mkServices);
     } catch (err) {
       console.error("[Soportin] Error fetching client data:", err);
     }
