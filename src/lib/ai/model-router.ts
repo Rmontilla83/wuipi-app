@@ -188,8 +188,9 @@ export async function generateDualBriefing(
       console.log(`[AI Router] Gemini analysis complete — ${geminiAnalysis.length} chars`);
 
       // Step 2: Claude — correlations + strategic recommendations
-      const claudeInput = `Fecha y hora actual: ${timestamp}\n\nANALISIS PREVIO (generado por Gemini Flash a partir de datos en tiempo real):\n${geminiAnalysis}\n\nDATOS ORIGINALES:\n${context}`;
-      console.log("[AI Router] Step 2: Claude correlating and recommending...");
+      // Only pass Gemini's analysis (not raw data again — it's already summarized)
+      const claudeInput = `Fecha y hora actual: ${timestamp}\n\nANALISIS DE DATOS (generado por Gemini Flash a partir de datos en tiempo real):\n${geminiAnalysis}`;
+      console.log(`[AI Router] Step 2: Claude correlating (${claudeInput.length} chars)...`);
       const claudeResult = await callClaudeSonnet(
         claudePrompt,
         [{ role: "user", content: claudeInput }],
@@ -200,7 +201,8 @@ export async function generateDualBriefing(
       return { content: claudeResult, engine: "dual", engines_used: { analysis: "gemini", strategy: "claude" } };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.error("[AI Router] Dual briefing failed, falling back to single:", msg);
+      const stack = err instanceof Error ? err.stack?.split("\n").slice(0, 3).join(" ") : "";
+      console.error(`[AI Router] Dual briefing failed: ${msg} | ${stack}`);
       errors.push(`Dual: ${msg}`);
       // Fall through to single mode
     }
