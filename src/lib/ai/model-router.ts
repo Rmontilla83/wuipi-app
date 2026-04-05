@@ -133,24 +133,42 @@ async function callClaudeSonnet(
   messages: Array<{ role: "user" | "assistant"; content: string }>,
   maxTokens: number = 1500,
 ): Promise<string> {
-  const { default: Anthropic } = await import("@anthropic-ai/sdk");
-  const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
+  console.log(`[AI Router] Calling Claude Sonnet (system: ${systemPrompt.length} chars, msgs: ${messages.length}, maxTokens: ${maxTokens})`);
 
-  const response = await client.messages.create({
-    model: "claude-sonnet-4-20250514",
-    max_tokens: maxTokens,
-    system: systemPrompt,
-    messages,
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) throw new Error("ANTHROPIC_API_KEY not set");
+
+  // Use REST API directly (avoids dynamic import issues in Vercel serverless)
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model: "claude-sonnet-4-20250514",
+      max_tokens: maxTokens,
+      system: systemPrompt,
+      messages,
+    }),
   });
 
-  const text = (response.content as any[])
-    .filter((b) => b.type === "text")
-    .map((b) => b.text)
+  if (!res.ok) {
+    const errBody = await res.text();
+    console.error(`[AI Router] Claude API ${res.status}: ${errBody.slice(0, 300)}`);
+    throw new Error(`Claude API ${res.status}: ${errBody.slice(0, 200)}`);
+  }
+
+  const data = await res.json();
+  const text = (data.content || [])
+    .filter((b: any) => b.type === "text")
+    .map((b: any) => b.text)
     .join("");
 
-  const inputTokens = (response as any).usage?.input_tokens || "?";
-  const outputTokens = (response as any).usage?.output_tokens || "?";
-  console.log(`[AI Router] Claude Sonnet — ${inputTokens} input tokens, ${outputTokens} output tokens`);
+  const inputTokens = data.usage?.input_tokens || "?";
+  const outputTokens = data.usage?.output_tokens || "?";
+  console.log(`[AI Router] Claude Sonnet — ${inputTokens} input, ${outputTokens} output tokens`);
   return text;
 }
 
