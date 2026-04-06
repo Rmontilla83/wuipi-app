@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { TopBar } from "@/components/layout/topbar";
 import { Card } from "@/components/ui/card";
@@ -40,10 +41,7 @@ function ServiceStatusBadge({ c }: { c: OdooClient }) {
 
 export default function ClientesPage() {
   const router = useRouter();
-  const [clients, setClients] = useState<OdooClient[]>([]);
-  const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
-  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
@@ -53,29 +51,26 @@ export default function ClientesPage() {
     return () => clearTimeout(t);
   }, [search]);
 
-  const fetchClients = useCallback(async () => {
-    setLoading(true);
-    try {
+  useEffect(() => { setPage(1); }, [debouncedSearch, statusFilter]);
+
+  const { data: queryData, isLoading: loading, refetch } = useQuery({
+    queryKey: ["odoo-clients", debouncedSearch, statusFilter, page],
+    queryFn: async () => {
       const params = new URLSearchParams();
       if (debouncedSearch) params.set("search", debouncedSearch);
       if (statusFilter) params.set("status", statusFilter);
       params.set("page", String(page));
       params.set("limit", "50");
-
       const res = await fetch(`/api/odoo/clients?${params}`);
       if (!res.ok) throw new Error("Error al cargar clientes");
-      const data = await res.json();
-      setClients(data.clients || []);
-      setTotal(data.total || 0);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  }, [debouncedSearch, statusFilter, page]);
+      return res.json();
+    },
+    staleTime: 60_000,
+    placeholderData: (prev) => prev,
+  });
 
-  useEffect(() => { fetchClients(); }, [fetchClients]);
-  useEffect(() => { setPage(1); }, [debouncedSearch, statusFilter]);
+  const clients: OdooClient[] = queryData?.clients || [];
+  const total: number = queryData?.total || 0;
 
   const totalPages = Math.ceil(total / 50);
 
@@ -109,7 +104,7 @@ export default function ClientesPage() {
               <ChevronDown size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" />
             </div>
             <button
-              onClick={fetchClients}
+              onClick={() => refetch()}
               disabled={loading}
               className="p-2 rounded-lg border border-wuipi-border text-gray-400 hover:text-white transition-colors"
             >

@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { TopBar } from "@/components/layout/topbar";
 import { Card } from "@/components/ui/card";
 import {
@@ -81,27 +82,26 @@ export default function InfraestructuraPage() {
 // ============================================================
 
 function MonitoreoTab() {
-  const [overview, setOverview] = useState<InfraOverview | null>(null);
-  const [problems, setProblems] = useState<InfraProblem[]>([]);
-  const [hosts, setHosts] = useState<InfraHost[]>([]);
-  const [loading, setLoading] = useState(true);
   const [selectedSite, setSelectedSite] = useState<string | null>(null);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const [ov, pr, ho] = await Promise.all([
-          fetch("/api/infraestructura").then(r => r.ok ? r.json() : null),
-          fetch("/api/infraestructura/problems").then(r => r.ok ? r.json() : { problems: [] }),
-          fetch("/api/infraestructura/hosts").then(r => r.ok ? r.json() : { hosts: [] }),
-        ]);
-        setOverview(ov);
-        setProblems(pr.problems || []);
-        setHosts(ho.hosts || []);
-      } catch { /* ignore */ }
-      finally { setLoading(false); }
-    })();
-  }, []);
+  const { data, isLoading: loading } = useQuery({
+    queryKey: ["infraestructura-monitoreo"],
+    queryFn: async () => {
+      const [ov, pr, ho] = await Promise.all([
+        fetch("/api/infraestructura").then(r => r.ok ? r.json() : null),
+        fetch("/api/infraestructura/problems").then(r => r.ok ? r.json() : { problems: [] }),
+        fetch("/api/infraestructura/hosts").then(r => r.ok ? r.json() : { hosts: [] }),
+      ]);
+      return { overview: ov as InfraOverview | null, problems: (pr.problems || []) as InfraProblem[], hosts: (ho.hosts || []) as InfraHost[] };
+    },
+    staleTime: 2 * 60_000,
+    refetchInterval: 5 * 60_000,
+    refetchIntervalInBackground: false,
+  });
+
+  const overview = data?.overview ?? null;
+  const problems = data?.problems ?? [];
+  const hosts = data?.hosts ?? [];
 
   if (loading) {
     return (

@@ -1,19 +1,57 @@
 // ===========================================
-// Kommo CRM API Client
+// Kommo CRM API Client — with auto token refresh
 // ===========================================
 
 const KOMMO_SUBDOMAIN = process.env.KOMMO_SUBDOMAIN;
-const KOMMO_ACCESS_TOKEN = process.env.KOMMO_ACCESS_TOKEN;
+const KOMMO_CLIENT_ID = process.env.KOMMO_CLIENT_ID;
+const KOMMO_CLIENT_SECRET = process.env.KOMMO_CLIENT_SECRET;
+const KOMMO_REDIRECT_URI = process.env.KOMMO_REDIRECT_URI || "https://api.wuipi.net/api/auth/kommo";
+
+let accessToken = process.env.KOMMO_ACCESS_TOKEN || "";
+let refreshToken = process.env.KOMMO_REFRESH_TOKEN || "";
 
 function getBaseUrl(): string {
   if (!KOMMO_SUBDOMAIN) throw new Error("KOMMO_SUBDOMAIN not configured");
-  // Some Kommo accounts use api-X.kommo.com instead of subdomain.kommo.com
-  // The subdomain-based URL handles both cases via Kommo's routing
   return `https://${KOMMO_SUBDOMAIN}.kommo.com/api/v4`;
 }
 
+async function refreshAccessToken(): Promise<boolean> {
+  if (!KOMMO_CLIENT_ID || !KOMMO_CLIENT_SECRET || !refreshToken) {
+    console.warn("Kommo: Cannot refresh token — missing CLIENT_ID, CLIENT_SECRET, or REFRESH_TOKEN");
+    return false;
+  }
+
+  try {
+    const res = await fetch(`https://${KOMMO_SUBDOMAIN}.kommo.com/oauth2/access_token`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        client_id: KOMMO_CLIENT_ID,
+        client_secret: KOMMO_CLIENT_SECRET,
+        grant_type: "refresh_token",
+        refresh_token: refreshToken,
+        redirect_uri: KOMMO_REDIRECT_URI,
+      }),
+    });
+
+    if (!res.ok) {
+      console.error("Kommo token refresh failed:", res.status, await res.text().catch(() => ""));
+      return false;
+    }
+
+    const data = await res.json();
+    accessToken = data.access_token;
+    refreshToken = data.refresh_token;
+    console.log("Kommo: Token refreshed successfully");
+    return true;
+  } catch (err) {
+    console.error("Kommo token refresh error:", err);
+    return false;
+  }
+}
+
 async function kommoFetch<T>(endpoint: string, params?: Record<string, string>): Promise<T> {
-  if (!KOMMO_ACCESS_TOKEN) throw new Error("KOMMO_ACCESS_TOKEN not configured");
+  if (!accessToken) throw new Error("KOMMO_ACCESS_TOKEN not configured");
 
   const url = new URL(`${getBaseUrl()}${endpoint}`);
   if (params) {
@@ -22,16 +60,28 @@ async function kommoFetch<T>(endpoint: string, params?: Record<string, string>):
     }
   }
 
-  const response = await fetch(url.toString(), {
+  let response = await fetch(url.toString(), {
     headers: {
-      Authorization: `Bearer ${KOMMO_ACCESS_TOKEN}`,
+      Authorization: `Bearer ${accessToken}`,
       "Content-Type": "application/json",
     },
     next: { revalidate: 60 },
   });
 
+  // Auto-refresh on 401
   if (response.status === 401) {
-    throw new Error("Kommo token expired - needs refresh");
+    const refreshed = await refreshAccessToken();
+    if (refreshed) {
+      response = await fetch(url.toString(), {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        next: { revalidate: 60 },
+      });
+    } else {
+      throw new Error("Kommo token expired and refresh failed");
+    }
   }
 
   if (!response.ok) {
@@ -141,5 +191,5 @@ export async function getAllLeadsByPipeline(pipelineId: number, from?: number, t
 }
 
 export function isConfigured(): boolean {
-  return !!(KOMMO_SUBDOMAIN && KOMMO_ACCESS_TOKEN);
+  return !!(KOMMO_SUBDOMAIN && accessToken);
 }
