@@ -11,6 +11,7 @@ import { createAdminSupabase } from "@/lib/supabase/server";
 import {
   isOdooConfigured, getMonthlyInvoiceSummary, getSubscriptionSummary,
   getPendingByCustomer, getMikrotikNodes, getMonthlyHistory,
+  getPaymentsByJournal, getExpensesSummary, getPlanDistribution,
 } from "@/lib/integrations/odoo";
 import { fetchBCVRate } from "@/lib/integrations/bcv";
 import * as kommo from "@/lib/integrations/kommo";
@@ -27,6 +28,9 @@ export interface BusinessData {
   mikrotik_nodes?: any[];
   finance?: any;
   cobranzas?: any;
+  payments_by_journal?: any[];
+  expenses_month?: any;
+  plan_distribution?: any[];
 }
 
 export async function gatherBusinessData(): Promise<BusinessData> {
@@ -35,7 +39,7 @@ export async function gatherBusinessData(): Promise<BusinessData> {
     sources: {},
   };
 
-  const [infraRes, problemsRes, soporteRes, leadsRes, clientsRes, nodesRes, mikrotikRes, financeRes, cobranzasRes] =
+  const [infraRes, problemsRes, soporteRes, leadsRes, clientsRes, nodesRes, mikrotikRes, financeRes, cobranzasRes, paymentsRes, expensesRes, plansRes] =
     await Promise.allSettled([
       getInfraOverview(),
       getInfraProblems(),
@@ -46,6 +50,9 @@ export async function gatherBusinessData(): Promise<BusinessData> {
       getMikrotikNodesData(),
       getFinancialSnapshot(),
       getCobranzasSnapshot(),
+      getPaymentsThisMonth(),
+      getExpensesThisMonth(),
+      getPlanDistributionData(),
     ]);
 
   if (infraRes.status === "fulfilled") {
@@ -102,6 +109,18 @@ export async function gatherBusinessData(): Promise<BusinessData> {
     result.sources.cobranzas = false;
   }
 
+  if (paymentsRes.status === "fulfilled" && paymentsRes.value) {
+    result.payments_by_journal = paymentsRes.value;
+  }
+
+  if (expensesRes.status === "fulfilled" && expensesRes.value) {
+    result.expenses_month = expensesRes.value;
+  }
+
+  if (plansRes.status === "fulfilled" && plansRes.value) {
+    result.plan_distribution = plansRes.value;
+  }
+
   return result;
 }
 
@@ -145,12 +164,19 @@ async function getSoporteFromKommo() {
     byCategory[label] = (byCategory[label] || 0) + 1;
   }
 
+  // Unique clients (by contact_id)
+  const uniqueContacts = new Set<number>();
+  for (const lead of leads) {
+    if (lead.contact_id) uniqueContacts.add(lead.contact_id);
+  }
+
   return {
     total: leads.length,
     active: active.length,
     open: open.length,
     in_progress: active.length - open.length,
     resolved_today: resolvedToday.length,
+    unique_clients: uniqueContacts.size,
     by_category: byCategory,
   };
 }
@@ -260,6 +286,30 @@ async function getCobranzasSnapshot() {
       ? Math.round((recovered.length / (recovered.length + all.filter(c => c.stage === "retirado_definitivo").length)) * 100)
       : 0,
   };
+}
+
+async function getPaymentsThisMonth() {
+  if (!isOdooConfigured()) return null;
+  const now = new Date();
+  return getPaymentsByJournal(now.getFullYear(), now.getMonth() + 1);
+}
+
+async function getExpensesThisMonth() {
+  if (!isOdooConfigured()) return null;
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = now.getMonth(); // 0-based
+  const startDate = `${y}-${String(m + 1).padStart(2, "0")}-01`;
+  const endMonth = m === 11 ? 0 : m + 1;
+  const endYear = m === 11 ? y + 1 : y;
+  const endDate = `${endYear}-${String(endMonth + 1).padStart(2, "0")}-01`;
+  const ML: Record<number, string> = { 0:"Ene",1:"Feb",2:"Mar",3:"Abr",4:"May",5:"Jun",6:"Jul",7:"Ago",8:"Sep",9:"Oct",10:"Nov",11:"Dic" };
+  return getExpensesSummary(startDate, endDate, `${ML[m]} ${y}`);
+}
+
+async function getPlanDistributionData() {
+  if (!isOdooConfigured()) return null;
+  try { return await getPlanDistribution(); } catch { return null; }
 }
 
 async function getNetworkNodesList() {

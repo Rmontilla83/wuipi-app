@@ -65,60 +65,117 @@ export async function sendMessage(
 }
 
 // ============================================
-// Format briefing for #socios-360 (all areas)
+// Format briefing for #socios-360 (CEO/Dirección)
+// Data-driven report with AI analysis at the end
 // ============================================
-export function formatSociosBriefing(briefing: any): string {
+export function formatSociosBriefing(briefing: any, rawData?: any): string {
   const date = new Date().toLocaleDateString("es-VE", {
     weekday: "long", day: "numeric", month: "long", year: "numeric",
     timeZone: "America/Caracas",
   });
 
-  const scoreEmoji = briefing.score >= 80 ? "🟢" : briefing.score >= 50 ? "🟡" : "🔴";
-  const trendEmoji = briefing.score_trend === "improving" ? "↗️" : briefing.score_trend === "declining" ? "↘️" : "→";
-
-  // Extract key metrics from KPIs
-  const kpis = briefing.kpis || {};
-  const kpiLines: string[] = [];
-  if (kpis.salud_general) kpiLines.push(`🏢 Salud: <b>${kpis.salud_general.value}</b>`);
-  if (kpis.salud_financiera) kpiLines.push(`💰 Finanzas: <b>${kpis.salud_financiera.value}</b>`);
-  if (kpis.eficiencia_soporte) kpiLines.push(`🎧 Soporte: <b>${kpis.eficiencia_soporte.value}</b>`);
-  if (kpis.crecimiento) kpiLines.push(`📈 Crecimiento: <b>${kpis.crecimiento.value}</b>`);
-  if (kpis.riesgo_operativo) kpiLines.push(`⚠️ Riesgo: <b>${kpis.riesgo_operativo.value}</b>`);
-
-  // Insights
-  const insightLines = (briefing.insights || []).slice(0, 5).map((ins: any) => {
-    const icon = ins.severity === "critical" ? "🔴" : ins.severity === "high" ? "🟠" : ins.severity === "medium" ? "🟡" : "🔵";
-    return `${icon} ${escHtml(ins.title)}`;
-  });
-
-  // Recommendations
-  const recs = briefing.recomendaciones_por_area || {};
-  const recLines: string[] = [];
-  if (recs.operaciones) recLines.push(`⚙️ <b>Ops:</b> ${escHtml(recs.operaciones)}`);
-  if (recs.finanzas) recLines.push(`💰 <b>Fin:</b> ${escHtml(recs.finanzas)}`);
-  if (recs.comercial) recLines.push(`📈 <b>Com:</b> ${escHtml(recs.comercial)}`);
-
-  const engine = briefing.engine === "dual" ? "Gemini + Claude" : briefing.engine || "IA";
+  const fmtUsd = (n: number) => `$${n.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const fmtBs = (n: number) => `Bs ${n.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
   const parts = [
-    `🏢 <b>WUIPI — Briefing Diario</b>`,
-    `📅 ${escHtml(date)} | Score: <b>${briefing.score}/100</b> ${scoreEmoji} ${trendEmoji}`,
-    ``,
-    kpiLines.join("\n"),
-    ``,
-    `📋 <b>ALERTAS:</b>`,
-    insightLines.length > 0 ? insightLines.join("\n") : "Sin alertas",
+    `🏢 <b>WUIPI — Reporte Dirección 360°</b>`,
+    `📅 ${escHtml(date)}`,
   ];
 
+  // ── 1. SALUD FINANCIERA ──
+  parts.push(``, `💰 <b>SALUD FINANCIERA</b>`);
+
+  if (rawData?.finance) {
+    const f = rawData.finance;
+    if (f.subscriptions) {
+      parts.push(`  MRR: <b>${fmtUsd(f.subscriptions.mrr_usd)}</b>`);
+    }
+    if (f.exchange_rate) {
+      parts.push(`  Tasa BCV: <b>${fmtBs(f.exchange_rate)}</b>/USD`);
+    }
+    if (f.monthly) {
+      const m = f.monthly;
+      if (m.ved_collected > 0) parts.push(`  Cobrado VED: ${fmtBs(m.ved_collected)} (${m.ved_collection_rate}%)`);
+      if (m.usd_collected > 0) parts.push(`  Cobrado USD: ${fmtUsd(m.usd_collected)} (${m.usd_collection_rate}%)`);
+    }
+  }
+
+  // Cobrado por banco
+  if (rawData?.payments_by_journal?.length > 0) {
+    parts.push(``, `🏦 <b>COBRADO POR BANCO (mes):</b>`);
+    for (const j of rawData.payments_by_journal) {
+      const cur = j.currency === "USD" ? fmtUsd(j.total) : fmtBs(j.total);
+      parts.push(`  ${j.journal_name}: <b>${cur}</b> (${j.count} mov)`);
+    }
+  }
+
+  // ── 2. SERVICIOS ──
+  parts.push(``);
+  if (rawData?.finance?.subscriptions) {
+    const s = rawData.finance.subscriptions;
+    const total = s.active + s.paused;
+    parts.push(`📡 <b>SERVICIOS:</b> ${total} total | <b>${s.active}</b> activos | ${s.paused} suspendidos`);
+  }
+
+  // Servicios por categoría (plan)
+  if (rawData?.plan_distribution?.length > 0) {
+    const plans = rawData.plan_distribution.slice(0, 6);
+    const planLines = plans.map((p: any) => `${p.name}: ${p.active}`).join(" | ");
+    parts.push(`  ${planLines}`);
+  }
+
+  // ── 3. EGRESOS DEL MES ──
+  if (rawData?.expenses_month) {
+    const e = rawData.expenses_month;
+    parts.push(``, `📊 <b>EGRESOS DEL MES:</b> ${fmtUsd(e.total_usd)}`);
+    if (e.by_category?.length > 0) {
+      for (const c of e.by_category) {
+        parts.push(`  ${c.category}: ${fmtUsd(c.total_usd)} (${c.pct}%)`);
+      }
+    }
+  }
+
+  // ── 4. SOPORTE ──
+  if (rawData?.soporte) {
+    const s = rawData.soporte;
+    parts.push(``, `🎧 <b>SOPORTE (30d):</b> ${s.total} tickets | ${s.active} activos | ${s.resolved_today} resueltos hoy`);
+    if (s.unique_clients > 0) {
+      parts.push(`  👥 Clientes únicos: <b>${s.unique_clients}</b>`);
+    }
+    if (s.by_category && Object.keys(s.by_category).length > 0) {
+      const total = Object.values(s.by_category).reduce((a: number, b: any) => a + b, 0) as number;
+      const sorted = Object.entries(s.by_category).sort((a: any, b: any) => b[1] - a[1]);
+      const catLines = sorted.map(([k, v]: any) => {
+        const pct = total > 0 ? Math.round((v / total) * 100) : 0;
+        return `${k}: ${pct}%`;
+      });
+      parts.push(`  📋 Razones: ${catLines.join(" | ")}`);
+    }
+  }
+
+  // ── 5. CUENTAS POR COBRAR ──
+  if (rawData?.finance?.accounts_receivable) {
+    const ar = rawData.finance.accounts_receivable;
+    parts.push(``, `📄 <b>CxC:</b> ${fmtUsd(ar.total_pending_amount)} pendiente (${ar.total_customers_with_debt} clientes)`);
+  }
+
+  // ── 6. ANÁLISIS IA ──
   if (briefing.summary) {
-    parts.push(``, `💡 <b>RESUMEN:</b>`, escHtml(briefing.summary));
+    parts.push(``, `💡 <b>ANÁLISIS:</b>`, escHtml(briefing.summary));
   }
 
-  if (recLines.length > 0) {
-    parts.push(``, `🎯 <b>RECOMENDACIONES:</b>`, recLines.join("\n"));
+  // Insights (top 3)
+  const insights = (briefing.insights || []).slice(0, 3);
+  if (insights.length > 0) {
+    parts.push(``, `🎯 <b>INSIGHTS:</b>`);
+    for (const ins of insights) {
+      const icon = ins.severity === "critical" ? "🔴" : ins.severity === "high" ? "🟠" : "🟡";
+      parts.push(`${icon} ${escHtml(ins.title)}`);
+    }
   }
 
-  parts.push(``, `🤖 ${engine} | ${new Date().toLocaleTimeString("es-VE", { hour: "2-digit", minute: "2-digit", timeZone: "America/Caracas" })}`);
+  const engine = briefing.engine === "dual" ? "Gemini + Claude" : briefing.engine || "IA";
+  parts.push(``, `🤖 ${engine} | ${timeNow()}`);
 
   return parts.join("\n");
 }
@@ -367,7 +424,7 @@ export async function sendBriefingToAllChannels(briefing: any, rawData?: any): P
   const failed: string[] = [];
 
   const sends: Array<{ name: string; chatId: string | null; format: (b: any, d?: any) => string }> = [
-    { name: "socios", chatId: channels.socios, format: formatSociosBriefing },
+    { name: "socios", chatId: channels.socios, format: (b, d) => formatSociosBriefing(b, d) },
     { name: "operaciones", chatId: channels.operaciones, format: (b, d) => formatOperacionesBriefing(b, d) },
     { name: "finanzas", chatId: channels.finanzas, format: (b, d) => formatFinanzasBriefing(b, d) },
     { name: "comercial", chatId: channels.comercial, format: (b, d) => formatComercialBriefing(b, d) },
