@@ -238,9 +238,25 @@ async function getFinancialSnapshot() {
 
   if (pendingData.status === "fulfilled") {
     const p = pendingData.value;
+
+    // Aging buckets based on oldest_due_date
+    const today = new Date();
+    const aging = { current: { count: 0, amount: 0 }, days30: { count: 0, amount: 0 }, days60: { count: 0, amount: 0 }, days90: { count: 0, amount: 0 }, over90: { count: 0, amount: 0 } };
+    for (const c of p.customers) {
+      if (!c.oldest_due_date || c.total_due <= 0) continue;
+      const dueDate = new Date(c.oldest_due_date);
+      const days = Math.max(0, Math.floor((today.getTime() - dueDate.getTime()) / 86400000));
+      const bucket = days <= 0 ? "current" : days <= 30 ? "days30" : days <= 60 ? "days60" : days <= 90 ? "days90" : "over90";
+      aging[bucket].count++;
+      aging[bucket].amount += c.total_due;
+    }
+    // Round amounts
+    for (const b of Object.values(aging)) b.amount = Math.round(b.amount * 100) / 100;
+
     result.accounts_receivable = {
       total_customers_with_debt: p.total_customers,
       total_pending_amount: Math.round(p.total_due * 100) / 100,
+      aging,
       top_debtors: p.customers.slice(0, 10).map(c => ({
         name: c.customer_name, amount: c.total_due, oldest_invoice: c.oldest_due_date,
       })),

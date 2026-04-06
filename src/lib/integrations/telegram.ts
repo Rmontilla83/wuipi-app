@@ -278,135 +278,166 @@ export function formatOperacionesBriefing(briefing: any, rawData?: any): string 
 }
 
 // ============================================
-// Format for #finanzas (cobranza + MRR + CxC)
+// Format for #finanzas — Gerencia de Finanzas
 // ============================================
 export function formatFinanzasBriefing(briefing: any, rawData?: any): string {
-  // Strict filter: only insights explicitly for finanzas, or finanzas category without specific "para"
-  const insights = (briefing.insights || [])
-    .filter((ins: any) =>
-      ins.para === "finanzas" ||
-      (!ins.para && ins.category === "finanzas")
-    )
-    .slice(0, 5);
+  const fmtUsd = (n: number) => `$${n.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const fmtBs = (n: number) => `Bs ${n.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-  const kpis = briefing.kpis || {};
+  const insights = (briefing.insights || [])
+    .filter((ins: any) => ins.para === "finanzas" || (!ins.para && ins.category === "finanzas"))
+    .slice(0, 3);
+
   const parts = [
-    `💰 <b>FINANZAS — Briefing Diario</b>`,
+    `💰 <b>FINANZAS — Reporte Diario</b>`,
     ``,
   ];
 
-  if (kpis.salud_financiera) parts.push(`💰 Salud financiera: <b>${kpis.salud_financiera.value}</b> (${trendLabel(kpis.salud_financiera.trend)})`);
+  // ── MRR ──
+  if (rawData?.finance?.subscriptions) {
+    parts.push(`📊 <b>MRR:</b> ${fmtUsd(rawData.finance.subscriptions.mrr_usd)}`);
+  }
 
-  // Financial data from raw sources
-  if (rawData?.finance) {
-    const f = rawData.finance;
-    parts.push(``);
-
-    if (f.exchange_rate) {
-      parts.push(`💱 <b>Tasa BCV:</b> Bs ${f.exchange_rate}/USD`);
+  // ── INGRESOS DEL MES (cobrado por banco) ──
+  if (rawData?.payments_by_journal?.length > 0) {
+    parts.push(``, `🏦 <b>INGRESOS DEL MES (por banco):</b>`);
+    let totalCobrado = 0;
+    for (const j of rawData.payments_by_journal) {
+      const cur = j.currency === "USD" ? fmtUsd(j.total) : fmtBs(j.total);
+      parts.push(`  ${j.journal_name}: <b>${cur}</b> (${j.count} mov)`);
+      totalCobrado += j.total;
     }
-
-    if (f.subscriptions) {
-      parts.push(`📊 <b>MRR:</b> $${f.subscriptions.mrr_usd?.toLocaleString("es-VE")} | ${f.subscriptions.active} activos / ${f.subscriptions.paused} pausados`);
-    }
-
-    if (f.accounts_receivable) {
-      const ar = f.accounts_receivable;
-      parts.push(`📄 <b>CxC:</b> $${ar.total_pending_amount?.toLocaleString("es-VE")} pendiente (${ar.total_customers_with_debt} clientes)`);
-    }
-
-    if (f.monthly) {
-      const m = f.monthly;
-      parts.push(``, `📈 <b>Facturación ${m.period || "mes"}:</b>`);
-      if (m.ved_collection_rate !== undefined) parts.push(`  VED: ${m.ved_collection_rate}% cobrado`);
-      if (m.usd_collection_rate !== undefined) parts.push(`  USD: ${m.usd_collection_rate}% cobrado`);
+    if (rawData.payments_by_journal.length > 1) {
+      parts.push(`  <b>Total: ${fmtBs(totalCobrado)}</b>`);
     }
   }
 
-  // Cobranzas data
-  if (rawData?.cobranzas) {
-    const cb = rawData.cobranzas;
-    parts.push(``);
-    parts.push(`🏦 <b>Cobranzas:</b> ${cb.active} casos activos ($${cb.active_amount?.toLocaleString("es-VE")}) | Recovery: ${cb.recovery_rate}%`);
+  // ── EGRESOS DEL MES ──
+  if (rawData?.expenses_month) {
+    const e = rawData.expenses_month;
+    parts.push(``, `📊 <b>EGRESOS DEL MES:</b> ${fmtUsd(e.total_usd)}`);
+    if (e.by_category?.length > 0) {
+      for (const c of e.by_category) {
+        parts.push(`  ${c.category}: ${fmtUsd(c.total_usd)} (${c.pct}%)`);
+      }
+    }
+  }
+
+  // ── CxC ──
+  if (rawData?.finance?.accounts_receivable) {
+    const ar = rawData.finance.accounts_receivable;
+    parts.push(``, `📄 <b>CUENTAS POR COBRAR:</b> ${fmtUsd(ar.total_pending_amount)} (${ar.total_customers_with_debt} clientes)`);
+  }
+
+  // ── ANÁLISIS + INSIGHTS ──
+  if (briefing.summary) {
+    parts.push(``, `💡 <b>ANÁLISIS:</b>`, escHtml(briefing.summary));
   }
 
   if (insights.length > 0) {
-    parts.push(``, `📋 <b>ALERTAS:</b>`);
+    parts.push(``, `🎯 <b>INSIGHTS:</b>`);
     for (const ins of insights) {
       const icon = ins.severity === "critical" ? "🔴" : ins.severity === "high" ? "🟠" : "🟡";
-      parts.push(`${icon} <b>${escHtml(ins.title)}</b>`);
-      parts.push(`   ${escHtml(ins.description)}`);
+      parts.push(`${icon} ${escHtml(ins.title)}`);
     }
-  } else {
-    parts.push(``, `✅ Sin alertas financieras`);
   }
-
-  const rec = briefing.recomendaciones_por_area?.finanzas;
-  if (rec) parts.push(``, `🎯 <b>Recomendacion:</b> ${escHtml(rec)}`);
 
   parts.push(``, `🤖 Supervisor IA | ${timeNow()}`);
   return parts.join("\n");
 }
 
 // ============================================
-// Format for #comercial (ventas + CxC + churn)
+// Format for #comercial — Gerencia Comercial
 // ============================================
 export function formatComercialBriefing(briefing: any, rawData?: any): string {
-  // Strict filter: only insights explicitly for comercial, or ventas/clientes category without specific "para"
-  const insights = (briefing.insights || [])
-    .filter((ins: any) =>
-      ins.para === "comercial" ||
-      (!ins.para && (ins.category === "ventas" || ins.category === "clientes"))
-    )
-    .slice(0, 5);
+  const fmtUsd = (n: number) => `$${n.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const fmtBs = (n: number) => `Bs ${n.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-  const kpis = briefing.kpis || {};
+  const insights = (briefing.insights || [])
+    .filter((ins: any) => ins.para === "comercial" || (!ins.para && (ins.category === "ventas" || ins.category === "clientes")))
+    .slice(0, 3);
+
   const parts = [
-    `📈 <b>COMERCIAL — Briefing Diario</b>`,
+    `📈 <b>COMERCIAL — Reporte Diario</b>`,
     ``,
   ];
 
-  if (kpis.crecimiento) parts.push(`📈 Crecimiento: <b>${kpis.crecimiento.value}</b> (${trendLabel(kpis.crecimiento.trend)})`);
-
-  // Sales pipeline from raw data
-  if (rawData?.leads) {
-    const l = rawData.leads;
-    parts.push(``);
-    parts.push(`🎯 <b>Pipeline:</b> ${l.active} leads activos | $${l.pipeline_value?.toLocaleString("es-VE")} en pipeline`);
-    parts.push(`📊 <b>Conversión:</b> ${l.conversion_rate}% | Ganados este mes: ${l.won_this_month}`);
-    if (l.total) parts.push(`📋 Total leads (30d): ${l.total}`);
+  // ── CxC GENERAL ──
+  if (rawData?.finance?.accounts_receivable) {
+    const ar = rawData.finance.accounts_receivable;
+    parts.push(`📄 <b>CUENTAS POR COBRAR:</b> ${fmtUsd(ar.total_pending_amount)} (${ar.total_customers_with_debt} clientes)`);
   }
 
-  // Subscriptions summary (growth view)
+  // ── COBRADO HASTA HOY (por banco) ──
+  if (rawData?.payments_by_journal?.length > 0) {
+    parts.push(``, `🏦 <b>COBRADO DEL MES (por banco):</b>`);
+    for (const j of rawData.payments_by_journal) {
+      const cur = j.currency === "USD" ? fmtUsd(j.total) : fmtBs(j.total);
+      parts.push(`  ${j.journal_name}: <b>${cur}</b> (${j.count} mov)`);
+    }
+  }
+
+  // ── SERVICIOS ──
   if (rawData?.finance?.subscriptions) {
     const s = rawData.finance.subscriptions;
-    parts.push(``);
-    parts.push(`👥 <b>Base de clientes:</b> ${s.active} servicios activos | ${s.paused} pausados`);
-    if (s.mrr_usd) parts.push(`💰 MRR: $${s.mrr_usd.toLocaleString("es-VE")}`);
-    const churnRate = s.active > 0 ? Math.round((s.paused / (s.active + s.paused)) * 1000) / 10 : 0;
-    if (churnRate > 0) parts.push(`⚠️ Tasa de pausa: ${churnRate}%`);
+    const total = s.active + s.paused;
+    parts.push(``, `📡 <b>SERVICIOS:</b> ${total} total | <b>${s.active}</b> activos | ${s.paused} suspendidos`);
   }
 
-  // Collections impact on retention
-  if (rawData?.cobranzas) {
-    const cb = rawData.cobranzas;
-    parts.push(``);
-    parts.push(`🏦 <b>Cobranzas:</b> ${cb.active} casos activos | Recovery: ${cb.recovery_rate}%`);
+  // ── PERIODICIDAD CxC (aging) ──
+  if (rawData?.finance?.accounts_receivable?.aging) {
+    const a = rawData.finance.accounts_receivable.aging;
+    parts.push(``, `⏱ <b>ANTIGÜEDAD CxC:</b>`);
+    if (a.current.count > 0) parts.push(`  Vigente: ${fmtUsd(a.current.amount)} (${a.current.count} clientes)`);
+    if (a.days30.count > 0) parts.push(`  1-30 días: ${fmtUsd(a.days30.amount)} (${a.days30.count} clientes)`);
+    if (a.days60.count > 0) parts.push(`  31-60 días: ${fmtUsd(a.days60.amount)} (${a.days60.count} clientes)`);
+    if (a.days90.count > 0) parts.push(`  61-90 días: ${fmtUsd(a.days90.amount)} (${a.days90.count} clientes)`);
+    if (a.over90.count > 0) parts.push(`  🔴 +90 días: ${fmtUsd(a.over90.amount)} (${a.over90.count} clientes)`);
+  }
+
+  // ── TOP 10 DEUDORES ──
+  if (rawData?.finance?.accounts_receivable?.top_debtors?.length > 0) {
+    const debtors = rawData.finance.accounts_receivable.top_debtors;
+    parts.push(``, `🔝 <b>TOP 10 MAYOR DEUDA:</b>`);
+    for (let i = 0; i < Math.min(debtors.length, 10); i++) {
+      const d = debtors[i];
+      parts.push(`  ${i + 1}. ${escHtml(d.name)}: ${fmtUsd(d.amount)}`);
+    }
+  }
+
+  // ── VENTAS DEL MES ──
+  if (rawData?.leads) {
+    const l = rawData.leads;
+    parts.push(``, `🎯 <b>VENTAS DEL MES:</b>`);
+    parts.push(`  Ganados: <b>${l.won_this_month}</b> | Nuevos leads: ${l.created_this_month}`);
+    parts.push(`  Pipeline: ${l.active} activos | ${fmtUsd(l.pipeline_value || 0)}`);
+
+    // Por instalar
+    if (l.by_stage?.en_instalacion) {
+      parts.push(`  🔧 Por instalar: <b>${l.by_stage.en_instalacion.count}</b>`);
+    }
+  }
+
+  // Servicios por plan
+  if (rawData?.plan_distribution?.length > 0) {
+    parts.push(``, `📦 <b>DISTRIBUCIÓN POR PLAN:</b>`);
+    for (const cat of rawData.plan_distribution.slice(0, 8)) {
+      parts.push(`  ${escHtml(cat.category)}: <b>${cat.active}</b> activos / ${cat.paused} susp (${cat.total} total)`);
+    }
+  }
+
+  // ── ANÁLISIS + INSIGHTS ──
+  if (briefing.summary) {
+    parts.push(``, `💡 <b>ANÁLISIS:</b>`, escHtml(briefing.summary));
   }
 
   if (insights.length > 0) {
-    parts.push(``, `📋 <b>ALERTAS:</b>`);
+    parts.push(``, `🎯 <b>INSIGHTS:</b>`);
     for (const ins of insights) {
       const icon = ins.severity === "critical" ? "🔴" : ins.severity === "high" ? "🟠" : "🟡";
-      parts.push(`${icon} <b>${escHtml(ins.title)}</b>`);
-      parts.push(`   ${escHtml(ins.description)}`);
+      parts.push(`${icon} ${escHtml(ins.title)}`);
     }
-  } else {
-    parts.push(``, `✅ Sin alertas comerciales`);
   }
-
-  const rec = briefing.recomendaciones_por_area?.comercial;
-  if (rec) parts.push(``, `🎯 <b>Recomendacion:</b> ${escHtml(rec)}`);
 
   parts.push(``, `🤖 Supervisor IA | ${timeNow()}`);
   return parts.join("\n");
