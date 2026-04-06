@@ -19,6 +19,7 @@ export type Module =
   // Sidebar-only pseudo-modules
   | "comando"
   | "supervisor_ia"
+  | "finanzas"
   | "portal_admin"
   | "actualizaciones";
 
@@ -32,7 +33,7 @@ export const OPERATIONAL_MODULES: Module[] = [
 
 /** Sidebar-only modules (visibility toggle, "access" action) */
 export const SIDEBAR_ONLY_MODULES: Module[] = [
-  "comando", "supervisor_ia", "portal_admin", "actualizaciones",
+  "comando", "supervisor_ia", "finanzas", "portal_admin", "actualizaciones",
 ];
 
 /** All modules */
@@ -51,6 +52,7 @@ export const SIDEBAR_MODULE_MAP: Record<string, string> = {
   "bequant":         "bequant",
   "infraestructura": "infraestructura",
   "erp":             "erp",
+  "finanzas":        "finanzas",
   "pagos":           "mercantil",
   "clientes":        "clientes",
   "portal-admin":    "portal_admin",
