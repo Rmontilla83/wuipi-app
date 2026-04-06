@@ -223,7 +223,7 @@ export function formatOperacionesBriefing(briefing: any, rawData?: any): string 
 // ============================================
 // Format for #finanzas (cobranza + MRR + CxC)
 // ============================================
-export function formatFinanzasBriefing(briefing: any): string {
+export function formatFinanzasBriefing(briefing: any, rawData?: any): string {
   // Strict filter: only insights explicitly for finanzas, or finanzas category without specific "para"
   const insights = (briefing.insights || [])
     .filter((ins: any) =>
@@ -238,7 +238,40 @@ export function formatFinanzasBriefing(briefing: any): string {
     ``,
   ];
 
-  if (kpis.salud_financiera) parts.push(`💰 Salud: <b>${kpis.salud_financiera.value}</b> (${trendLabel(kpis.salud_financiera.trend)})`);
+  if (kpis.salud_financiera) parts.push(`💰 Salud financiera: <b>${kpis.salud_financiera.value}</b> (${trendLabel(kpis.salud_financiera.trend)})`);
+
+  // Financial data from raw sources
+  if (rawData?.finance) {
+    const f = rawData.finance;
+    parts.push(``);
+
+    if (f.exchange_rate) {
+      parts.push(`💱 <b>Tasa BCV:</b> Bs ${f.exchange_rate}/USD`);
+    }
+
+    if (f.subscriptions) {
+      parts.push(`📊 <b>MRR:</b> $${f.subscriptions.mrr_usd?.toLocaleString("es-VE")} | ${f.subscriptions.active} activos / ${f.subscriptions.paused} pausados`);
+    }
+
+    if (f.accounts_receivable) {
+      const ar = f.accounts_receivable;
+      parts.push(`📄 <b>CxC:</b> $${ar.total_pending_amount?.toLocaleString("es-VE")} pendiente (${ar.total_customers_with_debt} clientes)`);
+    }
+
+    if (f.monthly) {
+      const m = f.monthly;
+      parts.push(``, `📈 <b>Facturación ${m.period || "mes"}:</b>`);
+      if (m.ved_collection_rate !== undefined) parts.push(`  VED: ${m.ved_collection_rate}% cobrado`);
+      if (m.usd_collection_rate !== undefined) parts.push(`  USD: ${m.usd_collection_rate}% cobrado`);
+    }
+  }
+
+  // Cobranzas data
+  if (rawData?.cobranzas) {
+    const cb = rawData.cobranzas;
+    parts.push(``);
+    parts.push(`🏦 <b>Cobranzas:</b> ${cb.active} casos activos ($${cb.active_amount?.toLocaleString("es-VE")}) | Recovery: ${cb.recovery_rate}%`);
+  }
 
   if (insights.length > 0) {
     parts.push(``, `📋 <b>ALERTAS:</b>`);
@@ -261,7 +294,7 @@ export function formatFinanzasBriefing(briefing: any): string {
 // ============================================
 // Format for #comercial (ventas + CxC + churn)
 // ============================================
-export function formatComercialBriefing(briefing: any): string {
+export function formatComercialBriefing(briefing: any, rawData?: any): string {
   // Strict filter: only insights explicitly for comercial, or ventas/clientes category without specific "para"
   const insights = (briefing.insights || [])
     .filter((ins: any) =>
@@ -277,6 +310,32 @@ export function formatComercialBriefing(briefing: any): string {
   ];
 
   if (kpis.crecimiento) parts.push(`📈 Crecimiento: <b>${kpis.crecimiento.value}</b> (${trendLabel(kpis.crecimiento.trend)})`);
+
+  // Sales pipeline from raw data
+  if (rawData?.leads) {
+    const l = rawData.leads;
+    parts.push(``);
+    parts.push(`🎯 <b>Pipeline:</b> ${l.active} leads activos | $${l.pipeline_value?.toLocaleString("es-VE")} en pipeline`);
+    parts.push(`📊 <b>Conversión:</b> ${l.conversion_rate}% | Ganados este mes: ${l.won_this_month}`);
+    if (l.total) parts.push(`📋 Total leads (30d): ${l.total}`);
+  }
+
+  // Subscriptions summary (growth view)
+  if (rawData?.finance?.subscriptions) {
+    const s = rawData.finance.subscriptions;
+    parts.push(``);
+    parts.push(`👥 <b>Base de clientes:</b> ${s.active} servicios activos | ${s.paused} pausados`);
+    if (s.mrr_usd) parts.push(`💰 MRR: $${s.mrr_usd.toLocaleString("es-VE")}`);
+    const churnRate = s.active > 0 ? Math.round((s.paused / (s.active + s.paused)) * 1000) / 10 : 0;
+    if (churnRate > 0) parts.push(`⚠️ Tasa de pausa: ${churnRate}%`);
+  }
+
+  // Collections impact on retention
+  if (rawData?.cobranzas) {
+    const cb = rawData.cobranzas;
+    parts.push(``);
+    parts.push(`🏦 <b>Cobranzas:</b> ${cb.active} casos activos | Recovery: ${cb.recovery_rate}%`);
+  }
 
   if (insights.length > 0) {
     parts.push(``, `📋 <b>ALERTAS:</b>`);
@@ -310,8 +369,8 @@ export async function sendBriefingToAllChannels(briefing: any, rawData?: any): P
   const sends: Array<{ name: string; chatId: string | null; format: (b: any, d?: any) => string }> = [
     { name: "socios", chatId: channels.socios, format: formatSociosBriefing },
     { name: "operaciones", chatId: channels.operaciones, format: (b, d) => formatOperacionesBriefing(b, d) },
-    { name: "finanzas", chatId: channels.finanzas, format: formatFinanzasBriefing },
-    { name: "comercial", chatId: channels.comercial, format: formatComercialBriefing },
+    { name: "finanzas", chatId: channels.finanzas, format: (b, d) => formatFinanzasBriefing(b, d) },
+    { name: "comercial", chatId: channels.comercial, format: (b, d) => formatComercialBriefing(b, d) },
   ];
 
   for (const { name, chatId, format } of sends) {

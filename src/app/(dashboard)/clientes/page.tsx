@@ -170,12 +170,12 @@ export default function ClientesPage() {
                           {c.mrr_usd > 0 ? fmtUSD(c.mrr_usd) : "—"}
                         </td>
                         <td className="p-3 text-right">
-                          {c.credit > 0 ? (
+                          {c.total_due > 0 ? (
                             <span className="text-red-400 text-xs font-medium">
-                              {c.credit.toLocaleString("es-VE", { minimumFractionDigits: 2 })}
+                              {fmtUSD(c.total_due)}
                             </span>
                           ) : (
-                            <span className="text-gray-600 text-xs">0.00</span>
+                            <span className="text-gray-600 text-xs">$0.00</span>
                           )}
                         </td>
                         <td className="p-3 text-center">

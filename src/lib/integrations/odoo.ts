@@ -780,7 +780,7 @@ const CLIENT_LIST_FIELDS = [
   "name", "vat", "email", "mobile", "phone", "city", "state_id",
   "l10n_latam_identification_type_id", "is_company",
   "subscription_count", "subscription_status", "suspend",
-  "credit", "total_invoiced", "unpaid_invoices_count",
+  "credit", "total_due", "total_invoiced", "unpaid_invoices_count",
 ] as const;
 
 const CLIENT_DETAIL_FIELDS = [
@@ -821,7 +821,7 @@ export async function getOdooClients(options?: {
   } else if (options?.status === "no_service") {
     domain.push(["subscription_count", "=", 0]);
   } else if (options?.status === "debt") {
-    domain.push(["credit", ">", 0]);
+    domain.push(["total_due", ">", 0]);
   }
 
   // Search filter — search partners first, then filter by ID
@@ -902,6 +902,7 @@ export async function getOdooClients(options?: {
       subscription_status: c.subscription_status || "",
       suspend: c.suspend || false,
       credit: c.credit || 0,
+      total_due: c.total_due || 0,
       total_invoiced: c.total_invoiced || 0,
       unpaid_invoices_count: c.unpaid_invoices_count || 0,
       service_count: subData?.serviceCount || 0,

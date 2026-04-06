@@ -103,6 +103,21 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Telegram not configured" }, { status: 503 });
     }
 
+    // Check if globally enabled and briefing enabled
+    const configSb = createAdminSupabase();
+    const { data: configRows } = await configSb
+      .from("supervisor_config")
+      .select("key, value")
+      .in("key", ["telegram_enabled", "briefing_enabled"]);
+
+    const configMap = new Map((configRows || []).map((r: any) => [r.key, r.value]));
+    if (configMap.get("telegram_enabled") === "false") {
+      return NextResponse.json({ ok: true, action: "disabled", reason: "Telegram desactivado" });
+    }
+    if (configMap.get("briefing_enabled") === "false") {
+      return NextResponse.json({ ok: true, action: "disabled", reason: "Briefing diario desactivado" });
+    }
+
     console.log("[Cron] Starting daily supervisor briefing...");
 
     // 1. Gather data

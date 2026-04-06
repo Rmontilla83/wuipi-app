@@ -1,6 +1,6 @@
 import { TopBar } from "@/components/layout/topbar";
 import { Card } from "@/components/ui/card";
-import { Settings, Users, Shield, Lock } from "lucide-react";
+import { Settings, Users, Shield, Lock, Send } from "lucide-react";
 import Link from "next/link";
 
 export default function ConfiguracionPage() {
@@ -37,6 +37,20 @@ export default function ConfiguracionPage() {
             </Card>
           </Link>
 
+          <Link href="/configuracion/telegram">
+            <Card className="!p-5 cursor-pointer hover:border-[#F46800]/30 transition-colors">
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 rounded-xl bg-blue-500/10 flex items-center justify-center">
+                  <Send size={24} className="text-blue-400" />
+                </div>
+                <div>
+                  <h3 className="text-white font-semibold">Telegram</h3>
+                  <p className="text-gray-500 text-sm">Reportes automáticos, alertas y canales por área</p>
+                </div>
+              </div>
+            </Card>
+          </Link>
+
           <Card className="!p-5 opacity-50">
             <div className="flex items-center gap-4">
               <div className="w-12 h-12 rounded-xl bg-blue-500/10 flex items-center justify-center">
@@ -44,7 +58,7 @@ export default function ConfiguracionPage() {
               </div>
               <div>
                 <h3 className="text-white font-semibold">Integraciones</h3>
-                <p className="text-gray-500 text-sm">APIs, webhooks y conexiones externas — pr��ximamente</p>
+                <p className="text-gray-500 text-sm">APIs, webhooks y conexiones externas — próximamente</p>
               </div>
             </div>
           </Card>

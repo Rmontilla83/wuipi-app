@@ -68,7 +68,8 @@ export interface OdooClient {
   subscription_count: number;
   subscription_status: string; // progress, paused, ""
   suspend: boolean;
-  credit: number;           // total receivable
+  credit: number;           // total receivable (VED)
+  total_due: number;         // total owed - drafts USD (Odoo computed)
   total_invoiced: number;
   unpaid_invoices_count: number;
   // Computed from subscriptions

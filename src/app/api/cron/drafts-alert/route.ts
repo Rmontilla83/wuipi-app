@@ -20,6 +20,21 @@ export async function GET(request: NextRequest) {
     }
 
     const supabase = createAdminSupabase();
+
+    // Check if globally enabled and drafts alert enabled
+    const { data: flagRows } = await supabase
+      .from("supervisor_config")
+      .select("key, value")
+      .in("key", ["telegram_enabled", "drafts_alert_enabled"]);
+
+    const flags = new Map((flagRows || []).map((r: any) => [r.key, r.value]));
+    if (flags.get("telegram_enabled") === "false") {
+      return NextResponse.json({ ok: true, action: "disabled", reason: "Telegram desactivado" });
+    }
+    if (flags.get("drafts_alert_enabled") === "false") {
+      return NextResponse.json({ ok: true, action: "disabled", reason: "Alerta borradores desactivada" });
+    }
+
     const now = new Date();
     const day = now.getDate();
 

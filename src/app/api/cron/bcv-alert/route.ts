@@ -21,6 +21,20 @@ export async function GET(request: NextRequest) {
 
     const supabase = createAdminSupabase();
 
+    // Check if globally enabled and BCV alert enabled
+    const { data: flagRows } = await supabase
+      .from("supervisor_config")
+      .select("key, value")
+      .in("key", ["telegram_enabled", "bcv_alert_enabled"]);
+
+    const flags = new Map((flagRows || []).map((r: any) => [r.key, r.value]));
+    if (flags.get("telegram_enabled") === "false") {
+      return NextResponse.json({ ok: true, action: "disabled", reason: "Telegram desactivado" });
+    }
+    if (flags.get("bcv_alert_enabled") === "false") {
+      return NextResponse.json({ ok: true, action: "disabled", reason: "Alerta BCV desactivada" });
+    }
+
     // Get current BCV rate
     const bcvRate = await fetchBCVRate();
     if (!bcvRate?.usd_to_bs) {
