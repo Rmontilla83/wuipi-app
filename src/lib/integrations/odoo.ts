@@ -1401,3 +1401,224 @@ export async function searchMikrotikServices(
 
   return raw.map(mapMkService);
 }
+
+// ── Expenses / Egresos ──────────────────────────────────────
+
+// Category mapping: group 60+ expense accounts into readable categories
+const EXPENSE_CATEGORIES: Record<string, string> = {
+  "5101": "Costo del servicio",
+  "6101": "Gastos operativos",
+  "6102": "Nómina y RRHH",
+  "6103": "Administración",
+  "6104": "Gastos financieros",
+  "6105": "Depreciación",
+};
+
+function getExpenseCategory(code: string): string {
+  const prefix = code.substring(0, 4);
+  return EXPENSE_CATEGORIES[prefix] || "Otros";
+}
+
+export interface ExpensesByCategory {
+  category: string;
+  total_usd: number;
+  total_ved: number;
+  line_count: number;
+  pct: number;
+}
+
+export interface ExpensesByMonth {
+  month: string;
+  label: string;
+  total_usd: number;
+  total_ved: number;
+  line_count: number;
+}
+
+export interface ExpensesByVendor {
+  vendor_id: number;
+  vendor_name: string;
+  total_usd: number;
+  total_ved: number;
+  bill_count: number;
+}
+
+export interface ExpensesSummary {
+  period: string;
+  total_usd: number;
+  total_ved: number;
+  line_count: number;
+  by_category: ExpensesByCategory[];
+  by_month: ExpensesByMonth[];
+  by_vendor: ExpensesByVendor[];
+  bcv_rate_current: number;
+}
+
+/**
+ * Fetch expense data from Odoo for a given year.
+ * Uses account.move.line on expense accounts (5xxx/6xxx) with historical BCV rates.
+ * All amounts converted to USD at the BCV rate of the transaction date.
+ */
+export async function getExpensesSummary(year: number): Promise<ExpensesSummary> {
+  const startDate = `${year}-01-01`;
+  const endDate = `${year + 1}-01-01`;
+
+  // 1. Fetch historical BCV rates for the period
+  const rawRates = await searchRead("res.currency.rate", [
+    ["currency_id.name", "=", "USD"],
+    ["name", ">=", startDate],
+    ["name", "<", endDate],
+  ], {
+    fields: ["name", "inverse_company_rate"],
+    limit: 400,
+    order: "name asc",
+  });
+
+  // Build date → rate map (VED per 1 USD)
+  const rateMap = new Map<string, number>();
+  for (const r of rawRates) {
+    if (r.name && r.inverse_company_rate) {
+      rateMap.set(r.name, r.inverse_company_rate);
+    }
+  }
+
+  // Helper: get rate for a date (exact match or closest previous)
+  const sortedRateDates = [...rateMap.keys()].sort();
+  const getRate = (date: string): number => {
+    if (rateMap.has(date)) return rateMap.get(date)!;
+    let best = sortedRateDates[0] || date;
+    for (const d of sortedRateDates) {
+      if (d <= date) best = d;
+      else break;
+    }
+    return rateMap.get(best) || 1;
+  };
+
+  // Current rate (latest)
+  const currentRate = sortedRateDates.length > 0
+    ? rateMap.get(sortedRateDates[sortedRateDates.length - 1])!
+    : 1;
+
+  // 2. Fetch expense lines from account.move.line
+  const expenseLines = await searchRead("account.move.line", [
+    ["date", ">=", startDate],
+    ["date", "<", endDate],
+    ["parent_state", "=", "posted"],
+    ["debit", ">", 0],
+    "|", ["account_id.code", "=like", "5%"], ["account_id.code", "=like", "6%"],
+  ], {
+    fields: ["account_id", "debit", "date"],
+    limit: 10000,
+    order: "date asc",
+  });
+
+  // 3. Process lines
+  const categoryMap = new Map<string, { total_usd: number; total_ved: number; count: number }>();
+  const monthMap = new Map<string, { total_usd: number; total_ved: number; count: number }>();
+  let grandTotalUsd = 0;
+  let grandTotalVed = 0;
+
+  for (const l of expenseLines) {
+    const ved = l.debit || 0;
+    const date = l.date || startDate;
+    const rate = getRate(date);
+    const usd = rate > 0 ? ved / rate : 0;
+
+    const accName = l.account_id?.[1] || "?";
+    const accCode = accName.match(/^(\d+)/)?.[1] || "?";
+    const category = getExpenseCategory(accCode);
+
+    if (!categoryMap.has(category)) categoryMap.set(category, { total_usd: 0, total_ved: 0, count: 0 });
+    const cat = categoryMap.get(category)!;
+    cat.total_usd += usd;
+    cat.total_ved += ved;
+    cat.count++;
+
+    const month = date.substring(0, 7);
+    if (!monthMap.has(month)) monthMap.set(month, { total_usd: 0, total_ved: 0, count: 0 });
+    const mo = monthMap.get(month)!;
+    mo.total_usd += usd;
+    mo.total_ved += ved;
+    mo.count++;
+
+    grandTotalUsd += usd;
+    grandTotalVed += ved;
+  }
+
+  // 4. Fetch vendor bills for top vendors
+  const vendorBills = await searchRead("account.move", [
+    ["move_type", "=", "in_invoice"],
+    ["state", "=", "posted"],
+    ["invoice_date", ">=", startDate],
+    ["invoice_date", "<", endDate],
+  ], {
+    fields: ["partner_id", "amount_total", "invoice_date"],
+    limit: 5000,
+  });
+
+  const vendorMap = new Map<number, { name: string; total_usd: number; total_ved: number; count: number }>();
+  for (const b of vendorBills) {
+    const vid = b.partner_id?.[0] || 0;
+    const vname = b.partner_id?.[1] || "?";
+    const ved = b.amount_total || 0;
+    const rate = getRate(b.invoice_date || startDate);
+    const usd = rate > 0 ? ved / rate : 0;
+
+    if (!vendorMap.has(vid)) vendorMap.set(vid, { name: vname, total_usd: 0, total_ved: 0, count: 0 });
+    const v = vendorMap.get(vid)!;
+    v.total_usd += usd;
+    v.total_ved += ved;
+    v.count++;
+  }
+
+  // 5. Build result
+  const round2 = (n: number) => Math.round(n * 100) / 100;
+
+  const by_category: ExpensesByCategory[] = [...categoryMap.entries()]
+    .map(([category, d]) => ({
+      category,
+      total_usd: round2(d.total_usd),
+      total_ved: round2(d.total_ved),
+      line_count: d.count,
+      pct: grandTotalUsd > 0 ? round2((d.total_usd / grandTotalUsd) * 100) : 0,
+    }))
+    .sort((a, b) => b.total_usd - a.total_usd);
+
+  const ML: Record<string, string> = {
+    "01": "Ene", "02": "Feb", "03": "Mar", "04": "Abr",
+    "05": "May", "06": "Jun", "07": "Jul", "08": "Ago",
+    "09": "Sep", "10": "Oct", "11": "Nov", "12": "Dic",
+  };
+
+  const by_month: ExpensesByMonth[] = [...monthMap.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([month, d]) => ({
+      month,
+      label: `${ML[month.split("-")[1]] || month.split("-")[1]} ${month.split("-")[0]}`,
+      total_usd: round2(d.total_usd),
+      total_ved: round2(d.total_ved),
+      line_count: d.count,
+    }));
+
+  const by_vendor: ExpensesByVendor[] = [...vendorMap.entries()]
+    .map(([vendor_id, d]) => ({
+      vendor_id,
+      vendor_name: d.name,
+      total_usd: round2(d.total_usd),
+      total_ved: round2(d.total_ved),
+      bill_count: d.count,
+    }))
+    .sort((a, b) => b.total_usd - a.total_usd)
+    .slice(0, 20);
+
+  return {
+    period: String(year),
+    total_usd: round2(grandTotalUsd),
+    total_ved: round2(grandTotalVed),
+    line_count: expenseLines.length,
+    by_category,
+    by_month,
+    by_vendor,
+    bcv_rate_current: round2(currentRate),
+  };
+}
