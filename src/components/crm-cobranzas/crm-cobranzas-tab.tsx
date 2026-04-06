@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef, DragEvent } from "react";
+import { useVisibilityPolling } from "@/hooks/useVisibilityPolling";
 import { Card } from "@/components/ui/card";
 import {
   Plus, Search, RefreshCw, LayoutGrid, List,
@@ -76,11 +77,8 @@ export default function CRMCobranzasTab() {
 
   useEffect(() => { fetchCollections(); }, [fetchCollections]);
 
-  // Auto-refresh every 2 minutes
-  useEffect(() => {
-    const interval = setInterval(fetchCollections, 120000);
-    return () => clearInterval(interval);
-  }, [fetchCollections]);
+  // Auto-refresh every 2 minutes, pause when tab hidden
+  useVisibilityPolling(fetchCollections, 120000);
 
   // Load collectors on mount
   useEffect(() => {

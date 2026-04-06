@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
 import { TopBar } from "@/components/layout/topbar";
 import { Card } from "@/components/ui/card";
@@ -977,99 +978,51 @@ export default function ComandoPage() {
     router.replace(url.pathname + url.search, { scroll: false });
   }, [router]);
 
-  const [financeStats, setFinanceStats] = useState<FinanceStats | null>(null);
-  const [loading, setLoading] = useState(true);
+  interface ComandoSummary {
+    finance: FinanceStats | null;
+    infra: InfraOverview | null;
+    problems: InfraProblem[];
+    hosts: InfraHost[];
+    tickets: TicketStats | null;
+    soporte: SoporteData | null;
+    ventas: VentasStats | null;
+    cobranzas: CobranzasStats | null;
+    nodes: MikrotikNode[];
+  }
 
-  const [infraOverview, setInfraOverview] = useState<InfraOverview | null>(null);
-  const [infraProblems, setInfraProblems] = useState<InfraProblem[]>([]);
-  const [infraHosts, setInfraHosts] = useState<InfraHost[]>([]);
-  const [infraLoading, setInfraLoading] = useState(true);
+  const { data: summary, isLoading: loading, refetch: refreshAll } = useQuery<ComandoSummary>({
+    queryKey: ["comando-summary"],
+    queryFn: async () => {
+      const res = await fetch("/api/comando/summary");
+      if (!res.ok) throw new Error("Summary fetch failed");
+      const data = await res.json();
+      return {
+        finance: data.finance,
+        infra: data.infra,
+        problems: data.problems || [],
+        hosts: data.hosts || [],
+        tickets: data.tickets,
+        soporte: data.soporte,
+        ventas: data.ventas,
+        cobranzas: data.cobranzas,
+        nodes: data.nodes || [],
+      };
+    },
+    staleTime: 2 * 60_000,
+    refetchInterval: 5 * 60_000,
+    refetchIntervalInBackground: false,
+  });
 
-  const [ticketStats, setTicketStats] = useState<TicketStats | null>(null);
-  const [soporteData, setSoporteData] = useState<SoporteData | null>(null);
-  const [ventasStats, setVentasStats] = useState<VentasStats | null>(null);
-  const [cobranzasStats, setCobranzasStats] = useState<CobranzasStats | null>(null);
-  const [mikrotikNodes, setMikrotikNodes] = useState<MikrotikNode[]>([]);
-
-  const loadFinanceStats = useCallback(async () => {
-    try {
-      let res = await fetch("/api/odoo/financial-summary");
-      if (!res.ok) res = await fetch("/api/facturacion/stats");
-      if (res.ok) setFinanceStats(await res.json());
-    } catch (err) { console.error("Error loading finance:", err); }
-    finally { setLoading(false); }
-  }, []);
-
-  const loadInfraData = useCallback(async () => {
-    try {
-      const [overview, problems, hosts] = await Promise.all([
-        fetch("/api/infraestructura").then(r => r.json()),
-        fetch("/api/infraestructura/problems").then(r => r.json()),
-        fetch("/api/infraestructura/hosts").then(r => r.json()),
-      ]);
-      setInfraOverview(overview);
-      setInfraProblems(problems);
-      setInfraHosts(hosts);
-    } catch (err) { console.error("Error loading infra:", err); }
-    finally { setInfraLoading(false); }
-  }, []);
-
-  const loadTicketStats = useCallback(async () => {
-    try {
-      const res = await fetch("/api/tickets/stats");
-      if (res.ok) setTicketStats(await res.json());
-    } catch (err) { console.error("Error loading tickets:", err); }
-  }, []);
-
-  const loadSoporteData = useCallback(async () => {
-    try {
-      const res = await fetch("/api/soporte?period=30d");
-      if (res.ok) setSoporteData(await res.json());
-    } catch (err) { console.error("Error loading soporte:", err); }
-  }, []);
-
-  const loadVentasStats = useCallback(async () => {
-    try {
-      const res = await fetch("/api/crm-ventas/stats");
-      if (res.ok) setVentasStats(await res.json());
-    } catch (err) { console.error("Error loading ventas:", err); }
-  }, []);
-
-  const loadCobranzasStats = useCallback(async () => {
-    try {
-      const res = await fetch("/api/cobranzas/stats");
-      if (res.ok) setCobranzasStats(await res.json());
-    } catch (err) { console.error("Error loading cobranzas:", err); }
-  }, []);
-
-  const loadMikrotikNodes = useCallback(async () => {
-    try {
-      const res = await fetch("/api/infraestructura/nodes");
-      if (res.ok) { const data = await res.json(); setMikrotikNodes(data.nodes || []); }
-    } catch (err) { console.error("Error loading nodes:", err); }
-  }, []);
-
-  useEffect(() => {
-    loadFinanceStats();
-    loadInfraData();
-    loadTicketStats();
-    loadSoporteData();
-    loadVentasStats();
-    loadCobranzasStats();
-    loadMikrotikNodes();
-    const interval = setInterval(loadInfraData, 60000);
-    return () => clearInterval(interval);
-  }, [loadFinanceStats, loadInfraData, loadTicketStats, loadSoporteData, loadVentasStats, loadCobranzasStats, loadMikrotikNodes]);
-
-  const refreshAll = () => {
-    loadFinanceStats();
-    loadInfraData();
-    loadTicketStats();
-    loadSoporteData();
-    loadVentasStats();
-    loadCobranzasStats();
-    loadMikrotikNodes();
-  };
+  const financeStats = summary?.finance ?? null;
+  const infraOverview = summary?.infra ?? null;
+  const infraProblems = summary?.problems ?? [];
+  const infraHosts = summary?.hosts ?? [];
+  const infraLoading = loading;
+  const ticketStats = summary?.tickets ?? null;
+  const soporteData = summary?.soporte ?? null;
+  const ventasStats = summary?.ventas ?? null;
+  const cobranzasStats = summary?.cobranzas ?? null;
+  const mikrotikNodes = summary?.nodes ?? [];
 
   return (
     <>
@@ -1077,7 +1030,7 @@ export default function ComandoPage() {
         title="Centro de Comando"
         icon={<Target size={22} />}
         actions={
-          <button onClick={refreshAll}
+          <button onClick={() => refreshAll()}
             className="flex items-center gap-2 px-3 py-2 rounded-lg border border-wuipi-border text-gray-400 hover:text-white text-sm transition-colors">
             <RefreshCw size={14} /> Actualizar
           </button>

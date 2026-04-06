@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { TopBar } from "@/components/layout/topbar";
 import { Card } from "@/components/ui/card";
 import { ScoreRing, LoadBar } from "@/components/dashboard";
@@ -137,31 +138,21 @@ function TechCard({ tech, rank }: { tech: TechData; rank: number }) {
 // ============================================
 export default function SoportePage() {
   const [mainTab, setMainTab] = useState<MainTab>("kommo");
-  const [data, setData] = useState<SoporteData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
   const [ticketFilter, setTicketFilter] = useState<"all" | "open" | "critical">("all");
   const [period, setPeriod] = useState("30d");
 
-  const fetchData = useCallback(async () => {
-    try {
+  const { data, isLoading: loading, isRefetching: refreshing, refetch } = useQuery<SoporteData>({
+    queryKey: ["soporte", period],
+    queryFn: async () => {
       const res = await fetch(`/api/soporte?period=${period}`);
       const json = await res.json();
-      if (!json.error) setData(json);
-    } catch (err) {
-      console.error("Error fetching support data:", err);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, [period]);
-
-  useEffect(() => {
-    setLoading(true);
-    fetchData();
-    const interval = setInterval(fetchData, 60000);
-    return () => clearInterval(interval);
-  }, [fetchData]);
+      if (json.error) throw new Error(json.error);
+      return json;
+    },
+    staleTime: 60_000,
+    refetchInterval: 60_000,
+    refetchIntervalInBackground: false,
+  });
 
   return (
     <>
@@ -193,10 +184,10 @@ export default function SoportePage() {
 
         {mainTab === "kommo" && (
           <KommoVisor
-            data={data} loading={loading} refreshing={refreshing}
+            data={data ?? null} loading={loading} refreshing={refreshing}
             ticketFilter={ticketFilter} setTicketFilter={setTicketFilter}
             period={period} setPeriod={setPeriod}
-            fetchData={fetchData} setRefreshing={setRefreshing}
+            fetchData={() => { refetch(); }} setRefreshing={() => {}}
           />
         )}
         {mainTab === "crm" && <CRMSoporteTab />}
@@ -212,7 +203,7 @@ function KommoVisor({ data, loading, refreshing, ticketFilter, setTicketFilter, 
   data: SoporteData | null; loading: boolean; refreshing: boolean;
   ticketFilter: "all" | "open" | "critical"; setTicketFilter: (f: "all" | "open" | "critical") => void;
   period: string; setPeriod: (p: string) => void;
-  fetchData: () => Promise<void>; setRefreshing: (b: boolean) => void;
+  fetchData: () => void; setRefreshing: (b: boolean) => void;
 }) {
   if (loading || !data) {
     return (

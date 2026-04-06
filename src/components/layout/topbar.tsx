@@ -1,15 +1,10 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { formatTime } from "@/lib/utils";
 import { Wifi, Brain, ArrowLeft } from "lucide-react";
-
-interface ServiceStats {
-  total: number;
-  active: number;
-  paused: number;
-}
+import { useDashboardContext } from "./dashboard-context";
 
 interface TopBarProps {
   title: string;
@@ -25,34 +20,12 @@ export function TopBar({ title, subtitle, icon, actions, showBack }: TopBarProps
   const isHome = pathname === "/comando";
   const shouldShowBack = showBack ?? !isHome;
   const [time, setTime] = useState(new Date());
-  const [services, setServices] = useState<ServiceStats | null>(null);
-  const [aiStatus, setAiStatus] = useState<{ ai: boolean; gemini: boolean; claude: boolean } | null>(null);
-
-  const fetchData = useCallback(() => {
-    fetch("/api/odoo/financial-summary")
-      .then((r) => r.ok ? r.json() : null)
-      .then((d) => {
-        if (d?.active_services !== undefined) {
-          setServices({
-            total: (d.active_services || 0) + (d.paused_services || 0),
-            active: d.active_services || 0,
-            paused: d.paused_services || 0,
-          });
-        }
-      })
-      .catch(() => {});
-
-    fetch("/api/health")
-      .then((r) => r.json())
-      .then((d) => { if (d.services) setAiStatus(d.services); })
-      .catch(() => {});
-  }, []);
+  const { services, aiStatus } = useDashboardContext();
 
   useEffect(() => {
     const timer = setInterval(() => setTime(new Date()), 1000);
-    fetchData();
     return () => clearInterval(timer);
-  }, [fetchData]);
+  }, []);
 
   return (
     <header className="h-16 px-7 flex items-center justify-between border-b border-wuipi-border bg-wuipi-sidebar shrink-0">

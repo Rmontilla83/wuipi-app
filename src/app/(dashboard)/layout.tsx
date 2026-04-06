@@ -1,6 +1,8 @@
 import { redirect } from "next/navigation";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { Sidebar } from "@/components/layout/sidebar";
+import { DashboardProvider } from "@/components/layout/dashboard-context";
+import { QueryProvider } from "@/components/layout/query-provider";
 import { getSidebarModules } from "@/lib/dal/permissions";
 import { SIDEBAR_MODULE_MAP } from "@/lib/auth/permissions";
 import type { UserRole, UserProfile } from "@/types";
@@ -51,11 +53,15 @@ export default async function DashboardLayout({
   }
 
   return (
-    <div className="flex h-screen overflow-hidden bg-wuipi-bg">
-      <Sidebar user={userProfile} allowedModules={sidebarNavIds} />
-      <main className="flex-1 flex flex-col overflow-hidden">
-        {children}
-      </main>
-    </div>
+    <QueryProvider>
+      <DashboardProvider>
+        <div className="flex h-screen overflow-hidden bg-wuipi-bg">
+          <Sidebar user={userProfile} allowedModules={sidebarNavIds} />
+          <main className="flex-1 flex flex-col overflow-hidden">
+            {children}
+          </main>
+        </div>
+      </DashboardProvider>
+    </QueryProvider>
   );
 }

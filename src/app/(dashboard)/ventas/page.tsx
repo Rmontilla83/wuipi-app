@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { TopBar } from "@/components/layout/topbar";
 import { Card } from "@/components/ui/card";
 import { ScoreRing } from "@/components/dashboard";
@@ -68,39 +69,23 @@ function classifyPipeline(name: string): "ventas" | "cobranzas" {
 // ============================================
 export default function VentasPage() {
   const [mainTab, setMainTab] = useState<MainTab>("kommo");
-  const [data, setData] = useState<VentasData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
   const [period, setPeriod] = useState("30d");
 
-  // Fetch ALL pipelines (no pipeline_id filter — we filter client-side by embudo tab)
-  const fetchData = useCallback(async () => {
-    try {
-      setError(null);
+  const { data, isLoading: loading, error: queryError, isRefetching: refreshing, refetch } = useQuery<VentasData>({
+    queryKey: ["ventas", period],
+    queryFn: async () => {
       const params = new URLSearchParams({ period });
       const res = await fetch(`/api/ventas?${params}`);
       const json = await res.json();
-      if (json.error) {
-        setError(json.error + (json.details ? `: ${json.details}` : ""));
-      } else {
-        setData(json);
-      }
-    } catch (err) {
-      console.error("Error fetching ventas:", err);
-      setError(err instanceof Error ? err.message : "Error de conexión");
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, [period]);
+      if (json.error) throw new Error(json.error + (json.details ? `: ${json.details}` : ""));
+      return json;
+    },
+    staleTime: 120_000,
+    refetchInterval: 120_000,
+    refetchIntervalInBackground: false,
+  });
 
-  useEffect(() => {
-    setLoading(true);
-    fetchData();
-    const interval = setInterval(fetchData, 120000);
-    return () => clearInterval(interval);
-  }, [fetchData]);
+  const error = queryError?.message ?? null;
 
   return (
     <>
@@ -124,9 +109,9 @@ export default function VentasPage() {
 
         {mainTab === "kommo" && (
           <KommoVisor
-            data={data} loading={loading} error={error} refreshing={refreshing}
+            data={data ?? null} loading={loading} error={error} refreshing={refreshing}
             period={period} setPeriod={setPeriod}
-            fetchData={fetchData} setRefreshing={setRefreshing}
+            fetchData={() => { refetch(); }} setRefreshing={() => {}}
           />
         )}
         {mainTab === "crm" && <CRMVentasTab />}
@@ -141,7 +126,7 @@ export default function VentasPage() {
 function KommoVisor({ data, loading, error, refreshing, period, setPeriod, fetchData, setRefreshing }: {
   data: VentasData | null; loading: boolean; error: string | null; refreshing: boolean;
   period: string; setPeriod: (p: string) => void;
-  fetchData: () => Promise<void>; setRefreshing: (b: boolean) => void;
+  fetchData: () => void; setRefreshing: (b: boolean) => void;
 }) {
   const [embudoTab, setEmbudoTab] = useState<EmbudoTab>("all");
 

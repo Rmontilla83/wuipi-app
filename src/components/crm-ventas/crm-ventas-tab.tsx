@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef, DragEvent } from "react";
+import { useVisibilityPolling } from "@/hooks/useVisibilityPolling";
 import { Card } from "@/components/ui/card";
 import {
   Plus, Search, RefreshCw, LayoutGrid, List, Target,
@@ -86,11 +87,8 @@ export default function CRMVentasTab() {
 
   useEffect(() => { fetchLeads(); }, [fetchLeads]);
 
-  // Auto-refresh every 2 minutes
-  useEffect(() => {
-    const interval = setInterval(fetchLeads, 120000);
-    return () => clearInterval(interval);
-  }, [fetchLeads]);
+  // Auto-refresh every 2 minutes, pause when tab hidden
+  useVisibilityPolling(fetchLeads, 120000);
 
   // Load products + salespeople on mount
   useEffect(() => {
