@@ -1455,13 +1455,15 @@ export interface ExpensesSummary {
 }
 
 /**
- * Fetch expense data from Odoo for a given year.
+ * Fetch expense data from Odoo for a date range.
  * Uses account.move.line on expense accounts (5xxx/6xxx) with historical BCV rates.
  * All amounts converted to USD at the BCV rate of the transaction date.
  */
-export async function getExpensesSummary(year: number): Promise<ExpensesSummary> {
-  const startDate = `${year}-01-01`;
-  const endDate = `${year + 1}-01-01`;
+export async function getExpensesSummary(
+  startDate: string,
+  endDate: string,
+  periodLabel?: string,
+): Promise<ExpensesSummary> {
 
   // 1. Fetch historical BCV rates for the period
   const rawRates = await searchRead("res.currency.rate", [
@@ -1612,7 +1614,7 @@ export async function getExpensesSummary(year: number): Promise<ExpensesSummary>
     .slice(0, 20);
 
   return {
-    period: String(year),
+    period: periodLabel || `${startDate} — ${endDate}`,
     total_usd: round2(grandTotalUsd),
     total_ved: round2(grandTotalVed),
     line_count: expenseLines.length,

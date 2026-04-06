@@ -1,13 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useSearchParams, useRouter } from "next/navigation";
 import { TopBar } from "@/components/layout/topbar";
 import { Card } from "@/components/ui/card";
 import {
   DollarSign, TrendingUp, TrendingDown, RefreshCw, ArrowDown, ArrowUp,
-  Receipt, Users, Wallet, BarChart3, PieChart,
+  Receipt, Users, Wallet, BarChart3, PieChart, Calendar,
 } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
 
@@ -35,10 +35,44 @@ const CATEGORY_COLORS: Record<string, string> = {
 
 type TabKey = typeof TABS[number]["key"];
 
+// ── Period presets ──────────────────────────────────────────
+
+function getPresets() {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = now.getMonth(); // 0-based
+
+  const fmt = (d: Date) => d.toISOString().split("T")[0];
+  const startOfMonth = (yr: number, mo: number) => new Date(yr, mo, 1);
+  const endOfMonth = (yr: number, mo: number) => new Date(yr, mo + 1, 1);
+
+  const ML: Record<number, string> = {
+    0: "Ene", 1: "Feb", 2: "Mar", 3: "Abr", 4: "May", 5: "Jun",
+    6: "Jul", 7: "Ago", 8: "Sep", 9: "Oct", 10: "Nov", 11: "Dic",
+  };
+
+  const prevM = m === 0 ? 11 : m - 1;
+  const prevY = m === 0 ? y - 1 : y;
+
+  return [
+    { key: "este-mes", label: `${ML[m]} ${y}`, from: fmt(startOfMonth(y, m)), to: fmt(endOfMonth(y, m)) },
+    { key: "mes-anterior", label: `${ML[prevM]} ${prevY}`, from: fmt(startOfMonth(prevY, prevM)), to: fmt(endOfMonth(prevY, prevM)) },
+    { key: "ultimos-3", label: "Últimos 3 meses", from: fmt(startOfMonth(m >= 2 ? y : y - 1, (m - 2 + 12) % 12)), to: fmt(endOfMonth(y, m)) },
+    { key: "ultimos-6", label: "Últimos 6 meses", from: fmt(startOfMonth(m >= 5 ? y : y - 1, (m - 5 + 12) % 12)), to: fmt(endOfMonth(y, m)) },
+    { key: "este-ano", label: `${y}`, from: `${y}-01-01`, to: `${y + 1}-01-01` },
+    { key: "ano-anterior", label: `${y - 1}`, from: `${y - 1}-01-01`, to: `${y}-01-01` },
+  ];
+}
+
 export default function FinanzasPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const activeTab = (searchParams.get("tab") as TabKey) || "resumen";
+
+  const presets = useMemo(() => getPresets(), []);
+  const [periodKey, setPeriodKey] = useState("este-ano");
+
+  const currentPreset = presets.find((p) => p.key === periodKey) || presets[4]; // default: este año
 
   const setTab = (tab: TabKey) => {
     const params = new URLSearchParams(searchParams.toString());
@@ -46,17 +80,19 @@ export default function FinanzasPage() {
     router.replace(`/finanzas?${params.toString()}`);
   };
 
-  const year = new Date().getFullYear();
-
   const { data, isLoading, refetch } = useQuery({
-    queryKey: ["finanzas-summary", year],
+    queryKey: ["finanzas-summary", currentPreset.from, currentPreset.to],
     queryFn: async () => {
-      const res = await fetch(`/api/finanzas/summary?year=${year}`);
+      const params = new URLSearchParams({
+        from: currentPreset.from,
+        to: currentPreset.to,
+        label: currentPreset.label,
+      });
+      const res = await fetch(`/api/finanzas/summary?${params}`);
       if (!res.ok) throw new Error("Error al cargar datos financieros");
       return res.json();
     },
     staleTime: 5 * 60_000,
-    refetchInterval: 5 * 60_000,
     refetchIntervalInBackground: false,
   });
 
@@ -67,12 +103,12 @@ export default function FinanzasPage() {
     <>
       <TopBar
         title="Finanzas"
-        subtitle={`Estado financiero ${year}`}
+        subtitle={`Estado financiero — ${currentPreset.label}`}
         icon={<DollarSign size={22} />}
       />
       <div className="flex-1 overflow-auto">
-        {/* Tabs */}
-        <div className="flex items-center gap-1 px-6 pt-4 pb-2 border-b border-wuipi-border">
+        {/* Tabs + Period Filter */}
+        <div className="flex items-center gap-1 px-6 pt-4 pb-2 border-b border-wuipi-border flex-wrap">
           {TABS.map((t) => (
             <button
               key={t.key}
@@ -86,13 +122,26 @@ export default function FinanzasPage() {
               {t.label}
             </button>
           ))}
-          <button
-            onClick={() => refetch()}
-            disabled={isLoading}
-            className="ml-auto p-2 rounded-lg border border-wuipi-border text-gray-400 hover:text-white transition-colors"
-          >
-            <RefreshCw size={14} className={isLoading ? "animate-spin" : ""} />
-          </button>
+
+          <div className="ml-auto flex items-center gap-2">
+            <Calendar size={14} className="text-gray-500" />
+            <select
+              value={periodKey}
+              onChange={(e) => setPeriodKey(e.target.value)}
+              className="appearance-none px-3 py-1.5 pr-7 rounded-lg bg-wuipi-bg border border-wuipi-border text-sm text-white focus:border-wuipi-accent/50 focus:outline-none"
+            >
+              {presets.map((p) => (
+                <option key={p.key} value={p.key}>{p.label}</option>
+              ))}
+            </select>
+            <button
+              onClick={() => refetch()}
+              disabled={isLoading}
+              className="p-2 rounded-lg border border-wuipi-border text-gray-400 hover:text-white transition-colors"
+            >
+              <RefreshCw size={14} className={isLoading ? "animate-spin" : ""} />
+            </button>
+          </div>
         </div>
 
         {isLoading ? (
@@ -136,11 +185,11 @@ function ResumenTab({ pnl, expenses, data }: { pnl: any; expenses: any; data: an
           sub="Mensual recurrente"
         />
         <KpiCard
-          label="Egresos mensuales"
+          label="Egresos promedio/mes"
           value={fmtUSD(pnl?.avg_monthly_expense || 0)}
           icon={<TrendingDown size={16} />}
           color="text-red-400"
-          sub={`${expenses?.line_count || 0} movimientos ${data?.year}`}
+          sub={`${expenses?.line_count || 0} movimientos`}
         />
         <KpiCard
           label="Margen neto"
@@ -163,7 +212,7 @@ function ResumenTab({ pnl, expenses, data }: { pnl: any; expenses: any; data: an
         <Card className="!p-0 overflow-hidden">
           <div className="px-5 py-3 border-b border-wuipi-border">
             <h3 className="text-white font-semibold text-sm flex items-center gap-2">
-              <BarChart3 size={14} /> Egresos por mes (USD)
+              <BarChart3 size={14} /> Egresos por mes (USD) — {expenses.period}
             </h3>
           </div>
           <div className="p-4 h-[250px]">
@@ -188,7 +237,7 @@ function ResumenTab({ pnl, expenses, data }: { pnl: any; expenses: any; data: an
         <Card className="!p-0 overflow-hidden">
           <div className="px-5 py-3 border-b border-wuipi-border">
             <h3 className="text-white font-semibold text-sm flex items-center gap-2">
-              <PieChart size={14} /> Distribución por categoría
+              <PieChart size={14} /> Distribución por categoría — {expenses.period}
             </h3>
           </div>
           <div className="p-4">
@@ -206,7 +255,7 @@ function ResumenTab({ pnl, expenses, data }: { pnl: any; expenses: any; data: an
               ))}
               <div className="flex items-center gap-3 pt-2 border-t border-wuipi-border/50">
                 <div className="w-3 h-3 rounded-full shrink-0 bg-transparent" />
-                <span className="text-sm text-white font-semibold flex-1">Total {expenses.period}</span>
+                <span className="text-sm text-white font-semibold flex-1">Total</span>
                 <span className="text-xs text-gray-500">100%</span>
                 <span className="text-sm text-white font-bold w-24 text-right">{fmtUSD(expenses.total_usd)}</span>
               </div>
@@ -254,7 +303,7 @@ function EgresosTab({ expenses }: { expenses: any }) {
       {/* Monthly table */}
       <Card className="!p-0 overflow-hidden">
         <div className="px-5 py-3 border-b border-wuipi-border">
-          <h3 className="text-white font-semibold text-sm">Egresos por mes</h3>
+          <h3 className="text-white font-semibold text-sm">Egresos por mes — {expenses.period}</h3>
         </div>
         <div className="overflow-auto">
           <table className="w-full text-sm">
@@ -278,7 +327,7 @@ function EgresosTab({ expenses }: { expenses: any }) {
                 </tr>
               ))}
               <tr className="border-t-2 border-wuipi-border bg-wuipi-card">
-                <td className="p-3 text-white font-semibold">Total {expenses.period}</td>
+                <td className="p-3 text-white font-semibold">Total</td>
                 <td className="p-3 text-right text-gray-400 font-medium">{expenses.line_count}</td>
                 <td className="p-3 text-right text-red-400 font-bold">{fmtUSD(expenses.total_usd)}</td>
                 <td className="p-3 text-right text-gray-500 text-xs">
@@ -293,7 +342,7 @@ function EgresosTab({ expenses }: { expenses: any }) {
       {/* Category table */}
       <Card className="!p-0 overflow-hidden">
         <div className="px-5 py-3 border-b border-wuipi-border">
-          <h3 className="text-white font-semibold text-sm">Egresos por categoría</h3>
+          <h3 className="text-white font-semibold text-sm">Egresos por categoría — {expenses.period}</h3>
         </div>
         <div className="overflow-auto">
           <table className="w-full text-sm">
@@ -327,7 +376,7 @@ function EgresosTab({ expenses }: { expenses: any }) {
         </div>
       </Card>
 
-      {/* Monthly Bar Chart with category colors */}
+      {/* Monthly Bar Chart */}
       {expenses.by_month?.length > 0 && (
         <Card className="!p-0 overflow-hidden">
           <div className="px-5 py-3 border-b border-wuipi-border">
@@ -376,7 +425,7 @@ function ProveedoresTab({ expenses }: { expenses: any }) {
       <Card className="!p-0 overflow-hidden">
         <div className="px-5 py-3 border-b border-wuipi-border">
           <h3 className="text-white font-semibold text-sm flex items-center gap-2">
-            <Receipt size={14} /> Top proveedores {expenses.period} (por facturación)
+            <Receipt size={14} /> Top proveedores — {expenses.period}
           </h3>
           <p className="text-gray-500 text-xs mt-0.5">Basado en facturas de proveedor confirmadas</p>
         </div>

@@ -12,8 +12,8 @@ import { apiError, apiServerError } from "@/lib/api-helpers";
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
 
-// Server-side cache (5 min)
-let cache: { data: any; ts: number } | null = null;
+// Server-side cache keyed by date range (5 min per key)
+const cacheMap = new Map<string, { data: any; ts: number }>();
 const CACHE_TTL = 5 * 60 * 1000;
 
 export async function GET(request: NextRequest) {
@@ -26,17 +26,24 @@ export async function GET(request: NextRequest) {
       return apiError("Odoo no configurado", 503);
     }
 
-    // Check cache
-    if (cache && Date.now() - cache.ts < CACHE_TTL) {
-      return NextResponse.json(cache.data);
-    }
+    // Parse date range params
+    const params = request.nextUrl.searchParams;
+    const now = new Date();
+    const year = now.getFullYear();
+    const from = params.get("from") || `${year}-01-01`;
+    const to = params.get("to") || `${year + 1}-01-01`;
+    const label = params.get("label") || String(year);
 
-    const yearParam = request.nextUrl.searchParams.get("year");
-    const year = yearParam ? parseInt(yearParam) : new Date().getFullYear();
+    // Check cache
+    const cacheKey = `${from}|${to}`;
+    const cached = cacheMap.get(cacheKey);
+    if (cached && Date.now() - cached.ts < CACHE_TTL) {
+      return NextResponse.json(cached.data);
+    }
 
     // Fetch all data in parallel
     const [expenses, subscriptions, monthlyHistory, bcvRate] = await Promise.allSettled([
-      getExpensesSummary(year),
+      getExpensesSummary(from, to, label),
       getSubscriptionSummary(),
       getMonthlyHistory(6),
       fetchBCVRate(),
@@ -49,7 +56,6 @@ export async function GET(request: NextRequest) {
 
     // Build P&L summary
     const mrr_usd = subsData?.mrr_usd || 0;
-    const annual_revenue_est = mrr_usd * 12;
     const total_expenses_usd = expensesData?.total_usd || 0;
 
     // Monthly avg expenses for comparison
@@ -57,11 +63,12 @@ export async function GET(request: NextRequest) {
     const avg_monthly_expense = total_expenses_usd / monthCount;
 
     const result = {
-      year,
+      from,
+      to,
+      label,
       bcv_rate: bcv?.usd_to_bs || expensesData?.bcv_rate_current || 0,
       pnl: {
         mrr_usd,
-        annual_revenue_est,
         total_expenses_usd,
         avg_monthly_expense: Math.round(avg_monthly_expense * 100) / 100,
         net_margin_usd: Math.round((mrr_usd - avg_monthly_expense) * 100) / 100,
@@ -74,7 +81,12 @@ export async function GET(request: NextRequest) {
       },
     };
 
-    cache = { data: result, ts: Date.now() };
+    // Store in cache (keep max 5 keys)
+    if (cacheMap.size > 5) {
+      const oldest = [...cacheMap.entries()].sort((a, b) => a[1].ts - b[1].ts)[0];
+      if (oldest) cacheMap.delete(oldest[0]);
+    }
+    cacheMap.set(cacheKey, { data: result, ts: Date.now() });
 
     return NextResponse.json(result);
   } catch (error) {
