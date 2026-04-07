@@ -82,39 +82,57 @@ export function formatSociosBriefing(briefing: any, rawData?: any): string {
     `📅 ${escHtml(date)}`,
   ];
 
-  // ── 1. SALUD FINANCIERA ──
-  parts.push(``, `💰 <b>SALUD FINANCIERA</b>`);
+  // ── 1. RESUMEN FINANCIERO ──
+  const mrrUsd = rawData?.finance?.subscriptions?.mrr_usd || 0;
+  const bcvRate = rawData?.finance?.exchange_rate || 0;
 
-  if (rawData?.finance) {
-    const f = rawData.finance;
-    if (f.subscriptions) {
-      parts.push(`  MRR: <b>${fmtUsd(f.subscriptions.mrr_usd)}</b>`);
+  // Calculate total collected in USD across all journals
+  let totalCobradoUsd = 0;
+  if (rawData?.payments_by_journal?.length > 0 && bcvRate > 0) {
+    for (const j of rawData.payments_by_journal) {
+      totalCobradoUsd += j.currency === "USD" ? j.total : j.total / bcvRate;
     }
-    if (f.exchange_rate) {
-      parts.push(`  Tasa BCV: <b>${fmtBs(f.exchange_rate)}</b>/USD`);
-    }
-    if (f.monthly) {
-      const m = f.monthly;
-      if (m.ved_collected > 0) parts.push(`  Cobrado VED: ${fmtBs(m.ved_collected)} (${m.ved_collection_rate}%)`);
-      if (m.usd_collected > 0) parts.push(`  Cobrado USD: ${fmtUsd(m.usd_collected)} (${m.usd_collection_rate}%)`);
-    }
+  }
+  const pctCobranza = mrrUsd > 0 ? Math.round((totalCobradoUsd / mrrUsd) * 100) : 0;
+
+  parts.push(``, `━━━━━━━━━━━━━━━━━━━━━━`);
+  parts.push(`💰 <b>RESUMEN FINANCIERO</b>`);
+  parts.push(`━━━━━━━━━━━━━━━━━━━━━━`);
+  if (mrrUsd > 0) parts.push(`  MRR: <b>${fmtUsd(mrrUsd)}</b>`);
+  if (bcvRate > 0) parts.push(`  Tasa BCV: <b>${fmtBs(bcvRate)}</b>/USD`);
+  if (totalCobradoUsd > 0) {
+    parts.push(`  Total cobrado: <b>${fmtUsd(totalCobradoUsd)}</b> — <b>${pctCobranza}%</b> del MRR`);
   }
 
   // Cobrado por banco
   if (rawData?.payments_by_journal?.length > 0) {
-    parts.push(``, `🏦 <b>COBRADO POR BANCO (mes):</b>`);
+    parts.push(``);
+    parts.push(`🏦 <b>Detalle por banco:</b>`);
     for (const j of rawData.payments_by_journal) {
       const cur = j.currency === "USD" ? fmtUsd(j.total) : fmtBs(j.total);
-      parts.push(`  ${j.journal_name}: <b>${cur}</b> (${j.count} mov)`);
+      parts.push(`  • ${j.journal_name}: <b>${cur}</b> (${j.count} mov)`);
     }
   }
 
-  // ── 2. SERVICIOS ──
+  // ── 2. CUENTAS POR COBRAR ──
+  if (rawData?.finance?.accounts_receivable) {
+    const ar = rawData.finance.accounts_receivable;
+    parts.push(``);
+    parts.push(`━━━━━━━━━━━━━━━━━━━━━━`);
+    parts.push(`📄 <b>CUENTAS POR COBRAR</b>`);
+    parts.push(`━━━━━━━━━━━━━━━━━━━━━━`);
+    parts.push(`  Total: <b>${fmtUsd(ar.total_pending_amount)}</b> (${ar.total_customers_with_debt} clientes)`);
+  }
+
+  // ── 3. SERVICIOS ──
   parts.push(``);
+  parts.push(`━━━━━━━━━━━━━━━━━━━━━━`);
+  parts.push(`📡 <b>SERVICIOS</b>`);
+  parts.push(`━━━━━━━━━━━━━━━━━━━━━━`);
   if (rawData?.finance?.subscriptions) {
     const s = rawData.finance.subscriptions;
     const total = s.active + s.paused;
-    parts.push(`📡 <b>SERVICIOS:</b> ${total} total | <b>${s.active}</b> activos | ${s.paused} suspendidos`);
+    parts.push(`  ${total} total | <b>${s.active}</b> activos | ${s.paused} suspendidos`);
   }
 
   // Servicios por categoría (plan)
@@ -124,23 +142,30 @@ export function formatSociosBriefing(briefing: any, rawData?: any): string {
     parts.push(`  ${planLines}`);
   }
 
-  // ── 3. EGRESOS DEL MES ──
+  // ── 4. EGRESOS DEL MES ──
   if (rawData?.expenses_month) {
     const e = rawData.expenses_month;
-    parts.push(``, `📊 <b>EGRESOS DEL MES:</b> ${fmtUsd(e.total_usd)}`);
+    parts.push(``);
+    parts.push(`━━━━━━━━━━━━━━━━━━━━━━`);
+    parts.push(`📊 <b>EGRESOS DEL MES:</b> ${fmtUsd(e.total_usd)}`);
+    parts.push(`━━━━━━━━━━━━━━━━━━━━━━`);
     if (e.by_category?.length > 0) {
       for (const c of e.by_category) {
-        parts.push(`  ${c.category}: ${fmtUsd(c.total_usd)} (${c.pct}%)`);
+        parts.push(`  • ${c.category}: ${fmtUsd(c.total_usd)} (${c.pct}%)`);
       }
     }
   }
 
-  // ── 4. SOPORTE ──
+  // ── 5. SOPORTE ──
   if (rawData?.soporte) {
     const s = rawData.soporte;
-    parts.push(``, `🎧 <b>SOPORTE (30d):</b> ${s.total} tickets | ${s.active} activos | ${s.resolved_today} resueltos hoy`);
+    parts.push(``);
+    parts.push(`━━━━━━━━━━━━━━━━━━━━━━`);
+    parts.push(`🎧 <b>SOPORTE (30d)</b>`);
+    parts.push(`━━━━━━━━━━━━━━━━━━━━━━`);
+    parts.push(`  ${s.total} tickets | ${s.active} activos | ${s.resolved_today} resueltos hoy`);
     if (s.unique_clients > 0) {
-      parts.push(`  👥 Clientes únicos: <b>${s.unique_clients}</b>`);
+      parts.push(`  Clientes únicos: <b>${s.unique_clients}</b>`);
     }
     if (s.by_category && Object.keys(s.by_category).length > 0) {
       const total = Object.values(s.by_category).reduce((a: number, b: any) => a + b, 0) as number;
@@ -149,33 +174,11 @@ export function formatSociosBriefing(briefing: any, rawData?: any): string {
         const pct = total > 0 ? Math.round((v / total) * 100) : 0;
         return `${k}: ${pct}%`;
       });
-      parts.push(`  📋 Razones: ${catLines.join(" | ")}`);
+      parts.push(`  Razones: ${catLines.join(" | ")}`);
     }
   }
 
-  // ── 5. CUENTAS POR COBRAR ──
-  if (rawData?.finance?.accounts_receivable) {
-    const ar = rawData.finance.accounts_receivable;
-    parts.push(``, `📄 <b>CxC:</b> ${fmtUsd(ar.total_pending_amount)} pendiente (${ar.total_customers_with_debt} clientes)`);
-  }
-
-  // ── 6. ANÁLISIS IA ──
-  if (briefing.summary) {
-    parts.push(``, `💡 <b>ANÁLISIS:</b>`, escHtml(briefing.summary));
-  }
-
-  // Insights (top 3)
-  const insights = (briefing.insights || []).slice(0, 3);
-  if (insights.length > 0) {
-    parts.push(``, `🎯 <b>INSIGHTS:</b>`);
-    for (const ins of insights) {
-      const icon = ins.severity === "critical" ? "🔴" : ins.severity === "high" ? "🟠" : "🟡";
-      parts.push(`${icon} ${escHtml(ins.title)}`);
-    }
-  }
-
-  const engine = briefing.engine === "dual" ? "Gemini + Claude" : briefing.engine || "IA";
-  parts.push(``, `🤖 ${engine} | ${timeNow()}`);
+  parts.push(``, `🤖 Supervisor IA | ${timeNow()}`);
 
   return parts.join("\n");
 }
@@ -184,21 +187,6 @@ export function formatSociosBriefing(briefing: any, rawData?: any): string {
 // Format for #operaciones (infra + soporte)
 // ============================================
 export function formatOperacionesBriefing(briefing: any, rawData?: any): string {
-  // Strict filter: only insights explicitly for operaciones, or infra/soporte without specific "para"
-  const insights = (briefing.insights || [])
-    .filter((ins: any) =>
-      ins.para === "operaciones" ||
-      (!ins.para && (ins.category === "infraestructura" || ins.category === "soporte"))
-    )
-    .slice(0, 5);
-
-  const sanitizedInsights = insights.map((ins: any) => ({
-    ...ins,
-    title: removeDollarAmounts(ins.title),
-    description: removeDollarAmounts(ins.description),
-  }));
-
-  const kpis = briefing.kpis || {};
   const parts = [
     `⚙️ <b>OPERACIONES — Briefing Diario</b>`,
     ``,
@@ -207,8 +195,11 @@ export function formatOperacionesBriefing(briefing: any, rawData?: any): string 
   // Infrastructure details from raw data
   if (rawData?.infra) {
     const i = rawData.infra;
-    parts.push(`📡 <b>RED:</b> ${i.hostsUp}/${i.totalHosts} hosts online | Health: ${i.healthScore}%`);
-    if (i.hostsDown > 0) parts.push(`🔴 <b>${i.hostsDown} hosts caidos</b>`);
+    parts.push(`━━━━━━━━━━━━━━━━━━━━━━`);
+    parts.push(`📡 <b>RED</b>`);
+    parts.push(`━━━━━━━━━━━━━━━━━━━━━━`);
+    parts.push(`  ${i.hostsUp}/${i.totalHosts} hosts online | Health: ${i.healthScore}%`);
+    if (i.hostsDown > 0) parts.push(`  🔴 <b>${i.hostsDown} hosts caidos</b>`);
   }
 
   // List actual down hosts / critical problems
@@ -217,7 +208,10 @@ export function formatOperacionesBriefing(briefing: any, rawData?: any): string 
     const warnings = rawData.problems.filter((p: any) => p.severity === "warning" || p.severity === "average");
 
     if (critical.length > 0) {
-      parts.push(``, `🚨 <b>PROBLEMAS CRITICOS (${critical.length}):</b>`);
+      parts.push(``);
+      parts.push(`━━━━━━━━━━━━━━━━━━━━━━`);
+      parts.push(`🚨 <b>PROBLEMAS CRITICOS (${critical.length})</b>`);
+      parts.push(`━━━━━━━━━━━━━━━━━━━━━━`);
       for (const p of critical.slice(0, 10)) {
         const mins = Math.round(p.duration / 60);
         const durLabel = mins > 60 ? `${Math.round(mins / 60)}h ${mins % 60}m` : `${mins}m`;
@@ -226,7 +220,8 @@ export function formatOperacionesBriefing(briefing: any, rawData?: any): string 
       }
     }
     if (warnings.length > 0) {
-      parts.push(``, `⚠️ <b>ADVERTENCIAS (${warnings.length}):</b>`);
+      parts.push(``);
+      parts.push(`⚠️ <b>ADVERTENCIAS (${warnings.length}):</b>`);
       for (const p of warnings.slice(0, 5)) {
         parts.push(`  🟡 ${escHtml(p.hostName)}: ${escHtml(p.name)}`);
       }
@@ -239,11 +234,14 @@ export function formatOperacionesBriefing(briefing: any, rawData?: any): string 
     const totalMrr = rawData.mikrotik_nodes.reduce((s: number, n: any) => s + (n.mrr_usd || 0), 0);
     const nodesDown = rawData.mikrotik_nodes.filter((n: any) => n.services_suspended > 0);
     if (nodesDown.length > 0) {
-      parts.push(``, `📊 <b>NODOS CON SUSPENSIONES:</b>`);
+      parts.push(``);
+      parts.push(`━━━━━━━━━━━━━━━━━━━━━━`);
+      parts.push(`📊 <b>NODOS CON SUSPENSIONES</b>`);
+      parts.push(`━━━━━━━━━━━━━━━━━━━━━━`);
       for (const n of nodesDown.slice(0, 8)) {
         const pctMrr = totalMrr > 0 ? Math.round((n.mrr_usd / totalMrr) * 1000) / 10 : 0;
         const pctSusp = Math.round((n.services_suspended / (n.services_active + n.services_suspended)) * 100);
-        parts.push(`  📡 <b>${escHtml(n.name)}</b>: ${n.services_active} act / ${n.services_suspended} susp (${pctSusp}%) — ${pctMrr}% del MRR`);
+        parts.push(`  • <b>${escHtml(n.name)}</b>: ${n.services_active} act / ${n.services_suspended} susp (${pctSusp}%) — ${pctMrr}% del MRR`);
       }
     }
   }
@@ -251,27 +249,16 @@ export function formatOperacionesBriefing(briefing: any, rawData?: any): string 
   // Soporte summary
   if (rawData?.soporte) {
     const s = rawData.soporte;
-    parts.push(``, `🎧 <b>SOPORTE:</b> ${s.active} tickets activos | ${s.open} nuevos | ${s.resolved_today} resueltos hoy`);
+    parts.push(``);
+    parts.push(`━━━━━━━━━━━━━━━━━━━━━━`);
+    parts.push(`🎧 <b>SOPORTE</b>`);
+    parts.push(`━━━━━━━━━━━━━━━━━━━━━━`);
+    parts.push(`  ${s.active} tickets activos | ${s.open} nuevos | ${s.resolved_today} resueltos hoy`);
     if (s.by_category && Object.keys(s.by_category).length > 0) {
       const sorted = Object.entries(s.by_category).sort((a: any, b: any) => b[1] - a[1]).slice(0, 5);
       parts.push(`  Razones: ${sorted.map(([k, v]) => `${k}: ${v}`).join(", ")}`);
     }
   }
-
-  if (kpis.eficiencia_soporte) parts.push(``, `📊 Eficiencia soporte: <b>${kpis.eficiencia_soporte.value}</b> (${trendLabel(kpis.eficiencia_soporte.trend)})`);
-  if (kpis.riesgo_operativo) parts.push(`⚠️ Riesgo operativo: <b>${kpis.riesgo_operativo.value}</b> (${trendLabel(kpis.riesgo_operativo.trend)})`);
-
-  if (sanitizedInsights.length > 0) {
-    parts.push(``, `💡 <b>INSIGHTS IA:</b>`);
-    for (const ins of sanitizedInsights) {
-      const icon = ins.severity === "critical" ? "🔴" : ins.severity === "high" ? "🟠" : "🟡";
-      parts.push(`${icon} ${escHtml(ins.title)}`);
-      parts.push(`   ${escHtml(ins.description)}`);
-    }
-  }
-
-  const rec = briefing.recomendaciones_por_area?.operaciones;
-  if (rec) parts.push(``, `🎯 <b>Recomendacion:</b> ${escHtml(removeDollarAmounts(rec))}`);
 
   parts.push(``, `🤖 Supervisor IA | ${timeNow()}`);
   return parts.join("\n");
@@ -284,41 +271,55 @@ export function formatFinanzasBriefing(briefing: any, rawData?: any): string {
   const fmtUsd = (n: number) => `$${n.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const fmtBs = (n: number) => `Bs ${n.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-  const insights = (briefing.insights || [])
-    .filter((ins: any) => ins.para === "finanzas" || (!ins.para && ins.category === "finanzas"))
-    .slice(0, 3);
+  const mrrUsd = rawData?.finance?.subscriptions?.mrr_usd || 0;
+  const bcvRate = rawData?.finance?.exchange_rate || 0;
 
   const parts = [
     `💰 <b>FINANZAS — Reporte Diario</b>`,
     ``,
   ];
 
-  // ── MRR ──
-  if (rawData?.finance?.subscriptions) {
-    parts.push(`📊 <b>MRR:</b> ${fmtUsd(rawData.finance.subscriptions.mrr_usd)}`);
+  // ── RESUMEN ──
+  parts.push(`━━━━━━━━━━━━━━━━━━━━━━`);
+  parts.push(`📊 <b>RESUMEN</b>`);
+  parts.push(`━━━━━━━━━━━━━━━━━━━━━━`);
+  if (mrrUsd > 0) parts.push(`  MRR: <b>${fmtUsd(mrrUsd)}</b>`);
+  if (bcvRate > 0) parts.push(`  Tasa BCV: <b>${fmtBs(bcvRate)}</b>/USD`);
+
+  // Total cobrado en USD
+  let totalCobradoUsd = 0;
+  if (rawData?.payments_by_journal?.length > 0 && bcvRate > 0) {
+    for (const j of rawData.payments_by_journal) {
+      totalCobradoUsd += j.currency === "USD" ? j.total : j.total / bcvRate;
+    }
+  }
+  const pctCobranza = mrrUsd > 0 ? Math.round((totalCobradoUsd / mrrUsd) * 100) : 0;
+  if (totalCobradoUsd > 0) {
+    parts.push(`  Total cobrado: <b>${fmtUsd(totalCobradoUsd)}</b> — <b>${pctCobranza}%</b> del MRR`);
   }
 
   // ── INGRESOS DEL MES (cobrado por banco) ──
   if (rawData?.payments_by_journal?.length > 0) {
-    parts.push(``, `🏦 <b>INGRESOS DEL MES (por banco):</b>`);
-    let totalCobrado = 0;
+    parts.push(``);
+    parts.push(`━━━━━━━━━━━━━━━━━━━━━━`);
+    parts.push(`🏦 <b>INGRESOS POR BANCO</b>`);
+    parts.push(`━━━━━━━━━━━━━━━━━━━━━━`);
     for (const j of rawData.payments_by_journal) {
       const cur = j.currency === "USD" ? fmtUsd(j.total) : fmtBs(j.total);
-      parts.push(`  ${j.journal_name}: <b>${cur}</b> (${j.count} mov)`);
-      totalCobrado += j.total;
-    }
-    if (rawData.payments_by_journal.length > 1) {
-      parts.push(`  <b>Total: ${fmtBs(totalCobrado)}</b>`);
+      parts.push(`  • ${j.journal_name}: <b>${cur}</b> (${j.count} mov)`);
     }
   }
 
   // ── EGRESOS DEL MES ──
   if (rawData?.expenses_month) {
     const e = rawData.expenses_month;
-    parts.push(``, `📊 <b>EGRESOS DEL MES:</b> ${fmtUsd(e.total_usd)}`);
+    parts.push(``);
+    parts.push(`━━━━━━━━━━━━━━━━━━━━━━`);
+    parts.push(`📊 <b>EGRESOS DEL MES:</b> ${fmtUsd(e.total_usd)}`);
+    parts.push(`━━━━━━━━━━━━━━━━━━━━━━`);
     if (e.by_category?.length > 0) {
       for (const c of e.by_category) {
-        parts.push(`  ${c.category}: ${fmtUsd(c.total_usd)} (${c.pct}%)`);
+        parts.push(`  • ${c.category}: ${fmtUsd(c.total_usd)} (${c.pct}%)`);
       }
     }
   }
@@ -326,20 +327,11 @@ export function formatFinanzasBriefing(briefing: any, rawData?: any): string {
   // ── CxC ──
   if (rawData?.finance?.accounts_receivable) {
     const ar = rawData.finance.accounts_receivable;
-    parts.push(``, `📄 <b>CUENTAS POR COBRAR:</b> ${fmtUsd(ar.total_pending_amount)} (${ar.total_customers_with_debt} clientes)`);
-  }
-
-  // ── ANÁLISIS + INSIGHTS ──
-  if (briefing.summary) {
-    parts.push(``, `💡 <b>ANÁLISIS:</b>`, escHtml(briefing.summary));
-  }
-
-  if (insights.length > 0) {
-    parts.push(``, `🎯 <b>INSIGHTS:</b>`);
-    for (const ins of insights) {
-      const icon = ins.severity === "critical" ? "🔴" : ins.severity === "high" ? "🟠" : "🟡";
-      parts.push(`${icon} ${escHtml(ins.title)}`);
-    }
+    parts.push(``);
+    parts.push(`━━━━━━━━━━━━━━━━━━━━━━`);
+    parts.push(`📄 <b>CUENTAS POR COBRAR</b>`);
+    parts.push(`━━━━━━━━━━━━━━━━━━━━━━`);
+    parts.push(`  Total: <b>${fmtUsd(ar.total_pending_amount)}</b> (${ar.total_customers_with_debt} clientes)`);
   }
 
   parts.push(``, `🤖 Supervisor IA | ${timeNow()}`);
@@ -353,10 +345,6 @@ export function formatComercialBriefing(briefing: any, rawData?: any): string {
   const fmtUsd = (n: number) => `$${n.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const fmtBs = (n: number) => `Bs ${n.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-  const insights = (briefing.insights || [])
-    .filter((ins: any) => ins.para === "comercial" || (!ins.para && (ins.category === "ventas" || ins.category === "clientes")))
-    .slice(0, 3);
-
   const parts = [
     `📈 <b>COMERCIAL — Reporte Diario</b>`,
     ``,
@@ -365,15 +353,21 @@ export function formatComercialBriefing(briefing: any, rawData?: any): string {
   // ── CxC GENERAL ──
   if (rawData?.finance?.accounts_receivable) {
     const ar = rawData.finance.accounts_receivable;
-    parts.push(`📄 <b>CUENTAS POR COBRAR:</b> ${fmtUsd(ar.total_pending_amount)} (${ar.total_customers_with_debt} clientes)`);
+    parts.push(`━━━━━━━━━━━━━━━━━━━━━━`);
+    parts.push(`📄 <b>CUENTAS POR COBRAR</b>`);
+    parts.push(`━━━━━━━━━━━━━━━━━━━━━━`);
+    parts.push(`  Total: <b>${fmtUsd(ar.total_pending_amount)}</b> (${ar.total_customers_with_debt} clientes)`);
   }
 
   // ── COBRADO HASTA HOY (por banco) ──
   if (rawData?.payments_by_journal?.length > 0) {
-    parts.push(``, `🏦 <b>COBRADO DEL MES (por banco):</b>`);
+    parts.push(``);
+    parts.push(`━━━━━━━━━━━━━━━━━━━━━━`);
+    parts.push(`🏦 <b>COBRADO DEL MES</b>`);
+    parts.push(`━━━━━━━━━━━━━━━━━━━━━━`);
     for (const j of rawData.payments_by_journal) {
       const cur = j.currency === "USD" ? fmtUsd(j.total) : fmtBs(j.total);
-      parts.push(`  ${j.journal_name}: <b>${cur}</b> (${j.count} mov)`);
+      parts.push(`  • ${j.journal_name}: <b>${cur}</b> (${j.count} mov)`);
     }
   }
 
@@ -381,13 +375,20 @@ export function formatComercialBriefing(briefing: any, rawData?: any): string {
   if (rawData?.finance?.subscriptions) {
     const s = rawData.finance.subscriptions;
     const total = s.active + s.paused;
-    parts.push(``, `📡 <b>SERVICIOS:</b> ${total} total | <b>${s.active}</b> activos | ${s.paused} suspendidos`);
+    parts.push(``);
+    parts.push(`━━━━━━━━━━━━━━━━━━━━━━`);
+    parts.push(`📡 <b>SERVICIOS</b>`);
+    parts.push(`━━━━━━━━━━━━━━━━━━━━━━`);
+    parts.push(`  ${total} total | <b>${s.active}</b> activos | ${s.paused} suspendidos`);
   }
 
-  // ── PERIODICIDAD CxC (aging) ──
+  // ── ANTIGÜEDAD CxC (aging) ──
   if (rawData?.finance?.accounts_receivable?.aging) {
     const a = rawData.finance.accounts_receivable.aging;
-    parts.push(``, `⏱ <b>ANTIGÜEDAD CxC:</b>`);
+    parts.push(``);
+    parts.push(`━━━━━━━━━━━━━━━━━━━━━━`);
+    parts.push(`⏱ <b>ANTIGÜEDAD CxC</b>`);
+    parts.push(`━━━━━━━━━━━━━━━━━━━━━━`);
     if (a.current.count > 0) parts.push(`  Vigente: ${fmtUsd(a.current.amount)} (${a.current.count} clientes)`);
     if (a.days30.count > 0) parts.push(`  1-30 días: ${fmtUsd(a.days30.amount)} (${a.days30.count} clientes)`);
     if (a.days60.count > 0) parts.push(`  31-60 días: ${fmtUsd(a.days60.amount)} (${a.days60.count} clientes)`);
@@ -398,7 +399,10 @@ export function formatComercialBriefing(briefing: any, rawData?: any): string {
   // ── TOP 10 DEUDORES ──
   if (rawData?.finance?.accounts_receivable?.top_debtors?.length > 0) {
     const debtors = rawData.finance.accounts_receivable.top_debtors;
-    parts.push(``, `🔝 <b>TOP 10 MAYOR DEUDA:</b>`);
+    parts.push(``);
+    parts.push(`━━━━━━━━━━━━━━━━━━━━━━`);
+    parts.push(`🔝 <b>TOP 10 MAYOR DEUDA</b>`);
+    parts.push(`━━━━━━━━━━━━━━━━━━━━━━`);
     for (let i = 0; i < Math.min(debtors.length, 10); i++) {
       const d = debtors[i];
       parts.push(`  ${i + 1}. ${escHtml(d.name)}: ${fmtUsd(d.amount)}`);
@@ -408,7 +412,10 @@ export function formatComercialBriefing(briefing: any, rawData?: any): string {
   // ── VENTAS DEL MES ──
   if (rawData?.leads) {
     const l = rawData.leads;
-    parts.push(``, `🎯 <b>VENTAS DEL MES:</b>`);
+    parts.push(``);
+    parts.push(`━━━━━━━━━━━━━━━━━━━━━━`);
+    parts.push(`🎯 <b>VENTAS DEL MES</b>`);
+    parts.push(`━━━━━━━━━━━━━━━━━━━━━━`);
     parts.push(`  Ganados: <b>${l.won_this_month}</b> | Nuevos leads: ${l.created_this_month}`);
     parts.push(`  Pipeline: ${l.active} activos | ${fmtUsd(l.pipeline_value || 0)}`);
 
@@ -420,22 +427,12 @@ export function formatComercialBriefing(briefing: any, rawData?: any): string {
 
   // Servicios por plan
   if (rawData?.plan_distribution?.length > 0) {
-    parts.push(``, `📦 <b>DISTRIBUCIÓN POR PLAN:</b>`);
+    parts.push(``);
+    parts.push(`━━━━━━━━━━━━━━━━━━━━━━`);
+    parts.push(`📦 <b>DISTRIBUCIÓN POR PLAN</b>`);
+    parts.push(`━━━━━━━━━━━━━━━━━━━━━━`);
     for (const cat of rawData.plan_distribution.slice(0, 8)) {
       parts.push(`  ${escHtml(cat.category)}: <b>${cat.active}</b> activos / ${cat.paused} susp (${cat.total} total)`);
-    }
-  }
-
-  // ── ANÁLISIS + INSIGHTS ──
-  if (briefing.summary) {
-    parts.push(``, `💡 <b>ANÁLISIS:</b>`, escHtml(briefing.summary));
-  }
-
-  if (insights.length > 0) {
-    parts.push(``, `🎯 <b>INSIGHTS:</b>`);
-    for (const ins of insights) {
-      const icon = ins.severity === "critical" ? "🔴" : ins.severity === "high" ? "🟠" : "🟡";
-      parts.push(`${icon} ${escHtml(ins.title)}`);
     }
   }
 
