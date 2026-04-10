@@ -3,12 +3,16 @@ import { apiError, apiServerError } from "@/lib/api-helpers";
 import { chatWithSupervisor, isAnyEngineConfigured } from "@/lib/ai/model-router";
 import { gatherBusinessData } from "@/lib/supervisor/gather-data";
 import { BUSINESS_RULES, getBillingCycleContext } from "@/lib/supervisor/business-rules";
+import { requirePermission } from "@/lib/auth/check-permission";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60; // Vercel Pro: 60s for AI + data gathering
 
 export async function POST(request: NextRequest) {
   try {
+    const caller = await requirePermission("supervisor_ia", "read");
+    if (!caller) return NextResponse.json({ error: "Sin permisos" }, { status: 403 });
+
     if (!isAnyEngineConfigured()) {
       return NextResponse.json(
         { content: "Supervisor IA no configurado. Agregar GEMINI_API_KEY o ANTHROPIC_API_KEY.", engine: "gemini" },

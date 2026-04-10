@@ -1,9 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getClient, getClientDetail, updateClient, deleteClient } from "@/lib/dal/facturacion";
 import { clientUpdateSchema, validate } from "@/lib/validations/schemas";
+import { requirePermission } from "@/lib/auth/check-permission";
+import { apiError } from "@/lib/api-helpers";
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const caller = await requirePermission("clientes", "read");
+    if (!caller) return apiError("Sin permisos", 403);
+
     const { id } = await params;
     const { searchParams } = new URL(request.url);
     const detail = searchParams.get("detail") === "true";
@@ -17,6 +22,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const caller = await requirePermission("clientes", "update");
+    if (!caller) return apiError("Sin permisos", 403);
+
     const { id } = await params;
     const body = await request.json();
     
@@ -34,6 +42,9 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
 
 export async function DELETE(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const caller = await requirePermission("clientes", "delete");
+    if (!caller) return apiError("Sin permisos", 403);
+
     const { id } = await params;
     await deleteClient(id);
     return NextResponse.json({ success: true });

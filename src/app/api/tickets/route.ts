@@ -1,10 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getTickets, createTicket, getTicketCategories, getTechnicians } from "@/lib/dal/tickets";
+import { requirePermission } from "@/lib/auth/check-permission";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
   try {
+    const caller = await requirePermission("soporte", "read");
+    if (!caller) return NextResponse.json({ error: "Sin permisos" }, { status: 403 });
+
     const { searchParams } = new URL(request.url);
     
     // Special endpoints
@@ -36,6 +40,9 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    const caller = await requirePermission("soporte", "create");
+    if (!caller) return NextResponse.json({ error: "Sin permisos" }, { status: 403 });
+
     const body = await request.json();
     
     if (!body.subject?.trim()) {

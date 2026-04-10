@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { apiError } from "@/lib/api-helpers";
+import { requirePermission } from "@/lib/auth/check-permission";
 import { getCollection, getCollectionDetail, updateCollection, deleteCollection } from "@/lib/dal/crm-cobranzas";
 import { crmCollectionUpdateSchema, validate } from "@/lib/validations/schemas";
 
@@ -6,6 +8,9 @@ export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const caller = await requirePermission("cobranzas", "read");
+    if (!caller) return apiError("Sin permisos", 403);
+
     const { id } = await params;
     const { searchParams } = new URL(request.url);
     const detail = searchParams.get("detail") === "true";
@@ -18,6 +23,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const caller = await requirePermission("cobranzas", "update");
+    if (!caller) return apiError("Sin permisos", 403);
+
     const { id } = await params;
     const body = await request.json();
     const validation = validate(crmCollectionUpdateSchema, body);
@@ -33,6 +41,9 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
 
 export async function DELETE(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const caller = await requirePermission("cobranzas", "delete");
+    if (!caller) return apiError("Sin permisos", 403);
+
     const { id } = await params;
     await deleteCollection(id);
     return NextResponse.json({ success: true });

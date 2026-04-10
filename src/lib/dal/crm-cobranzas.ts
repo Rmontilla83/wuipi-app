@@ -6,6 +6,10 @@ import { updateClient, nextSequence } from "./facturacion";
 
 const supabase = () => createAdminSupabase();
 
+function escSearch(s: string): string {
+  return s.replace(/[%_\\,.()"]/g, "");
+}
+
 // ============================================
 // STAGES CONFIG
 // ============================================
@@ -229,7 +233,10 @@ export async function getCollectors(options?: {
   if (options?.active_only !== false) query = query.eq("is_active", true);
   if (options?.type) query = query.eq("type", options.type);
   if (options?.search) {
-    query = query.or(`full_name.ilike.%${options.search}%,email.ilike.%${options.search}%`);
+    const s = escSearch(options.search.trim());
+    if (s) {
+      query = query.or(`full_name.ilike.%${s}%,email.ilike.%${s}%`);
+    }
   }
 
   const { data, error } = await query;

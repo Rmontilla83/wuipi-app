@@ -1,10 +1,14 @@
 import { createAdminSupabase } from "@/lib/supabase/server";
-import { apiSuccess, apiServerError } from "@/lib/api-helpers";
+import { apiSuccess, apiError, apiServerError } from "@/lib/api-helpers";
+import { requirePermission } from "@/lib/auth/check-permission";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
   try {
+    const caller = await requirePermission("supervisor_ia", "read");
+    if (!caller) return apiError("Sin permisos", 403);
+
     const { searchParams } = new URL(request.url);
     const limit = Math.min(parseInt(searchParams.get("limit") || "30"), 90);
     const date = searchParams.get("date"); // specific date YYYY-MM-DD

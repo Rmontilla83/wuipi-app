@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { apiSuccess, apiError, apiServerError } from "@/lib/api-helpers";
 import { verifyClientPaymentToken } from "@/lib/utils/payment-token";
 import { isOdooConfigured, searchRead, read } from "@/lib/integrations/odoo";
+import { checkRateLimit, getClientIP } from "@/lib/utils/rate-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -11,10 +12,14 @@ export const dynamic = "force-dynamic";
  */
 export async function GET(request: NextRequest) {
   try {
+    const ip = getClientIP(request.headers);
+    const rl = checkRateLimit(`pagar-cliente:${ip}`, 20, 60_000);
+    if (!rl.allowed) return apiError("Demasiadas solicitudes", 429);
+
     if (!isOdooConfigured()) return apiError("Sistema no disponible", 503);
 
     const token = new URL(request.url).searchParams.get("token");
-    if (!token) return apiError("Token requerido", 400);
+    if (!token || token.length > 100) return apiError("Token requerido", 400);
 
     const partnerId = verifyClientPaymentToken(token);
     if (!partnerId) return apiError("Enlace de pago no valido", 400);

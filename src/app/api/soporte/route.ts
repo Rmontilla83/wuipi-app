@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import * as kommo from "@/lib/integrations/kommo";
+import { requirePermission } from "@/lib/auth/check-permission";
+
+export const dynamic = "force-dynamic";
 
 // Pipeline & Status IDs for "Embudo de SOPORTE"
 const PIPELINE_ID = 12115128;
@@ -128,6 +131,9 @@ interface UserInfo { id: number; name: string; isAdmin: boolean; groupId: number
 
 export async function GET(request: NextRequest) {
   try {
+    const caller = await requirePermission("soporte", "read");
+    if (!caller) return NextResponse.json({ error: "Sin permisos" }, { status: 403 });
+
     if (!kommo.isConfigured()) {
       return NextResponse.json({ error: "Kommo not configured", mock: true });
     }

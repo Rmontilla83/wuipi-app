@@ -97,7 +97,7 @@ export async function POST(request: NextRequest) {
         const successUrl = `${getAppUrl()}/pagar/${token}?status=success`;
         const cancelUrl = `${getAppUrl()}/pagar/${token}?status=cancelled`;
 
-        console.log("[Pay] Stripe session:", { amount_usd: Number(item.amount_usd), token });
+        // Stripe session creation
 
         const stripe = new Stripe(stripeKey, { apiVersion: "2025-04-30.basil" as Stripe.LatestApiVersion });
         const session = await stripe.checkout.sessions.create({

@@ -1,10 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getPlans, getServices, getPaymentMethods, createPlan, createService, updatePlan, updateService } from "@/lib/dal/facturacion";
+import { requirePermission } from "@/lib/auth/check-permission";
+import { apiError } from "@/lib/api-helpers";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
   try {
+    const caller = await requirePermission("clientes", "read");
+    if (!caller) return apiError("Sin permisos", 403);
+
     const { searchParams } = new URL(request.url);
     const type = searchParams.get("type") || "all";
 
@@ -21,6 +26,9 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    const caller = await requirePermission("clientes", "create");
+    if (!caller) return apiError("Sin permisos", 403);
+
     const body = await request.json();
     const { type, ...data } = body;
 
@@ -41,6 +49,9 @@ export async function POST(request: NextRequest) {
 
 export async function PUT(request: NextRequest) {
   try {
+    const caller = await requirePermission("clientes", "update");
+    if (!caller) return apiError("Sin permisos", 403);
+
     const body = await request.json();
     const { type, id, ...data } = body;
 

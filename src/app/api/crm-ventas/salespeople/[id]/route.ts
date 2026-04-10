@@ -1,11 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { updateSalesperson, deleteSalesperson } from "@/lib/dal/crm-ventas";
 import { crmSalespersonSchema, validate } from "@/lib/validations/schemas";
+import { requirePermission } from "@/lib/auth/check-permission";
 
 export const dynamic = "force-dynamic";
 
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const caller = await requirePermission("ventas", "update");
+    if (!caller) return NextResponse.json({ error: "Sin permisos" }, { status: 403 });
+
     const { id } = await params;
     const body = await request.json();
     const validation = validate(crmSalespersonSchema.partial(), body);
@@ -21,6 +25,9 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
 
 export async function DELETE(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const caller = await requirePermission("ventas", "delete");
+    if (!caller) return NextResponse.json({ error: "Sin permisos" }, { status: 403 });
+
     const { id } = await params;
     await deleteSalesperson(id);
     return NextResponse.json({ success: true });

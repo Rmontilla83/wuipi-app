@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getOdooClientDetail, getMikrotikServiceByPartner } from "@/lib/integrations/odoo";
+import { getPortalCaller } from "@/lib/auth/check-permission";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -152,10 +153,20 @@ function buildClientContext(detail: any, services: any[]): string {
 
 export async function POST(request: NextRequest) {
   try {
+    const caller = await getPortalCaller();
+    if (!caller) {
+      return NextResponse.json({ error: "No autenticado" }, { status: 401 });
+    }
+
     const { message, history, partnerId } = await request.json();
 
     if (!message || !partnerId) {
       return NextResponse.json({ error: "message and partnerId required" }, { status: 400 });
+    }
+
+    // Ensure portal user can only access their own data
+    if (Number(partnerId) !== caller.odoo_partner_id) {
+      return NextResponse.json({ error: "Acceso denegado" }, { status: 403 });
     }
 
     const apiKey = process.env.ANTHROPIC_API_KEY;

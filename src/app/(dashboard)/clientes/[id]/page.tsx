@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
+import DOMPurify from "isomorphic-dompurify";
 import { TopBar } from "@/components/layout/topbar";
 import { Card } from "@/components/ui/card";
 import {
@@ -476,7 +477,7 @@ function InformacionTab({ data }: { data: OdooClientDetail }) {
             </div>
           )}
           {data.notes && (
-            <div className="text-xs text-gray-400 bg-wuipi-bg rounded-lg p-3 border border-wuipi-border" dangerouslySetInnerHTML={{ __html: data.notes }} />
+            <div className="text-xs text-gray-400 bg-wuipi-bg rounded-lg p-3 border border-wuipi-border" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(data.notes) }} />
           )}
         </Card>
       )}

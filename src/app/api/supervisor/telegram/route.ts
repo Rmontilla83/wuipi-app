@@ -3,6 +3,7 @@ import { isConfigured, sendBriefingToAllChannels, getChannels } from "@/lib/inte
 import { gatherBusinessData } from "@/lib/supervisor/gather-data";
 import { isCacheRecent } from "@/lib/supervisor/briefing-cache";
 import { apiServerError } from "@/lib/api-helpers";
+import { requirePermission } from "@/lib/auth/check-permission";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 15;
@@ -10,6 +11,9 @@ export const maxDuration = 15;
 // POST: Send current briefing to Telegram channels (uses cache if recent)
 export async function POST(request: Request) {
   try {
+    const caller = await requirePermission("supervisor_ia", "read");
+    if (!caller) return NextResponse.json({ error: "Sin permisos" }, { status: 403 });
+
     if (!isConfigured()) {
       return NextResponse.json(
         { error: "Telegram no configurado. Agregar TELEGRAM_BOT_TOKEN." },

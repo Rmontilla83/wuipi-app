@@ -1,11 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { moveLead } from "@/lib/dal/crm-ventas";
 import { crmLeadMoveSchema, validate } from "@/lib/validations/schemas";
+import { requirePermission } from "@/lib/auth/check-permission";
 
 export const dynamic = "force-dynamic";
 
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const caller = await requirePermission("ventas", "update");
+    if (!caller) return NextResponse.json({ error: "Sin permisos" }, { status: 403 });
+
     const { id } = await params;
     const body = await request.json();
     const validation = validate(crmLeadMoveSchema, body);

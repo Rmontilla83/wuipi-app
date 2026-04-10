@@ -1,10 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getInvoices, createInvoice } from "@/lib/dal/facturacion";
+import { requirePermission } from "@/lib/auth/check-permission";
+import { apiError } from "@/lib/api-helpers";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
   try {
+    const caller = await requirePermission("clientes", "read");
+    if (!caller) return apiError("Sin permisos", 403);
+
     const { searchParams } = new URL(request.url);
     const result = await getInvoices({
       search: searchParams.get("search") || undefined,
@@ -23,6 +28,9 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    const caller = await requirePermission("erp", "create");
+    if (!caller) return apiError("Sin permisos", 403);
+
     const body = await request.json();
     
     if (!body.client_id || !body.items || !body.items.length) {

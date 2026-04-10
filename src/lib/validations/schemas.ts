@@ -146,8 +146,8 @@ export const crmLeadMoveSchema = z.object({
 export const crmActivityCreateSchema = z.object({
   lead_id: z.string().uuid("Lead inválido"),
   type: z.enum(CRM_ACTIVITY_TYPES, { message: "Tipo de actividad inválido" }),
-  description: z.string().min(1, "La descripción es requerida"),
-  metadata: z.any().optional().nullable(),
+  description: z.string().min(1, "La descripción es requerida").max(5000),
+  metadata: z.record(z.string(), z.any()).optional().nullable(),
   created_by: z.string().optional(),
 });
 
@@ -207,8 +207,8 @@ export const crmCollectionMoveSchema = z.object({
 export const crmCollectionActivityCreateSchema = z.object({
   collection_id: z.string().uuid("Caso inválido"),
   type: z.enum(CRM_COLLECTION_ACTIVITY_TYPES, { message: "Tipo de actividad inválido" }),
-  description: z.string().min(1, "La descripción es requerida"),
-  metadata: z.any().optional().nullable(),
+  description: z.string().min(1, "La descripción es requerida").max(5000),
+  metadata: z.record(z.string(), z.any()).optional().nullable(),
   created_by: z.string().optional(),
 });
 
@@ -250,7 +250,7 @@ export const collectionUploadRowSchema = z.object({
   subtotal: z.number().optional().nullable(),
   impuesto: z.number().optional().nullable(),
   total: z.number().optional().nullable(),
-  metadata: z.record(z.any()).optional().nullable(),
+  metadata: z.record(z.string(), z.any()).optional().nullable(),
 });
 
 export const collectionUploadSchema = z.object({

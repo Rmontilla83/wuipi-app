@@ -1,4 +1,5 @@
-import { apiSuccess, apiServerError } from "@/lib/api-helpers";
+import { apiSuccess, apiError, apiServerError } from "@/lib/api-helpers";
+import { requirePermission } from "@/lib/auth/check-permission";
 import { getInfraOverview, getInfraProblems, getInfraHosts } from "@/lib/integrations/zabbix";
 import {
   isOdooConfigured, getMonthlyInvoiceSummary, getSubscriptionSummary,
@@ -22,6 +23,9 @@ const CACHE_TTL = 2 * 60 * 1000;
 
 export async function GET() {
   try {
+    const caller = await requirePermission("comando", "access");
+    if (!caller) return apiError("Sin permisos", 403);
+
     if (cache && Date.now() - cache.ts < CACHE_TTL) {
       return apiSuccess(cache.data);
     }

@@ -1,11 +1,15 @@
-import { apiSuccess } from "@/lib/api-helpers";
+import { apiSuccess, apiError } from "@/lib/api-helpers";
 import { getInfraOverview } from "@/lib/integrations/zabbix";
 import type { InfraOverview } from "@/types/zabbix";
+import { requirePermission } from "@/lib/auth/check-permission";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
+    const caller = await requirePermission("infraestructura", "read");
+    if (!caller) return apiError("Sin permisos", 403);
+
     const data = await getInfraOverview();
     return apiSuccess(data);
   } catch (error) {

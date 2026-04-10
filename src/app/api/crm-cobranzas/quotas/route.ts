@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { apiError } from "@/lib/api-helpers";
+import { requirePermission } from "@/lib/auth/check-permission";
 import { getQuotas, upsertQuota } from "@/lib/dal/crm-cobranzas";
 import { crmCollectionQuotaSchema, validate } from "@/lib/validations/schemas";
 
@@ -6,6 +8,9 @@ export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
   try {
+    const caller = await requirePermission("cobranzas", "read");
+    if (!caller) return apiError("Sin permisos", 403);
+
     const { searchParams } = new URL(request.url);
     const month = searchParams.get("month");
     if (!month) {
@@ -20,6 +25,9 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    const caller = await requirePermission("cobranzas", "create");
+    if (!caller) return apiError("Sin permisos", 403);
+
     const body = await request.json();
     const validation = validate(crmCollectionQuotaSchema, body);
     if (!validation.success) {

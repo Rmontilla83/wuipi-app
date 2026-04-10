@@ -3,6 +3,10 @@ import { nextSequence } from "./facturacion";
 
 const supabase = () => createAdminSupabase();
 
+function escSearch(s: string): string {
+  return s.replace(/[%_\\,.()"]/g, "");
+}
+
 // ============================================
 // TICKET CATEGORIES
 // ============================================
@@ -48,7 +52,10 @@ export async function getTickets(options?: {
     .range(offset, offset + limit - 1);
 
   if (options?.search) {
-    query = query.or(`subject.ilike.%${options.search}%,ticket_number.ilike.%${options.search}%`);
+    const s = escSearch(options.search.trim());
+    if (s) {
+      query = query.or(`subject.ilike.%${s}%,ticket_number.ilike.%${s}%`);
+    }
   }
   if (options?.status && options.status !== "all") {
     query = query.eq("status", options.status);

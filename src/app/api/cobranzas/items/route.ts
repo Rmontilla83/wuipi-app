@@ -4,6 +4,7 @@ export const dynamic = "force-dynamic";
 
 import { NextRequest } from "next/server";
 import { apiSuccess, apiError, apiServerError } from "@/lib/api-helpers";
+import { requirePermission } from "@/lib/auth/check-permission";
 import {
   updateItem,
   createNotification,
@@ -18,6 +19,9 @@ const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://api.wuipi.net";
 
 export async function PATCH(request: NextRequest) {
   try {
+    const caller = await requirePermission("cobranzas", "update");
+    if (!caller) return apiError("Sin permisos", 403);
+
     const { id, ...updates } = await request.json();
     if (!id) return apiError("id requerido", 400);
 
@@ -55,6 +59,9 @@ export async function PATCH(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    const caller = await requirePermission("cobranzas", "create");
+    if (!caller) return apiError("Sin permisos", 403);
+
     const { id, customer_name, customer_phone, customer_email, amount_usd, concept, invoice_number, payment_token } = await request.json();
     if (!id || !payment_token) return apiError("id y payment_token requeridos", 400);
 

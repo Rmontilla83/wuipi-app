@@ -3,11 +3,15 @@ export const dynamic = "force-dynamic";
 
 import { NextRequest } from "next/server";
 import { apiSuccess, apiError, apiServerError } from "@/lib/api-helpers";
+import { requirePermission } from "@/lib/auth/check-permission";
 import { validate, collectionUploadSchema } from "@/lib/validations/schemas";
 import { createCampaign, createItems } from "@/lib/dal/collection-campaigns";
 
 export async function POST(request: NextRequest) {
   try {
+    const caller = await requirePermission("cobranzas", "create");
+    if (!caller) return apiError("Sin permisos", 403);
+
     const body = await request.json();
     const parsed = validate(collectionUploadSchema, body);
     if (!parsed.success) {

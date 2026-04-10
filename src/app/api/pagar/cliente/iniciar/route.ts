@@ -4,6 +4,7 @@ import { verifyClientPaymentToken } from "@/lib/utils/payment-token";
 import { isOdooConfigured, searchRead, read } from "@/lib/integrations/odoo";
 import { createAdminSupabase } from "@/lib/supabase/server";
 import { generateCollectionToken } from "@/lib/dal/collection-campaigns";
+import { checkRateLimit, getClientIP } from "@/lib/utils/rate-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -17,10 +18,16 @@ const PORTAL_CAMPAIGN_NAME = "Portal Autoservicio";
  */
 export async function POST(request: NextRequest) {
   try {
+    const ip = getClientIP(request.headers);
+    const rl = checkRateLimit(`pagar-iniciar:${ip}`, 10, 60_000);
+    if (!rl.allowed) return apiError("Demasiadas solicitudes", 429);
+
     if (!isOdooConfigured()) return apiError("Sistema no disponible", 503);
 
     const { token } = await request.json();
-    if (!token) return apiError("Token requerido", 400);
+    if (!token || typeof token !== "string" || token.length > 100) {
+      return apiError("Token requerido", 400);
+    }
 
     const partnerId = verifyClientPaymentToken(token);
     if (!partnerId) return apiError("Token no valido", 400);

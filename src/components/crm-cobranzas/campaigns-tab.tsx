@@ -1242,13 +1242,13 @@ function CampaignDetailView({
                     status={String(r.whatsapp?.status || "?")}
                   </span>
                 </div>
-                <pre className="mt-0.5 text-[10px] text-gray-500 font-mono bg-black/20 rounded p-1 overflow-x-auto whitespace-pre-wrap break-all max-h-24"
-                  dangerouslySetInnerHTML={{ __html: JSON.stringify(r.whatsapp?.response ?? null, null, 2) }}
-                />
+                <pre className="mt-0.5 text-[10px] text-gray-500 font-mono bg-black/20 rounded p-1 overflow-x-auto whitespace-pre-wrap break-all max-h-24">
+                  <code>{JSON.stringify(r.whatsapp?.response ?? null, null, 2)}</code>
+                </pre>
                 {r.whatsapp?.fallback ? (
-                  <pre className="mt-0.5 text-[10px] text-amber-500/80 font-mono bg-black/20 rounded p-1 overflow-x-auto whitespace-pre-wrap break-all max-h-24"
-                    dangerouslySetInnerHTML={{ __html: "FALLBACK: " + JSON.stringify(r.whatsapp.fallback, null, 2) }}
-                  />
+                  <pre className="mt-0.5 text-[10px] text-amber-500/80 font-mono bg-black/20 rounded p-1 overflow-x-auto whitespace-pre-wrap break-all max-h-24">
+                    <code>{"FALLBACK: " + JSON.stringify(r.whatsapp.fallback, null, 2)}</code>
+                  </pre>
                 ) : null}
 
                 {/* Email */}

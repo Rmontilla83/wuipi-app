@@ -1,11 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getLeads, createLead } from "@/lib/dal/crm-ventas";
 import { crmLeadCreateSchema, validate } from "@/lib/validations/schemas";
+import { requirePermission } from "@/lib/auth/check-permission";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
   try {
+    const caller = await requirePermission("ventas", "read");
+    if (!caller) return NextResponse.json({ error: "Sin permisos" }, { status: 403 });
+
     const { searchParams } = new URL(request.url);
     const result = await getLeads({
       search: searchParams.get("search") || undefined,
@@ -26,6 +30,9 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    const caller = await requirePermission("ventas", "create");
+    if (!caller) return NextResponse.json({ error: "Sin permisos" }, { status: 403 });
+
     const body = await request.json();
     const validation = validate(crmLeadCreateSchema, body);
     if (!validation.success) {

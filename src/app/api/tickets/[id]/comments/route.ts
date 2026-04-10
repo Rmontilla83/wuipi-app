@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { addTicketComment } from "@/lib/dal/tickets";
+import { requirePermission } from "@/lib/auth/check-permission";
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const caller = await requirePermission("soporte", "create");
+    if (!caller) return NextResponse.json({ error: "Sin permisos" }, { status: 403 });
+
     const { id } = await params;
     const body = await request.json();
     

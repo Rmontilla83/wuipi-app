@@ -51,7 +51,7 @@ export async function POST(request: NextRequest) {
         if (item && session.amount_total) {
           const expectedCents = Math.round(Number(item.amount_usd) * 100);
           if (Math.abs(session.amount_total - expectedCents) > 1) {
-            console.error(`[Stripe Webhook] AMOUNT MISMATCH: expected=${expectedCents} charged=${session.amount_total} token=${token}`);
+            console.error("[Stripe Webhook] AMOUNT MISMATCH detected — payment NOT marked as paid");
             return NextResponse.json({ received: true }); // Acknowledge but don't mark paid
           }
         }

@@ -3,11 +3,15 @@ export const dynamic = "force-dynamic";
 
 import { NextRequest } from "next/server";
 import { apiError, apiServerError } from "@/lib/api-helpers";
+import { requirePermission } from "@/lib/auth/check-permission";
 import { getCampaign, getItemsByCampaign } from "@/lib/dal/collection-campaigns";
 import * as XLSX from "xlsx";
 
 export async function POST(request: NextRequest) {
   try {
+    const caller = await requirePermission("cobranzas", "export");
+    if (!caller) return apiError("Sin permisos", 403);
+
     const { campaign_id } = await request.json();
     if (!campaign_id) return apiError("campaign_id requerido", 400);
 

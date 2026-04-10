@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { createAdminSupabase } from "@/lib/supabase/server";
 import { nextSequence } from "@/lib/dal/facturacion";
 import { apiSuccess, apiError, apiServerError } from "@/lib/api-helpers";
+import { requirePermission } from "@/lib/auth/check-permission";
 
 export const dynamic = "force-dynamic";
 
@@ -33,6 +34,9 @@ interface ImportClient {
 
 export async function POST(request: NextRequest) {
   try {
+    const caller = await requirePermission("clientes", "create");
+    if (!caller) return apiError("Sin permisos", 403);
+
     const body = await request.json();
     const clients: ImportClient[] = body.clients;
 

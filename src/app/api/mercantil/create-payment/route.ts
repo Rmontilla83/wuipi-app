@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { createAdminSupabase } from "@/lib/supabase/server";
 import { apiSuccess, apiError, apiServerError } from "@/lib/api-helpers";
+import { requirePermission } from "@/lib/auth/check-permission";
 import { MercantilSDK } from "@/lib/mercantil";
 import { generatePaymentToken } from "@/lib/mercantil/utils/helpers";
 
@@ -14,6 +15,9 @@ export const dynamic = "force-dynamic";
  */
 export async function POST(request: NextRequest) {
   try {
+    const caller = await requirePermission("mercantil", "create");
+    if (!caller) return apiError("Sin permisos", 403);
+
     const body = await request.json();
     const supabase = createAdminSupabase();
 

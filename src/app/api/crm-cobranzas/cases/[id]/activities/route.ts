@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { apiError } from "@/lib/api-helpers";
+import { requirePermission } from "@/lib/auth/check-permission";
 import { getActivities, createActivity } from "@/lib/dal/crm-cobranzas";
 import { crmCollectionActivityCreateSchema, validate } from "@/lib/validations/schemas";
 
@@ -6,6 +8,9 @@ export const dynamic = "force-dynamic";
 
 export async function GET(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const caller = await requirePermission("cobranzas", "read");
+    if (!caller) return apiError("Sin permisos", 403);
+
     const { id } = await params;
     const activities = await getActivities(id);
     return NextResponse.json(activities);
@@ -16,6 +21,9 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const caller = await requirePermission("cobranzas", "create");
+    if (!caller) return apiError("Sin permisos", 403);
+
     const { id } = await params;
     const body = await request.json();
     const validation = validate(crmCollectionActivityCreateSchema, { ...body, collection_id: id });

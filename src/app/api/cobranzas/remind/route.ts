@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic";
 
 import { NextRequest } from "next/server";
 import { apiSuccess, apiError, apiServerError } from "@/lib/api-helpers";
+import { requirePermission } from "@/lib/auth/check-permission";
 import {
   getItemsByCampaign,
   createNotification,
@@ -52,6 +53,9 @@ function getReminderType(attemptNumber: number, today: Date): {
 
 export async function POST(request: NextRequest) {
   try {
+    const caller = await requirePermission("cobranzas", "send");
+    if (!caller) return apiError("Sin permisos", 403);
+
     const { campaign_id, item_ids } = await request.json();
     if (!campaign_id) return apiError("campaign_id requerido", 400);
 

@@ -1,11 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getActivities, createActivity } from "@/lib/dal/crm-ventas";
 import { crmActivityCreateSchema, validate } from "@/lib/validations/schemas";
+import { requirePermission } from "@/lib/auth/check-permission";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const caller = await requirePermission("ventas", "read");
+    if (!caller) return NextResponse.json({ error: "Sin permisos" }, { status: 403 });
+
     const { id } = await params;
     const activities = await getActivities(id);
     return NextResponse.json(activities);
@@ -16,6 +20,9 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const caller = await requirePermission("ventas", "create");
+    if (!caller) return NextResponse.json({ error: "Sin permisos" }, { status: 403 });
+
     const { id } = await params;
     const body = await request.json();
     const validation = validate(crmActivityCreateSchema, { ...body, lead_id: id });

@@ -1,11 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getLatestRate, setExchangeRate } from "@/lib/dal/facturacion";
 import { fetchBCVRate } from "@/lib/services/bcv-rate";
+import { requirePermission } from "@/lib/auth/check-permission";
+import { apiError } from "@/lib/api-helpers";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
+    const caller = await requirePermission("clientes", "read");
+    if (!caller) return apiError("Sin permisos", 403);
+
     const today = new Date().toISOString().split("T")[0];
     let rate = await getLatestRate();
 
@@ -41,6 +46,9 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
+    const caller = await requirePermission("clientes", "create");
+    if (!caller) return apiError("Sin permisos", 403);
+
     const body = await request.json();
 
     // Manual rate override

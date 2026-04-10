@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { getBequantData } from "@/lib/integrations/bequant";
-import { apiSuccess, apiServerError } from "@/lib/api-helpers";
+import { apiSuccess, apiError, apiServerError } from "@/lib/api-helpers";
+import { requirePermission } from "@/lib/auth/check-permission";
 
 export const dynamic = "force-dynamic";
 
@@ -9,6 +10,8 @@ export async function GET(
   { params }: { params: { ip: string } }
 ) {
   try {
+    const caller = await requirePermission("bequant", "read");
+    if (!caller) return apiError("Sin permisos", 403);
     const { searchParams } = new URL(request.url);
     const period = (searchParams.get("period") || "24h") as "24h" | "7d" | "30d";
     const planSpeedDown = searchParams.get("planSpeed")

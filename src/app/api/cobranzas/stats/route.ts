@@ -1,11 +1,15 @@
 import { createAdminSupabase } from "@/lib/supabase/server";
-import { apiSuccess, apiServerError } from "@/lib/api-helpers";
+import { apiSuccess, apiError, apiServerError } from "@/lib/api-helpers";
+import { requirePermission } from "@/lib/auth/check-permission";
 import { COLLECTION_STAGES } from "@/lib/dal/crm-cobranzas";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
+    const caller = await requirePermission("cobranzas", "read");
+    if (!caller) return apiError("Sin permisos", 403);
+
     const supabase = createAdminSupabase();
 
     const { data: collections, error } = await supabase

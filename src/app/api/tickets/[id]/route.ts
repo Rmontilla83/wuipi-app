@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getTicket, getTicketWithComments, updateTicket, deleteTicket, addTicketComment } from "@/lib/dal/tickets";
+import { requirePermission } from "@/lib/auth/check-permission";
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const caller = await requirePermission("soporte", "read");
+    if (!caller) return NextResponse.json({ error: "Sin permisos" }, { status: 403 });
+
     const { id } = await params;
     const { searchParams } = new URL(request.url);
     const withComments = searchParams.get("comments") === "true";
@@ -16,6 +20,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const caller = await requirePermission("soporte", "update");
+    if (!caller) return NextResponse.json({ error: "Sin permisos" }, { status: 403 });
+
     const { id } = await params;
     const body = await request.json();
     
@@ -56,6 +63,9 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
 
 export async function DELETE(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const caller = await requirePermission("soporte", "delete");
+    if (!caller) return NextResponse.json({ error: "Sin permisos" }, { status: 403 });
+
     const { id } = await params;
     await deleteTicket(id);
     return NextResponse.json({ success: true });

@@ -4,6 +4,7 @@ import { gatherBusinessData } from "@/lib/supervisor/gather-data";
 import { BUSINESS_RULES, getBillingCycleContext } from "@/lib/supervisor/business-rules";
 import { createAdminSupabase } from "@/lib/supabase/server";
 import { getCachedBriefing, saveBriefingToCache } from "@/lib/supervisor/briefing-cache";
+import { requirePermission } from "@/lib/auth/check-permission";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60; // Vercel Pro: 60s for dual AI calls
@@ -139,6 +140,9 @@ Reglas:
 
 export async function POST(request: NextRequest) {
   try {
+    const caller = await requirePermission("supervisor_ia", "read");
+    if (!caller) return NextResponse.json({ error: "Sin permisos" }, { status: 403 });
+
     if (!isAnyEngineConfigured()) {
       return NextResponse.json(
         { error: "No hay modelo IA configurado. Agregar GEMINI_API_KEY o ANTHROPIC_API_KEY.", configured: false },

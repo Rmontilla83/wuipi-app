@@ -7,6 +7,11 @@ const supabase = () => createAdminSupabase();
 
 // --- Helpers ---
 
+/** Escape special PostgREST filter chars in search terms */
+function escSearch(s: string): string {
+  return s.replace(/[%_\\,.()"]/g, "");
+}
+
 export async function nextSequence(seqId: string): Promise<string> {
   const { data, error } = await supabase().rpc("next_sequence", {
     seq_id: seqId,
@@ -39,9 +44,12 @@ export async function getClients(options?: {
   if (options?.status) query = query.eq("service_status", options.status);
   if (options?.nodo) query = query.eq("service_node_code", options.nodo);
   if (options?.search) {
-    query = query.or(
-      `legal_name.ilike.%${options.search}%,trade_name.ilike.%${options.search}%,code.ilike.%${options.search}%,document_number.ilike.%${options.search}%,service_ip.ilike.%${options.search}%`
-    );
+    const s = escSearch(options.search.trim());
+    if (s) {
+      query = query.or(
+        `legal_name.ilike.%${s}%,trade_name.ilike.%${s}%,code.ilike.%${s}%,document_number.ilike.%${s}%,service_ip.ilike.%${s}%`
+      );
+    }
   }
 
   const { data, error, count } = await query;
@@ -278,9 +286,12 @@ export async function getInvoices(options?: {
   if (options?.from) query = query.gte("issue_date", options.from);
   if (options?.to) query = query.lte("issue_date", options.to);
   if (options?.search) {
-    query = query.or(
-      `invoice_number.ilike.%${options.search}%,client_name.ilike.%${options.search}%`
-    );
+    const s = escSearch(options.search.trim());
+    if (s) {
+      query = query.or(
+        `invoice_number.ilike.%${s}%,client_name.ilike.%${s}%`
+      );
+    }
   }
 
   const { data, error, count } = await query;
@@ -425,9 +436,12 @@ export async function getPayments(options?: {
   if (options?.from) query = query.gte("payment_date", options.from);
   if (options?.to) query = query.lte("payment_date", options.to);
   if (options?.search) {
-    query = query.or(
-      `payment_number.ilike.%${options.search}%,reference_number.ilike.%${options.search}%`
-    );
+    const s = escSearch(options.search.trim());
+    if (s) {
+      query = query.or(
+        `payment_number.ilike.%${s}%,reference_number.ilike.%${s}%`
+      );
+    }
   }
 
   const { data, error, count } = await query;

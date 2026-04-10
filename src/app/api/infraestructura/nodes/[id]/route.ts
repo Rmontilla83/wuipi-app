@@ -3,12 +3,16 @@ export const dynamic = "force-dynamic";
 import { NextRequest } from "next/server";
 import { apiSuccess, apiError, apiServerError } from "@/lib/api-helpers";
 import { isOdooConfigured, getMikrotikNodeDetail } from "@/lib/integrations/odoo";
+import { requirePermission } from "@/lib/auth/check-permission";
 
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const caller = await requirePermission("infraestructura", "read");
+    if (!caller) return apiError("Sin permisos", 403);
+
     if (!isOdooConfigured()) return apiError("Odoo no configurado", 503);
 
     const { id } = await params;

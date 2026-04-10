@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import * as kommo from "@/lib/integrations/kommo-ventas";
+import { requirePermission } from "@/lib/auth/check-permission";
+
+export const dynamic = "force-dynamic";
 
 // Cache pipelines in memory (refreshes on cold start)
 let cachedPipelines: any[] | null = null;
@@ -29,6 +32,9 @@ function mapStatusColor(pipeline: any, statusId: number): string {
 
 export async function GET(request: NextRequest) {
   try {
+    const caller = await requirePermission("ventas", "read");
+    if (!caller) return NextResponse.json({ error: "Sin permisos" }, { status: 403 });
+
     if (!kommo.isConfigured()) {
       return NextResponse.json({ error: "Kommo Ventas not configured", mock: true });
     }

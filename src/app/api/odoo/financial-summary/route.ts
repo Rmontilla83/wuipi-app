@@ -1,4 +1,5 @@
 import { apiSuccess, apiError, apiServerError } from "@/lib/api-helpers";
+import { requirePermission } from "@/lib/auth/check-permission";
 import {
   isOdooConfigured,
   getMonthlyInvoiceSummary,
@@ -19,6 +20,9 @@ const CACHE_TTL = 2 * 60 * 1000;
 
 export async function GET() {
   try {
+    const caller = await requirePermission("finanzas", "read");
+    if (!caller) return apiError("Sin permisos", 403);
+
     if (!isOdooConfigured()) {
       return apiError("Odoo no está configurado", 503);
     }

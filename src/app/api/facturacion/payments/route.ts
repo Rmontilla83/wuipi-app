@@ -1,10 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getPayments, createPayment, updatePayment } from "@/lib/dal/facturacion";
+import { requirePermission } from "@/lib/auth/check-permission";
+import { apiError } from "@/lib/api-helpers";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
   try {
+    const caller = await requirePermission("clientes", "read");
+    if (!caller) return apiError("Sin permisos", 403);
+
     const { searchParams } = new URL(request.url);
     const result = await getPayments({
       search: searchParams.get("search") || undefined,
@@ -24,8 +29,11 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    const caller = await requirePermission("clientes", "create");
+    if (!caller) return apiError("Sin permisos", 403);
+
     const body = await request.json();
-    
+
     if (!body.client_id || !body.amount || !body.payment_method_id) {
       return NextResponse.json({ error: "client_id, amount and payment_method_id are required" }, { status: 400 });
     }
@@ -43,6 +51,9 @@ export async function POST(request: NextRequest) {
 
 export async function PUT(request: NextRequest) {
   try {
+    const caller = await requirePermission("clientes", "update");
+    if (!caller) return apiError("Sin permisos", 403);
+
     const body = await request.json();
     if (!body.id) return NextResponse.json({ error: "id is required" }, { status: 400 });
     const { id, ...updates } = body;

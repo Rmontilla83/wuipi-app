@@ -35,7 +35,7 @@ export async function POST(request: NextRequest) {
     const payload = sdk.parseWebhook(rawPayload as Record<string, unknown>);
 
     console.log(
-      `[Mercantil Webhook] Status: ${payload.status} | Invoice: ${payload.invoice_number} | Ref: ${payload.reference_number} | Amount: ${payload.amount}`
+      `[Mercantil Webhook] Status: ${payload.status} | Invoice: ${payload.invoice_number}`
     );
 
     // Update webhook log with parsed data
@@ -114,9 +114,7 @@ export async function POST(request: NextRequest) {
     // If approved, update invoice status
     if (payload.status === "approved" && payment.invoice_id) {
       // The trigger update_invoice_on_payment will handle status transitions
-      console.log(
-        `[Mercantil Webhook] Payment approved for invoice ${payload.invoice_number} — updating invoice`
-      );
+      // Payment approved — invoice trigger handles status transitions
     }
 
     // --- Cross-reference with collection_items (cobros masivos) ---
@@ -136,9 +134,7 @@ export async function POST(request: NextRequest) {
             payment_reference: payload.reference_number || "",
             amount_bss: payload.amount ? parseFloat(String(payload.amount)) : undefined,
           });
-          console.log(
-            `[Mercantil Webhook] Collection item ${collectionItem.payment_token} marked as paid`
-          );
+          console.log("[Mercantil Webhook] Collection item marked as paid");
         }
       } catch (collErr) {
         // Not finding a collection item is normal — not all Mercantil payments are from cobranzas

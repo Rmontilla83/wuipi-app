@@ -9,7 +9,8 @@ export function apiError(message: string, status = 400) {
 }
 
 export function apiServerError(error: unknown) {
-  const message = error instanceof Error ? error.message : "Error interno del servidor";
+  // Log full error server-side for debugging (visible in Vercel logs)
   console.error("[API Error]", error);
-  return NextResponse.json({ error: message }, { status: 500 });
+  // Never expose internal error details to the client
+  return NextResponse.json({ error: "Error interno del servidor" }, { status: 500 });
 }
