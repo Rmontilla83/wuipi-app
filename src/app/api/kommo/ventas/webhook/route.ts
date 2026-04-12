@@ -1,11 +1,10 @@
 // ===========================================
 // Kommo Ventas Webhook — Sales Bot Receiver
+// Recibe triggers del Salesbot (send_hook)
 // ===========================================
 
 import { NextRequest, NextResponse } from "next/server";
-import { parseWebhookPayload } from "@/lib/integrations/kommo-ventas";
-import { handleIncomingMessage } from "@/lib/bot/sales-engine";
-import type { BotIncomingMessage } from "@/lib/bot/types";
+import { handleSalesbotTrigger } from "@/lib/bot/sales-engine";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -13,61 +12,59 @@ export const maxDuration = 30;
 export async function POST(request: NextRequest) {
   try {
     const contentType = request.headers.get("content-type") || "";
-    let raw: Record<string, string> = {};
+    let payload: Record<string, any> = {};
 
+    // El Salesbot send_hook puede enviar como form-urlencoded o JSON
     if (contentType.includes("application/x-www-form-urlencoded")) {
       const formData = await request.formData();
       for (const [key, value] of formData.entries()) {
-        raw[key] = value.toString();
+        payload[key] = value.toString();
       }
     } else if (contentType.includes("application/json")) {
-      raw = await request.json();
+      payload = await request.json();
     } else {
       const text = await request.text();
-      try { raw = JSON.parse(text); } catch { raw = { _raw: text }; }
+      try { payload = JSON.parse(text); } catch { payload = { _raw: text }; }
     }
 
-    const event = parseWebhookPayload(raw);
+    // Extraer lead ID del payload del Salesbot
+    // El trigger send_hook envía datos del lead en varios formatos posibles
+    const leadId = extractLeadId(payload);
 
-    // Ignorar mensajes salientes (del vendedor o del bot)
-    if (event.message.type !== "incoming") {
-      return NextResponse.json({ status: "ignored", reason: "outgoing" });
+    if (!leadId) {
+      console.log("[Kommo Bot] No se pudo extraer leadId del payload:", JSON.stringify(payload).slice(0, 500));
+      return NextResponse.json({ status: "ignored", reason: "no_lead_id" });
     }
 
-    // Ignorar mensajes sin texto (media, stickers, etc.)
-    if (!event.message.text.trim()) {
-      return NextResponse.json({ status: "ignored", reason: "empty" });
-    }
+    console.log("[Kommo Bot] Trigger recibido para lead:", leadId);
 
-    console.log("[Kommo Bot]", JSON.stringify({
-      action: "message_received",
-      origin: event.message.origin,
-      contact: event.message.author.name,
-      leadId: event.message.elementId,
-      text: event.message.text.slice(0, 200),
-    }));
-
-    // Construir mensaje para el motor del bot
-    const msg: BotIncomingMessage = {
-      messageId: event.message.id,
-      chatId: event.message.chatId,
-      talkId: event.message.talkId,
-      contactId: event.message.contactId,
-      leadId: event.message.elementId,
-      text: event.message.text,
-      authorName: event.message.author.name,
-      authorType: event.message.author.type,
-      origin: event.message.origin,
-      createdAt: event.message.createdAt,
-    };
-
-    // Procesar con el motor del bot — esperamos a que termine antes de responder
-    // Kommo tolera hasta 15s de espera, Claude responde en ~3-5s
-    await handleIncomingMessage(msg);
+    // Procesar con el motor del bot
+    await handleSalesbotTrigger(leadId);
 
     return NextResponse.json({ status: "processed" });
   } catch (error: any) {
     console.error("[Kommo Bot] Error:", error.message);
     return NextResponse.json({ status: "error", message: error.message });
   }
+}
+
+/** Extraer el lead ID del payload del Salesbot trigger */
+function extractLeadId(payload: Record<string, any>): number | null {
+  // Formato 1: lead[id] (form-urlencoded del trigger)
+  if (payload["lead[id]"]) return parseInt(payload["lead[id]"]);
+
+  // Formato 2: leads[status][0][id] (webhook estándar de Kommo)
+  if (payload["leads[status][0][id]"]) return parseInt(payload["leads[status][0][id]"]);
+
+  // Formato 3: message[add][0][element_id] (webhook de mensaje)
+  if (payload["message[add][0][element_id]"]) return parseInt(payload["message[add][0][element_id]"]);
+
+  // Formato 4: JSON directo
+  if (payload.lead_id) return parseInt(payload.lead_id);
+  if (payload.lead?.id) return parseInt(payload.lead.id);
+
+  // Formato 5: unsorted[add][0][lead_id]
+  if (payload["unsorted[add][0][lead_id]"]) return parseInt(payload["unsorted[add][0][lead_id]"]);
+
+  return null;
 }

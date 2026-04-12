@@ -7,10 +7,7 @@ import * as kommo from "@/lib/integrations/kommo-ventas";
 import { buildSystemPrompt, buildMessages } from "./sales-prompts";
 import {
   PIPELINE_ID,
-  STAGES,
   STAGE_NAMES,
-  CHANNEL_MAP,
-  type BotIncomingMessage,
   type BotResponse,
   type ConversationMessage,
 } from "./types";
@@ -18,103 +15,144 @@ import {
 const CLAUDE_API_KEY = process.env.ANTHROPIC_API_KEY || "";
 const CLAUDE_MODEL = "claude-sonnet-4-20250514";
 
-// --- Main Handler ---
+// IDs de los campos custom del bot en Kommo
+const CF_BOT_INPUT = 1157965;
+const CF_BOT_OUTPUT = 1157967;
+const CF_BOT_DONE = 1157969;
+const CF_BOT_STATUS = 1157971;
 
-export async function handleIncomingMessage(msg: BotIncomingMessage): Promise<void> {
+// --- Main Handler ---
+// Llamado por el webhook del Salesbot (send_hook trigger).
+// Lee el mensaje del campo bot_input, genera respuesta con Claude,
+// escribe la respuesta en bot_output y marca bot_done = true.
+// El Salesbot se encarga de enviar el mensaje al cliente.
+
+export async function handleSalesbotTrigger(leadId: number): Promise<void> {
   const supabase = createAdminSupabase();
 
-  // 1. Buscar o crear conversación
-  const conversation = await getOrCreateConversation(supabase, msg);
-
-  // 2. Si está marcada como atendida por humano, no intervenir
-  if (conversation.attended_by === "human") {
-    console.log("[Bot] Conversación atendida por humano, ignorando");
-    return;
-  }
-
-  // 3. Obtener etapa actual del lead en Kommo
-  const currentStageId = await getLeadStage(msg.leadId);
-
-  // 4. Verificar que el lead está en nuestro pipeline (VENTAS 2.0)
-  // Si no está, podría ser del pipeline viejo — ignorar
-  if (currentStageId === null) {
-    console.log("[Bot] Lead no encontrado o no está en pipeline VENTAS 2.0, ignorando");
-    return;
-  }
-
-  // 5. Cargar historial de conversación
-  const history = await getConversationHistory(supabase, conversation.id);
-
-  // 6. Guardar mensaje del cliente
-  await saveMessage(supabase, conversation.id, "user", msg.text);
-
-  // 7. Generar respuesta con Claude
-  const currentStageName = STAGE_NAMES[currentStageId] || "Desconocida";
-  const botResponse = await generateResponse(currentStageName, history, msg.text);
-
-  // 8. Enviar respuesta al cliente via Kommo
   try {
-    await kommo.sendChatMessage(msg.chatId, botResponse.reply);
-    console.log("[Bot] Respuesta enviada:", botResponse.reply.slice(0, 100));
-  } catch (err: any) {
-    console.error("[Bot] Error enviando mensaje:", err.message);
-    // Guardar el error pero no crashear
-    await saveMessage(supabase, conversation.id, "assistant", botResponse.reply, {
-      error: err.message,
-      sent: false,
+    // 1. Obtener datos del lead (etapa + campo bot_input)
+    const lead = await kommo.getLead(leadId);
+    if (!lead) {
+      console.error("[Bot] Lead no encontrado:", leadId);
+      await setBotResponse(leadId, "Lead no encontrado", "error");
+      return;
+    }
+
+    // 2. Verificar que está en nuestro pipeline
+    if (lead.pipeline_id !== PIPELINE_ID) {
+      console.log("[Bot] Lead no está en VENTAS 2.0, ignorando:", leadId);
+      return;
+    }
+
+    // 3. Leer el mensaje del campo bot_input
+    const inputField = lead.custom_fields_values?.find(
+      (f: any) => f.field_id === CF_BOT_INPUT
+    );
+    const messageText = inputField?.values?.[0]?.value || "";
+
+    if (!messageText.trim()) {
+      console.log("[Bot] bot_input vacío, ignorando");
+      await setBotResponse(leadId, "Sin mensaje", "error");
+      return;
+    }
+
+    console.log("[Bot] Procesando lead:", leadId, "Mensaje:", messageText.slice(0, 100));
+
+    // 4. Buscar o crear conversación en Supabase
+    const conversation = await getOrCreateConversation(supabase, {
+      leadId: leadId.toString(),
+      contactId: lead._embedded?.contacts?.[0]?.id?.toString() || "",
     });
-    return;
-  }
 
-  // 9. Guardar respuesta del bot
-  await saveMessage(supabase, conversation.id, "assistant", botResponse.reply, {
-    intent: botResponse.intent,
-    temperature: botResponse.temperature,
-    needsHuman: botResponse.needsHuman,
-    fieldsDetected: botResponse.fieldsDetected,
-  });
-
-  // 10. Mover lead de etapa si aplica
-  if (botResponse.moveToStage && botResponse.moveToStage !== currentStageId) {
-    try {
-      await kommo.updateLead(parseInt(msg.leadId), {
-        status_id: botResponse.moveToStage,
-        pipeline_id: PIPELINE_ID,
-      });
-      console.log("[Bot] Lead movido a:", STAGE_NAMES[botResponse.moveToStage]);
-    } catch (err: any) {
-      console.error("[Bot] Error moviendo lead:", err.message);
+    // 5. Si está atendida por humano, no intervenir
+    if (conversation.attended_by === "human") {
+      console.log("[Bot] Conversación atendida por humano, ignorando");
+      return;
     }
-  }
 
-  // 11. Actualizar campos del lead si se detectaron datos
-  if (Object.keys(botResponse.fieldsDetected).length > 0) {
-    await updateConversationFields(supabase, conversation.id, botResponse);
-  }
+    // 6. Cargar historial y guardar mensaje del cliente
+    const history = await getConversationHistory(supabase, conversation.id);
+    await saveMessage(supabase, conversation.id, "user", messageText);
 
-  // 12. Si necesita humano, agregar nota al lead
-  if (botResponse.needsHuman) {
-    try {
-      await kommo.addNoteToLead(
-        parseInt(msg.leadId),
-        `🤖 Bot: El cliente necesita atención humana.\nMotivo: ${botResponse.intent}\nÚltimo mensaje: "${msg.text.slice(0, 200)}"`
-      );
-    } catch (err: any) {
-      console.error("[Bot] Error agregando nota:", err.message);
-    }
-  }
+    // 7. Generar respuesta con Claude
+    const currentStageName = STAGE_NAMES[lead.status_id] || "Desconocida";
+    const botResponse = await generateResponse(currentStageName, history, messageText);
 
-  // 13. Actualizar conversación
-  await supabase
-    .from("bot_sales_conversations")
-    .update({
-      messages_count: (conversation.messages_count || 0) + 2,
-      last_message_at: new Date().toISOString(),
+    // 8. Escribir respuesta en campo custom + marcar done
+    await setBotResponse(leadId, botResponse.reply, "ok");
+    console.log("[Bot] Respuesta escrita:", botResponse.reply.slice(0, 100));
+
+    // 9. Guardar respuesta en Supabase
+    await saveMessage(supabase, conversation.id, "assistant", botResponse.reply, {
+      intent: botResponse.intent,
       temperature: botResponse.temperature,
-      classification: botResponse.intent,
-      needs_human: botResponse.needsHuman,
-    })
-    .eq("id", conversation.id);
+      needsHuman: botResponse.needsHuman,
+      fieldsDetected: botResponse.fieldsDetected,
+    });
+
+    // 10. Mover lead de etapa si aplica
+    if (botResponse.moveToStage && botResponse.moveToStage !== lead.status_id) {
+      try {
+        await kommo.updateLead(leadId, {
+          status_id: botResponse.moveToStage,
+          pipeline_id: PIPELINE_ID,
+        });
+        console.log("[Bot] Lead movido a:", STAGE_NAMES[botResponse.moveToStage]);
+      } catch (err: any) {
+        console.error("[Bot] Error moviendo lead:", err.message);
+      }
+    }
+
+    // 11. Actualizar datos recopilados en Supabase
+    if (Object.keys(botResponse.fieldsDetected).length > 0) {
+      await updateConversationFields(supabase, conversation.id, botResponse);
+    }
+
+    // 12. Si necesita humano, agregar nota
+    if (botResponse.needsHuman) {
+      try {
+        await kommo.addNoteToLead(
+          leadId,
+          `Bot: El cliente necesita atencion humana.\nMotivo: ${botResponse.intent}\nMensaje: "${messageText.slice(0, 200)}"`
+        );
+      } catch (err: any) {
+        console.error("[Bot] Error agregando nota:", err.message);
+      }
+    }
+
+    // 13. Actualizar conversación
+    await supabase
+      .from("bot_sales_conversations")
+      .update({
+        messages_count: (conversation.messages_count || 0) + 2,
+        last_message_at: new Date().toISOString(),
+        temperature: botResponse.temperature,
+        classification: botResponse.intent,
+        needs_human: botResponse.needsHuman,
+      })
+      .eq("id", conversation.id);
+
+  } catch (err: any) {
+    console.error("[Bot] Error fatal:", err.message);
+    // Intentar escribir error para que el Salesbot muestre mensaje genérico
+    try {
+      await setBotResponse(leadId, err.message, "error");
+    } catch {
+      // Si ni esto funciona, ya no podemos hacer nada
+    }
+  }
+}
+
+/** Escribe la respuesta del bot en los campos custom del lead */
+async function setBotResponse(leadId: number, reply: string, status: string) {
+  await kommo.updateLead(leadId, {
+    custom_fields_values: [
+      { field_id: CF_BOT_OUTPUT, values: [{ value: reply }] },
+      { field_id: CF_BOT_STATUS, values: [{ value: status }] },
+      { field_id: CF_BOT_DONE, values: [{ value: true }] },
+    ],
+  });
 }
 
 // --- Claude API ---
@@ -198,12 +236,15 @@ function fallbackResponse(): BotResponse {
 
 // --- Supabase Helpers ---
 
-async function getOrCreateConversation(supabase: any, msg: BotIncomingMessage) {
+async function getOrCreateConversation(
+  supabase: any,
+  info: { leadId: string; contactId: string }
+) {
   // Buscar conversación activa por lead
   const { data: existing } = await supabase
     .from("bot_sales_conversations")
     .select("*")
-    .eq("kommo_lead_id", msg.leadId)
+    .eq("kommo_lead_id", info.leadId)
     .eq("status", "active")
     .maybeSingle();
 
@@ -213,12 +254,12 @@ async function getOrCreateConversation(supabase: any, msg: BotIncomingMessage) {
   const { data: created, error } = await supabase
     .from("bot_sales_conversations")
     .insert({
-      kommo_lead_id: msg.leadId,
-      kommo_contact_id: msg.contactId,
-      kommo_chat_id: msg.chatId,
-      kommo_talk_id: msg.talkId,
+      kommo_lead_id: info.leadId,
+      kommo_contact_id: info.contactId,
+      kommo_chat_id: "",
+      kommo_talk_id: "",
       phone: "",
-      channel: CHANNEL_MAP[msg.origin] || msg.origin,
+      channel: "Salesbot",
       status: "active",
       attended_by: "bot",
       messages_count: 0,
@@ -293,17 +334,3 @@ async function updateConversationFields(
   }
 }
 
-// --- Kommo Helpers ---
-
-async function getLeadStage(leadId: string): Promise<number | null> {
-  try {
-    const lead = await kommo.getLead(parseInt(leadId));
-    if (!lead || lead.pipeline_id !== PIPELINE_ID) {
-      return null;
-    }
-    return lead.status_id;
-  } catch (err: any) {
-    console.error("[Bot] Error obteniendo lead:", err.message);
-    return null;
-  }
-}
