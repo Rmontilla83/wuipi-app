@@ -61,17 +61,11 @@ export async function POST(request: NextRequest) {
       createdAt: event.message.createdAt,
     };
 
-    // Procesar con el motor del bot (no bloquear la respuesta a Kommo)
-    // Usamos waitUntil pattern: respondemos 200 inmediato y procesamos en background
-    const botPromise = handleIncomingMessage(msg).catch((err) => {
-      console.error("[Kommo Bot] Error en motor:", err.message);
-    });
+    // Procesar con el motor del bot — esperamos a que termine antes de responder
+    // Kommo tolera hasta 15s de espera, Claude responde en ~3-5s
+    await handleIncomingMessage(msg);
 
-    // En Vercel, el runtime mantiene la función viva hasta que las promises pendientes se resuelvan
-    // siempre que respondamos dentro del timeout
-    void botPromise;
-
-    return NextResponse.json({ status: "processing" });
+    return NextResponse.json({ status: "processed" });
   } catch (error: any) {
     console.error("[Kommo Bot] Error:", error.message);
     return NextResponse.json({ status: "error", message: error.message });
