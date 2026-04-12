@@ -19,6 +19,7 @@ export async function middleware(request: NextRequest) {
     "/pagar/cliente/",          // Public client payment page
     "/portal/",                 // Customer portal (own auth at layout level)
     "/api/portal/verify-email", // Pre-login email check (must be public)
+    "/api/kommo/ventas/webhook", // Kommo sales bot webhook (external)
   ];
   const { pathname } = request.nextUrl;
   const isPublic = publicPaths.some((path) => pathname.startsWith(path));
