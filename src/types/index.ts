@@ -76,3 +76,4 @@ export type {
   InterfaceBandwidth, APClient, OutageEvent, EquipmentType, SeverityLevel,
   DetailedEquipmentType, InfraSiteSummary,
 } from "./zabbix";
+export * from "./inbox";

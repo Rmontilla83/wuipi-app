@@ -8,9 +8,17 @@ import { buildSystemPrompt, buildMessages } from "./sales-prompts";
 import {
   PIPELINE_ID,
   STAGE_NAMES,
+  CRM_STAGE_DISPLAY_NAMES,
   type BotResponse,
   type ConversationMessage,
 } from "./types";
+import {
+  getConversation as getInboxConversation,
+  getMessages as getInboxMessages,
+  createMessage as createInboxMessage,
+  updateConversation as updateInboxConversation,
+} from "@/lib/dal/inbox";
+import { moveLead } from "@/lib/dal/crm-ventas";
 
 const CLAUDE_API_KEY = process.env.ANTHROPIC_API_KEY || "";
 const CLAUDE_MODEL = "claude-sonnet-4-20250514";
@@ -157,10 +165,11 @@ async function setBotResponse(leadId: number, reply: string, status: string) {
 
 // --- Claude API ---
 
-async function generateResponse(
+export async function generateResponse(
   currentStage: string,
   history: ConversationMessage[],
-  newMessage: string
+  newMessage: string,
+  options?: { channel?: string; useCrmStages?: boolean }
 ): Promise<BotResponse> {
   if (!CLAUDE_API_KEY) {
     console.error("[Bot] ANTHROPIC_API_KEY no configurada");
@@ -168,7 +177,7 @@ async function generateResponse(
   }
 
   try {
-    const systemPrompt = buildSystemPrompt(currentStage);
+    const systemPrompt = buildSystemPrompt(currentStage, options);
     const messages = buildMessages(history, newMessage);
 
     const response = await fetch("https://api.anthropic.com/v1/messages", {
@@ -331,6 +340,123 @@ async function updateConversationFields(
       .from("bot_sales_conversations")
       .update(update)
       .eq("id", conversationId);
+  }
+}
+
+// ===========================================
+// INBOX BOT HANDLER (desacoplado de Kommo)
+// ===========================================
+// Lee/escribe directamente en inbox_messages y inbox_conversations.
+// Llamado por /api/inbox/simulate y (futuro) por el webhook de Meta.
+
+export async function handleInboxMessage(conversationId: string): Promise<void> {
+  try {
+    // 1. Cargar conversación con contact + lead
+    const conversation = await getInboxConversation(conversationId);
+    if (!conversation) {
+      console.error("[InboxBot] Conversación no encontrada:", conversationId);
+      return;
+    }
+
+    if (!conversation.bot_active) {
+      console.log("[InboxBot] Bot desactivado para conversación:", conversationId);
+      return;
+    }
+
+    // 2. Cargar últimos mensajes
+    const recentMessages = await getInboxMessages(conversationId, { limit: 20 });
+    if (recentMessages.length === 0) return;
+
+    const lastMessage = recentMessages[recentMessages.length - 1];
+    if (lastMessage.direction !== "inbound") return; // Solo responder a mensajes del contacto
+
+    // 3. Determinar etapa actual
+    const crmStage = conversation.crm_leads?.stage || "incoming";
+    const stageName = CRM_STAGE_DISPLAY_NAMES[crmStage] || "Leads Entrantes";
+
+    // 4. Convertir historial al formato del bot
+    const history: ConversationMessage[] = recentMessages.slice(0, -1).map((m) => ({
+      role: m.direction === "inbound" ? "user" as const : "assistant" as const,
+      content: m.content,
+      timestamp: new Date(m.created_at).getTime() / 1000,
+    }));
+
+    // 5. Generar respuesta con Claude
+    console.log("[InboxBot] Procesando conversación:", conversationId, "Stage:", stageName);
+    const botResponse = await generateResponse(stageName, history, lastMessage.content, {
+      channel: conversation.channel,
+      useCrmStages: true,
+    });
+
+    // 6. Guardar respuesta en inbox_messages
+    await createInboxMessage({
+      conversation_id: conversationId,
+      direction: "outbound",
+      sender_type: "bot",
+      content: botResponse.reply,
+      status: "simulated",
+      metadata: {
+        intent: botResponse.intent,
+        temperature: botResponse.temperature,
+        needsHuman: botResponse.needsHuman,
+        fieldsDetected: botResponse.fieldsDetected,
+      },
+    });
+
+    // 7. Actualizar conversación (temperatura, campos, etc.)
+    const convUpdate: Record<string, any> = {
+      temperature: botResponse.temperature,
+    };
+
+    // Merge bot_fields
+    if (Object.keys(botResponse.fieldsDetected).length > 0) {
+      const existingFields = (conversation.bot_fields || {}) as Record<string, unknown>;
+      convUpdate.bot_fields = { ...existingFields, ...botResponse.fieldsDetected };
+    }
+
+    // 8. Si moveToStage es un string CRM y hay lead vinculado
+    if (botResponse.moveToStage && conversation.lead_id) {
+      const targetStage = typeof botResponse.moveToStage === "string"
+        ? botResponse.moveToStage
+        : null;
+      if (targetStage && targetStage !== crmStage) {
+        try {
+          await moveLead(conversation.lead_id, targetStage, "Bot IA");
+          console.log("[InboxBot] Lead movido a:", targetStage);
+        } catch (err: any) {
+          console.error("[InboxBot] Error moviendo lead:", err.message);
+        }
+      }
+    }
+
+    // 9. Si necesita humano, desactivar bot
+    if (botResponse.needsHuman) {
+      convUpdate.status = "waiting";
+      convUpdate.bot_active = false;
+    }
+
+    await updateInboxConversation(conversationId, convUpdate);
+    console.log("[InboxBot] Respuesta enviada:", botResponse.reply.slice(0, 80));
+
+  } catch (err: any) {
+    console.error("[InboxBot] Error fatal:", err.message);
+    // Escribir mensaje de error como respuesta del sistema
+    try {
+      await createInboxMessage({
+        conversation_id: conversationId,
+        direction: "outbound",
+        sender_type: "system",
+        content: "Error procesando mensaje. Un asesor te contactará pronto.",
+        content_type: "system",
+        status: "simulated",
+      });
+      await updateInboxConversation(conversationId, {
+        status: "waiting",
+        bot_active: false,
+      });
+    } catch {
+      // Si ni esto funciona, ya no podemos hacer nada
+    }
   }
 }
 

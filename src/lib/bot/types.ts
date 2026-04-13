@@ -74,6 +74,25 @@ export interface BotResponse {
   needsHuman: boolean;
 }
 
+/** Mapeo de stages del CRM interno a nombres legibles (para el prompt del bot) */
+export const CRM_STAGE_DISPLAY_NAMES: Record<string, string> = {
+  incoming: "Leads Entrantes",
+  contacto_inicial: "Contacto Inicial",
+  info_enviada: "Información Enviada",
+  en_instalacion: "En Instalación",
+  no_factible: "No Factible",
+  no_concretado: "No Concretado",
+  no_clasificado: "No Clasificado",
+  retirado_reactivacion: "Retirado / Reactivación",
+  prueba_actualizacion: "Prueba / Actualización",
+  ganado: "Ganado",
+};
+
+/** Mapeo inverso: nombre legible → stage key del CRM */
+export const CRM_STAGE_FROM_NAME: Record<string, string> = Object.fromEntries(
+  Object.entries(CRM_STAGE_DISPLAY_NAMES).map(([k, v]) => [v.toLowerCase(), k])
+);
+
 /** Catálogo de planes */
 export const PLANES_CATALOGO = [
   { code: "BM025", name: "Beam 25", speed: "25 Mbps simétrico", price: 20, tech: "Fibra Óptica" },

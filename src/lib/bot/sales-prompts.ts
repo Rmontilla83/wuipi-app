@@ -2,14 +2,29 @@
 // Sales Bot — Prompts para Claude
 // ===========================================
 
-import { PLANES_CATALOGO, STAGE_NAMES, type ConversationMessage } from "./types";
+import { PLANES_CATALOGO, STAGE_NAMES, CRM_STAGE_DISPLAY_NAMES, type ConversationMessage } from "./types";
 
 const CATALOGO_TEXT = PLANES_CATALOGO.map(
   (p) => `- ${p.name}: ${p.speed} — $${p.price}/mes (${p.tech})`
 ).join("\n");
 
-export function buildSystemPrompt(currentStage: string): string {
-  return `Eres el asesor comercial virtual de Wuipi Telecomunicaciones. Respondes por WhatsApp y redes sociales.
+export function buildSystemPrompt(currentStage: string, options?: { channel?: string; useCrmStages?: boolean }): string {
+  const channelNote = options?.channel === "instagram"
+    ? "\nNOTA: Estás respondiendo por Instagram DM. Sé aún más conciso (2-3 oraciones máximo)."
+    : options?.channel === "facebook"
+      ? "\nNOTA: Estás respondiendo por Facebook Messenger."
+      : "";
+
+  const stageInstructions = options?.useCrmStages
+    ? `- "moveToStage": Nombre de la etapa si debe avanzar, o null. Los nombres son:
+  "contacto_inicial", "info_enviada", "en_instalacion", "ganado", "no_concretado".
+  Solo avanza si hay información suficiente para la siguiente etapa. NUNCA retrocedas de etapa.`
+    : `- "moveToStage": Número de stage_id si debe avanzar, o null. Los IDs son:
+  104369460=Leads Entrantes, 104369464=Calificación, 104369468=Propuesta Enviada,
+  104369472=Datos de Contratación, 104371260=Instalación Programada, 142=Ganado, 143=No Concretado.
+  Solo avanza si hay información suficiente para la siguiente etapa. NUNCA retrocedas de etapa.`;
+
+  return `Eres el asesor comercial virtual de Wuipi Telecomunicaciones. Respondes por WhatsApp y redes sociales.${channelNote}
 
 PERSONALIDAD:
 - Profesional, amigable y directo. No eres un menú de opciones, eres un asesor real.
@@ -73,10 +88,7 @@ Responde ÚNICAMENTE con un JSON válido, sin markdown ni texto adicional:
 Reglas del JSON:
 - "reply": El mensaje que se envía al cliente. Solo texto plano para WhatsApp.
 - "intent": La intención detectada en el mensaje del cliente.
-- "moveToStage": Número de stage_id si debe avanzar, o null si no. Los IDs son:
-  104369460=Leads Entrantes, 104369464=Calificación, 104369468=Propuesta Enviada,
-  104369472=Datos de Contratación, 104371260=Instalación Programada, 142=Ganado, 143=No Concretado.
-  Solo avanza si hay información suficiente para la siguiente etapa. NUNCA retrocedas de etapa.
+${stageInstructions}
 - "fieldsDetected": Datos que el cliente proporcionó en este mensaje. Solo incluye campos que detectes:
   ciudad, zona, tipoServicio ("hogar"/"pyme"), planInteres, nombre, cedula, telefono, direccion, comoNosConocio
 - "temperature": "frio" (solo curioseando), "tibio" (interesado pero con dudas), "caliente" (quiere contratar)

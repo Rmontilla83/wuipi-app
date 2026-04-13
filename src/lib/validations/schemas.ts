@@ -308,6 +308,57 @@ export const bequantTestConnectionSchema = z.object({
 });
 
 // ============================================
+// INBOX MULTI-CANAL
+// ============================================
+
+const INBOX_CHANNELS = ["whatsapp", "instagram", "facebook", "web", "manual"] as const;
+const INBOX_CONV_STATUSES = ["active", "bot", "waiting", "resolved", "expired"] as const;
+const MSG_DIRECTIONS = ["inbound", "outbound"] as const;
+const MSG_SENDER_TYPES = ["contact", "agent", "bot", "system"] as const;
+
+export const inboxContactCreateSchema = z.object({
+  display_name: z.string().min(1, "Nombre requerido").max(255),
+  phone: z.string().max(30).optional().nullable(),
+  email: z.string().email("Email inválido").optional().nullable().or(z.literal("")),
+  wa_id: z.string().max(50).optional().nullable(),
+  ig_id: z.string().max(100).optional().nullable(),
+  fb_id: z.string().max(100).optional().nullable(),
+});
+
+export const inboxContactUpdateSchema = inboxContactCreateSchema.partial();
+
+export const inboxConversationCreateSchema = z.object({
+  contact_id: z.string().uuid("ID de contacto inválido"),
+  lead_id: z.string().uuid().optional().nullable(),
+  channel: z.enum(INBOX_CHANNELS, { errorMap: () => ({ message: "Canal inválido" }) }),
+  assigned_to: z.string().uuid().optional().nullable(),
+  bot_active: z.boolean().default(true),
+});
+
+export const inboxConversationUpdateSchema = z.object({
+  status: z.enum(INBOX_CONV_STATUSES).optional(),
+  assigned_to: z.string().uuid().optional().nullable(),
+  bot_active: z.boolean().optional(),
+  lead_id: z.string().uuid().optional().nullable(),
+});
+
+export const inboxMessageCreateSchema = z.object({
+  conversation_id: z.string().uuid("ID de conversación inválido"),
+  direction: z.enum(MSG_DIRECTIONS),
+  sender_type: z.enum(MSG_SENDER_TYPES).default("agent"),
+  content: z.string().min(1, "Mensaje requerido").max(10000),
+  content_type: z.enum(["text", "image", "video", "audio", "document", "location", "system"]).default("text"),
+});
+
+export const inboxSimulateInboundSchema = z.object({
+  contact_name: z.string().min(1, "Nombre del contacto requerido").max(255),
+  phone: z.string().max(30).optional().nullable(),
+  channel: z.enum(INBOX_CHANNELS).default("whatsapp"),
+  message: z.string().min(1, "Mensaje requerido").max(10000),
+  lead_id: z.string().uuid().optional().nullable(),
+});
+
+// ============================================
 // HELPER: validate and return typed data or error
 // ============================================
 export function validate<T>(schema: z.ZodSchema<T>, data: unknown): { success: true; data: T } | { success: false; error: string; details: z.ZodIssue[] } {
