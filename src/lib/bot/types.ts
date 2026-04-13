@@ -77,15 +77,12 @@ export interface BotResponse {
 /** Mapeo de stages del CRM interno a nombres legibles (para el prompt del bot) */
 export const CRM_STAGE_DISPLAY_NAMES: Record<string, string> = {
   incoming: "Leads Entrantes",
-  contacto_inicial: "Contacto Inicial",
-  info_enviada: "Información Enviada",
-  en_instalacion: "En Instalación",
-  no_factible: "No Factible",
-  no_concretado: "No Concretado",
-  no_clasificado: "No Clasificado",
-  retirado_reactivacion: "Retirado / Reactivación",
-  prueba_actualizacion: "Prueba / Actualización",
+  calificacion: "Calificación",
+  propuesta_enviada: "Propuesta Enviada",
+  datos_contratacion: "Datos de Contratación",
+  instalacion_programada: "Instalación Programada",
   ganado: "Ganado",
+  no_concretado: "No Concretado",
 };
 
 /** Mapeo inverso: nombre legible → stage key del CRM */

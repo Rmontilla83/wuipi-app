@@ -25,16 +25,13 @@ export interface CrmLead {
 // STAGES CONFIG
 // ============================================
 export const STAGES = [
-  { key: "incoming",               label: "Incoming Leads",         color: "#22d3ee", bg: "bg-cyan-400/10",    border: "border-cyan-400/30",    text: "text-cyan-400" },
-  { key: "contacto_inicial",       label: "Contacto Inicial",       color: "#3b82f6", bg: "bg-blue-400/10",    border: "border-blue-400/30",    text: "text-blue-400" },
-  { key: "info_enviada",           label: "Info Enviada / Espera",  color: "#6366f1", bg: "bg-indigo-400/10",  border: "border-indigo-400/30",  text: "text-indigo-400" },
-  { key: "en_instalacion",         label: "Proceso Instalación",    color: "#f59e0b", bg: "bg-amber-400/10",   border: "border-amber-400/30",   text: "text-amber-400" },
-  { key: "no_factible",            label: "No Factible",            color: "#6b7280", bg: "bg-gray-400/10",    border: "border-gray-400/30",    text: "text-gray-400" },
-  { key: "no_concretado",          label: "No Concretado",          color: "#ef4444", bg: "bg-red-400/10",     border: "border-red-400/30",     text: "text-red-400" },
-  { key: "no_clasificado",         label: "No Clasificado",         color: "#94a3b8", bg: "bg-slate-400/10",   border: "border-slate-400/30",   text: "text-slate-400" },
-  { key: "retirado_reactivacion",  label: "Retirado / Reactivación",color: "#f97316", bg: "bg-orange-400/10",  border: "border-orange-400/30",  text: "text-orange-400" },
-  { key: "prueba_actualizacion",   label: "Prueba / Actualización", color: "#a855f7", bg: "bg-purple-400/10",  border: "border-purple-400/30",  text: "text-purple-400" },
+  { key: "incoming",               label: "Leads Entrantes",        color: "#22d3ee", bg: "bg-cyan-400/10",    border: "border-cyan-400/30",    text: "text-cyan-400" },
+  { key: "calificacion",           label: "Calificación",           color: "#3b82f6", bg: "bg-blue-400/10",    border: "border-blue-400/30",    text: "text-blue-400" },
+  { key: "propuesta_enviada",      label: "Propuesta Enviada",      color: "#6366f1", bg: "bg-indigo-400/10",  border: "border-indigo-400/30",  text: "text-indigo-400" },
+  { key: "datos_contratacion",     label: "Datos de Contratación",  color: "#a855f7", bg: "bg-purple-400/10",  border: "border-purple-400/30",  text: "text-purple-400" },
+  { key: "instalacion_programada", label: "Instalación Programada", color: "#f59e0b", bg: "bg-amber-400/10",   border: "border-amber-400/30",   text: "text-amber-400" },
   { key: "ganado",                 label: "Ganado",                 color: "#34d399", bg: "bg-emerald-400/10", border: "border-emerald-400/30", text: "text-emerald-400" },
+  { key: "no_concretado",          label: "No Concretado",          color: "#ef4444", bg: "bg-red-400/10",     border: "border-red-400/30",     text: "text-red-400" },
 ] as const;
 
 export const STAGE_MAP = Object.fromEntries(STAGES.map(s => [s.key, s]));

@@ -104,13 +104,32 @@ export function formatSociosBriefing(briefing: any, rawData?: any): string {
     parts.push(`  Total cobrado: <b>${fmtUsd(totalCobradoUsd)}</b> — <b>${pctCobranza}%</b> del MRR`);
   }
 
-  // Cobrado por banco
+  // Cobrado por banco (posted + draft)
   if (rawData?.payments_by_journal?.length > 0) {
+    // Show draft total if any exist
+    let totalDraftUsd = 0;
+    if (bcvRate > 0) {
+      for (const j of rawData.payments_by_journal) {
+        if (j.draft_count > 0) {
+          totalDraftUsd += j.currency === "USD" ? j.draft_total : j.draft_total / bcvRate;
+        }
+      }
+    }
+
     parts.push(``);
     parts.push(`🏦 <b>Detalle por banco:</b>`);
     for (const j of rawData.payments_by_journal) {
       const cur = j.currency === "USD" ? fmtUsd(j.total) : fmtBs(j.total);
-      parts.push(`  • ${j.journal_name}: <b>${cur}</b> (${j.count} mov)`);
+      let detail = `  • ${j.journal_name}: <b>${cur}</b> (${j.count} mov)`;
+      if (j.draft_count > 0) {
+        const draftCur = j.currency === "USD" ? fmtUsd(j.draft_total) : fmtBs(j.draft_total);
+        detail += ` — 📝 ${draftCur} en borrador`;
+      }
+      parts.push(detail);
+    }
+
+    if (totalDraftUsd > 0) {
+      parts.push(`  ⚠️ <b>${fmtUsd(totalDraftUsd)}</b> en pagos borrador (sin asignar a clientes)`);
     }
   }
 
@@ -298,15 +317,33 @@ export function formatFinanzasBriefing(briefing: any, rawData?: any): string {
     parts.push(`  Total cobrado: <b>${fmtUsd(totalCobradoUsd)}</b> — <b>${pctCobranza}%</b> del MRR`);
   }
 
-  // ── INGRESOS DEL MES (cobrado por banco) ──
+  // ── INGRESOS DEL MES (cobrado por banco — posted + draft) ──
   if (rawData?.payments_by_journal?.length > 0) {
+    let totalDraftUsd = 0;
+    if (bcvRate > 0) {
+      for (const j of rawData.payments_by_journal) {
+        if (j.draft_count > 0) {
+          totalDraftUsd += j.currency === "USD" ? j.draft_total : j.draft_total / bcvRate;
+        }
+      }
+    }
+
     parts.push(``);
     parts.push(`━━━━━━━━━━━━━━━━━━━━━━`);
     parts.push(`🏦 <b>INGRESOS POR BANCO</b>`);
     parts.push(`━━━━━━━━━━━━━━━━━━━━━━`);
     for (const j of rawData.payments_by_journal) {
       const cur = j.currency === "USD" ? fmtUsd(j.total) : fmtBs(j.total);
-      parts.push(`  • ${j.journal_name}: <b>${cur}</b> (${j.count} mov)`);
+      let detail = `  • ${j.journal_name}: <b>${cur}</b> (${j.count} mov)`;
+      if (j.draft_count > 0) {
+        const draftCur = j.currency === "USD" ? fmtUsd(j.draft_total) : fmtBs(j.draft_total);
+        detail += ` — 📝 ${draftCur} en borrador`;
+      }
+      parts.push(detail);
+    }
+
+    if (totalDraftUsd > 0) {
+      parts.push(`  ⚠️ <b>${fmtUsd(totalDraftUsd)}</b> en pagos borrador (sin asignar a clientes)`);
     }
   }
 
@@ -359,15 +396,34 @@ export function formatComercialBriefing(briefing: any, rawData?: any): string {
     parts.push(`  Total: <b>${fmtUsd(ar.total_pending_amount)}</b> (${ar.total_customers_with_debt} clientes)`);
   }
 
-  // ── COBRADO HASTA HOY (por banco) ──
+  // ── COBRADO HASTA HOY (por banco — posted + draft) ──
   if (rawData?.payments_by_journal?.length > 0) {
+    const bcvRate = rawData?.finance?.exchange_rate || 0;
+    let totalDraftUsd = 0;
+    if (bcvRate > 0) {
+      for (const j of rawData.payments_by_journal) {
+        if (j.draft_count > 0) {
+          totalDraftUsd += j.currency === "USD" ? j.draft_total : j.draft_total / bcvRate;
+        }
+      }
+    }
+
     parts.push(``);
     parts.push(`━━━━━━━━━━━━━━━━━━━━━━`);
     parts.push(`🏦 <b>COBRADO DEL MES</b>`);
     parts.push(`━━━━━━━━━━━━━━━━━━━━━━`);
     for (const j of rawData.payments_by_journal) {
       const cur = j.currency === "USD" ? fmtUsd(j.total) : fmtBs(j.total);
-      parts.push(`  • ${j.journal_name}: <b>${cur}</b> (${j.count} mov)`);
+      let detail = `  • ${j.journal_name}: <b>${cur}</b> (${j.count} mov)`;
+      if (j.draft_count > 0) {
+        const draftCur = j.currency === "USD" ? fmtUsd(j.draft_total) : fmtBs(j.draft_total);
+        detail += ` — 📝 ${draftCur} en borrador`;
+      }
+      parts.push(detail);
+    }
+
+    if (totalDraftUsd > 0) {
+      parts.push(`  ⚠️ <b>${fmtUsd(totalDraftUsd)}</b> en pagos borrador (sin asignar a clientes)`);
     }
   }
 
@@ -420,8 +476,8 @@ export function formatComercialBriefing(briefing: any, rawData?: any): string {
     parts.push(`  Pipeline: ${l.active} activos | ${fmtUsd(l.pipeline_value || 0)}`);
 
     // Por instalar
-    if (l.by_stage?.en_instalacion) {
-      parts.push(`  🔧 Por instalar: <b>${l.by_stage.en_instalacion.count}</b>`);
+    if (l.by_stage?.instalacion_programada) {
+      parts.push(`  🔧 Por instalar: <b>${l.by_stage.instalacion_programada.count}</b>`);
     }
   }
 

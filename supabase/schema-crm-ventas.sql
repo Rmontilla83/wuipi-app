@@ -54,9 +54,8 @@ CREATE TABLE IF NOT EXISTS crm_leads (
   -- Pipeline
   stage VARCHAR(50) NOT NULL DEFAULT 'incoming'
     CHECK (stage IN (
-      'incoming', 'contacto_inicial', 'info_enviada', 'en_instalacion',
-      'no_factible', 'no_concretado', 'no_clasificado',
-      'retirado_reactivacion', 'prueba_actualizacion', 'ganado'
+      'incoming', 'calificacion', 'propuesta_enviada', 'datos_contratacion',
+      'instalacion_programada', 'ganado', 'no_concretado'
     )),
   product_id UUID REFERENCES crm_products(id) ON DELETE SET NULL,
   salesperson_id UUID REFERENCES crm_salespeople(id) ON DELETE SET NULL,

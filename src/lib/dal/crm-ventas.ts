@@ -15,9 +15,8 @@ function escSearch(s: string): string {
 // STAGES CONFIG
 // ============================================
 export const CRM_STAGES = [
-  "incoming", "contacto_inicial", "info_enviada", "en_instalacion",
-  "no_factible", "no_concretado", "no_clasificado",
-  "retirado_reactivacion", "prueba_actualizacion", "ganado",
+  "incoming", "calificacion", "propuesta_enviada", "datos_contratacion",
+  "instalacion_programada", "ganado", "no_concretado",
 ] as const;
 
 export type CrmStage = typeof CRM_STAGES[number];
@@ -345,7 +344,7 @@ export async function getLeadStats() {
   const weekAgo = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7);
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
 
-  const activeStages = ["incoming", "contacto_inicial", "info_enviada", "en_instalacion", "prueba_actualizacion", "retirado_reactivacion"];
+  const activeStages = ["incoming", "calificacion", "propuesta_enviada", "datos_contratacion", "instalacion_programada"];
   const active = all.filter(l => activeStages.includes(l.stage));
   const won = all.filter(l => l.stage === "ganado");
   const lost = all.filter(l => l.stage === "no_concretado");

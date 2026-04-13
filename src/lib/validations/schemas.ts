@@ -109,9 +109,8 @@ export const planSchema = z.object({
 // ============================================
 
 const CRM_STAGES = [
-  "incoming", "contacto_inicial", "info_enviada", "en_instalacion",
-  "no_factible", "no_concretado", "no_clasificado",
-  "retirado_reactivacion", "prueba_actualizacion", "ganado",
+  "incoming", "calificacion", "propuesta_enviada", "datos_contratacion",
+  "instalacion_programada", "ganado", "no_concretado",
 ] as const;
 
 const CRM_SOURCES = ["whatsapp", "web", "referido", "social", "other"] as const;

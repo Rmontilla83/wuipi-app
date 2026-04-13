@@ -156,7 +156,7 @@ export default function CRMVentasTab() {
   const onDragEnd = () => { setDraggingId(null); setDragOverCol(null); };
 
   // Stats
-  const activeLeads = leads.filter(l => !["ganado", "no_concretado", "no_factible"].includes(l.stage));
+  const activeLeads = leads.filter(l => !["ganado", "no_concretado"].includes(l.stage));
   const wonLeads = leads.filter(l => l.stage === "ganado");
   const lostLeads = leads.filter(l => l.stage === "no_concretado");
   const pipelineValue = activeLeads.reduce((s, l) => s + (l.value || 0), 0);

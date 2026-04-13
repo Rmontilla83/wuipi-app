@@ -31,7 +31,7 @@ interface AgingBucket { count: number; total: number }
 interface TopDebtor { partner_id: number; name: string; total_due: number; invoice_count: number; oldest_due_date: string; currency: string }
 interface PlanCategory { category: string; total: number; active: number; paused: number; plans: { code: string; name: string; active: number; paused: number; total: number }[] }
 interface MonthlyHistoryEntry { month: string; label: string; drafted_usd: number; collected_usd: number; effectiveness: number }
-interface JournalPayment { journal_id: number; journal_name: string; count: number; total: number; currency: string }
+interface JournalPayment { journal_id: number; journal_name: string; count: number; total: number; currency: string; posted_count: number; posted_total: number; draft_count: number; draft_total: number }
 
 interface FinanceStats {
   invoiced_ved: number; collected_ved: number; invoices_count_ved: number; collection_rate_ved: number;
@@ -330,13 +330,32 @@ function BankDistribution() {
                   <div className={`h-full rounded-full ${colors[i % colors.length]} transition-all`}
                     style={{ width: `${Math.max((j.total / maxTotal) * 100, 2)}%` }} />
                 </div>
+                {j.draft_count > 0 && (
+                  <p className="text-[10px] text-amber-400/70 mt-0.5">
+                    📝 {j.draft_count} en borrador: {isUsd ? fmtUsd(j.draft_total) : fmtBs(j.draft_total)}
+                  </p>
+                )}
               </div>
             );
           })}
-          <div className="pt-2 border-t border-wuipi-border flex items-center justify-between text-xs">
-            <span className="text-gray-500">Total: {data.reduce((s, j) => s + j.count, 0)} movimientos</span>
-            <span className="text-white font-semibold">{fmtBs(grandTotal)}</span>
-          </div>
+          {(() => {
+            const totalDraft = data.reduce((s, j) => s + (j.draft_total || 0), 0);
+            const totalDraftCount = data.reduce((s, j) => s + (j.draft_count || 0), 0);
+            return (
+              <>
+                <div className="pt-2 border-t border-wuipi-border flex items-center justify-between text-xs">
+                  <span className="text-gray-500">Total: {data.reduce((s, j) => s + j.count, 0)} movimientos</span>
+                  <span className="text-white font-semibold">{fmtBs(grandTotal)}</span>
+                </div>
+                {totalDraftCount > 0 && (
+                  <div className="flex items-center justify-between text-[10px] text-amber-400/70 mt-1">
+                    <span>📝 {totalDraftCount} pagos en borrador (sin asignar)</span>
+                    <span>{fmtBs(totalDraft)}</span>
+                  </div>
+                )}
+              </>
+            );
+          })()}
         </div>
       )}
     </Card>
@@ -827,18 +846,18 @@ function CrecimientoTab({ ventas, finance, cobranzas }: {
   if (!ventas) return <LoadingPlaceholder />;
 
   const STAGE_ORDER = [
-    "incoming", "contacto_inicial", "info_enviada", "en_instalacion",
-    "prueba_actualizacion", "retirado_reactivacion", "ganado", "no_concretado", "no_factible", "no_clasificado",
+    "incoming", "calificacion", "propuesta_enviada", "datos_contratacion",
+    "instalacion_programada", "ganado", "no_concretado",
   ];
   const STAGE_NAMES: Record<string, string> = {
-    incoming: "Entrantes", contacto_inicial: "Contacto inicial", info_enviada: "Info enviada",
-    en_instalacion: "Instalacion", prueba_actualizacion: "Prueba/Upgrade", retirado_reactivacion: "Reactivacion",
-    ganado: "Ganados", no_concretado: "No concretados", no_factible: "No factibles", no_clasificado: "Sin clasificar",
+    incoming: "Entrantes", calificacion: "Calificación", propuesta_enviada: "Propuesta",
+    datos_contratacion: "Datos", instalacion_programada: "Instalación",
+    ganado: "Ganados", no_concretado: "No concretados",
   };
   const STAGE_COLORS: Record<string, string> = {
-    incoming: "bg-blue-500", contacto_inicial: "bg-cyan-500", info_enviada: "bg-violet-500",
-    en_instalacion: "bg-amber-500", prueba_actualizacion: "bg-indigo-500", retirado_reactivacion: "bg-orange-500",
-    ganado: "bg-emerald-500", no_concretado: "bg-red-500", no_factible: "bg-gray-500", no_clasificado: "bg-gray-400",
+    incoming: "bg-blue-500", calificacion: "bg-cyan-500", propuesta_enviada: "bg-violet-500",
+    datos_contratacion: "bg-purple-500", instalacion_programada: "bg-amber-500",
+    ganado: "bg-emerald-500", no_concretado: "bg-red-500",
   };
 
   const pipelineStages = STAGE_ORDER
