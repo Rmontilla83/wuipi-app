@@ -97,14 +97,31 @@ const TEST_CASES: TestCase[] = [
   },
 ];
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const caller = await requirePermission("ventas", "create");
     if (!caller) return NextResponse.json({ error: "Sin permisos" }, { status: 403 });
 
+    const { searchParams } = new URL(request.url);
+    const caseParam = searchParams.get("case");
+
+    // ?case=1 runs test 1 only (1-indexed), no param = list available tests
+    if (!caseParam) {
+      return NextResponse.json({
+        usage: "Agrega ?case=N para correr un test (1-6)",
+        tests: TEST_CASES.map((t, i) => ({ case: i + 1, id: t.id, description: t.description, turns: t.messages.length })),
+      });
+    }
+
+    const caseIndex = parseInt(caseParam) - 1;
+    if (caseIndex < 0 || caseIndex >= TEST_CASES.length) {
+      return NextResponse.json({ error: `Case debe ser 1-${TEST_CASES.length}` }, { status: 400 });
+    }
+
+    const casesToRun = [TEST_CASES[caseIndex]];
     const results: any[] = [];
 
-    for (const test of TEST_CASES) {
+    for (const test of casesToRun) {
       const testResult: any = {
         id: test.id,
         description: test.description,
