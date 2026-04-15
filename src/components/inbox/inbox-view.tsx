@@ -1,22 +1,29 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useInboxStore } from "@/hooks/useInboxStore";
 import ConversationList from "./conversation-list";
 import ChatPanel from "./chat-panel";
 import ContactSidebar from "./contact-sidebar";
 
-export default function InboxView() {
+export default function InboxView({ autoSelectId, onAutoSelected }: {
+  autoSelectId?: string | null;
+  onAutoSelected?: () => void;
+} = {}) {
   const selectedId = useInboxStore((s) => s.selectedId);
   const selectConversation = useInboxStore((s) => s.selectConversation);
 
   // Mobile: show list or chat
   const [mobileView, setMobileView] = useState<"list" | "chat">("list");
 
-  const handleSelect = (id: string) => {
-    selectConversation(id);
-    setMobileView("chat");
-  };
+  // Auto-select conversation from pipeline
+  useEffect(() => {
+    if (autoSelectId) {
+      selectConversation(autoSelectId);
+      setMobileView("chat");
+      onAutoSelected?.();
+    }
+  }, [autoSelectId, selectConversation, onAutoSelected]);
 
   const handleBack = () => {
     selectConversation(null);

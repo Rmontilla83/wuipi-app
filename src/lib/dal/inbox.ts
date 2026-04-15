@@ -129,6 +129,7 @@ export async function getConversations(options?: {
   assigned_to?: string;
   status?: string;
   channel?: string;
+  lead_id?: string;
   search?: string;
   page?: number;
   limit?: number;
@@ -146,6 +147,7 @@ export async function getConversations(options?: {
   if (options?.assigned_to) query = query.eq("assigned_to", options.assigned_to);
   if (options?.status) query = query.eq("status", options.status);
   if (options?.channel) query = query.eq("channel", options.channel);
+  if (options?.lead_id) query = query.eq("lead_id", options.lead_id);
   // Search by contact name requires a join filter
   if (options?.search) {
     const s = options.search.replace(/[%_\\]/g, "");

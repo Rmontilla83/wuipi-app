@@ -40,16 +40,29 @@ const timeAgo = (ts: string) => {
   return d.toLocaleDateString("es-VE", { day: "2-digit", month: "short", year: "numeric" });
 };
 
-export default function LeadDetail({ leadId, products, salespeople, onClose, onUpdated }: {
+interface ConversationPreview {
+  id: string;
+  channel: string;
+  status: string;
+  last_message_at: string;
+  last_message_preview: string | null;
+  on_hold_reason: string | null;
+  bot_active: boolean;
+  messages: { direction: string; sender_type: string; content: string; created_at: string }[];
+}
+
+export default function LeadDetail({ leadId, products, salespeople, onClose, onUpdated, onOpenConversation }: {
   leadId: string;
   products: Product[];
   salespeople: Salesperson[];
   onClose: () => void;
   onUpdated: () => void;
+  onOpenConversation?: (conversationId: string) => void;
 }) {
   const [lead, setLead] = useState<any>(null);
   const [activities, setActivities] = useState<Activity[]>([]);
   const [loading, setLoading] = useState(true);
+  const [conversation, setConversation] = useState<ConversationPreview | null>(null);
 
   // Edit mode
   const [editing, setEditing] = useState(false);
@@ -76,7 +89,32 @@ export default function LeadDetail({ leadId, products, salespeople, onClose, onU
     finally { setLoading(false); }
   }, [leadId]);
 
-  useEffect(() => { fetchLead(); }, [fetchLead]);
+  const fetchConversation = useCallback(async () => {
+    try {
+      // Find conversation linked to this lead
+      const res = await fetch(`/api/inbox/conversations?lead_id=${leadId}&limit=1`);
+      const json = await res.json();
+      const conv = json.data?.[0];
+      if (!conv) { setConversation(null); return; }
+
+      // Fetch last 5 messages
+      const msgRes = await fetch(`/api/inbox/conversations/${conv.id}/messages?limit=5`);
+      const msgJson = await msgRes.json();
+
+      setConversation({
+        id: conv.id,
+        channel: conv.channel,
+        status: conv.status,
+        last_message_at: conv.last_message_at,
+        last_message_preview: conv.last_message_preview,
+        on_hold_reason: conv.on_hold_reason,
+        bot_active: conv.bot_active,
+        messages: msgJson.data || [],
+      });
+    } catch { setConversation(null); }
+  }, [leadId]);
+
+  useEffect(() => { fetchLead(); fetchConversation(); }, [fetchLead, fetchConversation]);
 
   const handleEdit = () => {
     setEditing(true);
@@ -310,6 +348,55 @@ export default function LeadDetail({ leadId, products, salespeople, onClose, onU
               </button>
             </div>
           </div>
+
+          {/* Conversation preview */}
+          {conversation && (
+            <div className="p-3 bg-wuipi-bg rounded-lg border border-wuipi-border">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-xs font-bold text-gray-400 flex items-center gap-1.5">
+                  <MessageSquare size={12} /> Conversación
+                  <span className={`ml-1 px-1.5 py-0.5 rounded text-[9px] font-bold ${
+                    conversation.channel === "whatsapp" ? "bg-green-500/10 text-green-400" :
+                    conversation.channel === "instagram" ? "bg-pink-500/10 text-pink-400" :
+                    conversation.channel === "facebook" ? "bg-blue-500/10 text-blue-400" :
+                    "bg-gray-500/10 text-gray-400"
+                  }`}>
+                    {conversation.channel === "whatsapp" ? "WA" : conversation.channel === "instagram" ? "IG" : conversation.channel === "facebook" ? "FB" : conversation.channel}
+                  </span>
+                  {conversation.on_hold_reason && (
+                    <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-blue-500/10 text-blue-400">En gestión</span>
+                  )}
+                  {conversation.status === "waiting" && (
+                    <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-red-500/10 text-red-400">Requiere atención</span>
+                  )}
+                </span>
+                {onOpenConversation && (
+                  <button onClick={() => { onOpenConversation(conversation.id); onClose(); }}
+                    className="flex items-center gap-1 text-xs text-wuipi-accent hover:underline">
+                    Abrir chat <ArrowRight size={12} />
+                  </button>
+                )}
+              </div>
+
+              {/* Last messages */}
+              <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                {conversation.messages.map((msg, i) => (
+                  <div key={i} className={`flex ${msg.direction === "outbound" ? "justify-end" : "justify-start"}`}>
+                    <div className={`max-w-[85%] px-3 py-1.5 rounded-xl text-xs ${
+                      msg.direction === "outbound"
+                        ? msg.sender_type === "bot" ? "bg-cyan-500/10 text-cyan-200" : "bg-wuipi-accent/10 text-wuipi-accent"
+                        : "bg-wuipi-card text-gray-300"
+                    }`}>
+                      {msg.content.length > 200 ? msg.content.slice(0, 200) + "…" : msg.content}
+                    </div>
+                  </div>
+                ))}
+                {conversation.messages.length === 0 && (
+                  <p className="text-xs text-gray-600 text-center py-2">Sin mensajes</p>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Timeline */}
           <div>

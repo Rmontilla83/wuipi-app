@@ -13,6 +13,12 @@ type MainTab = "crm" | "inbox";
 export default function VentasPage() {
   const [mainTab, setMainTab] = useState<MainTab>("crm");
   const [waitingCount, setWaitingCount] = useState(0);
+  const [pendingConversationId, setPendingConversationId] = useState<string | null>(null);
+
+  const handleOpenConversation = useCallback((conversationId: string) => {
+    setPendingConversationId(conversationId);
+    setMainTab("inbox");
+  }, []);
 
   const fetchWaitingCount = useCallback(async () => {
     try {
@@ -53,8 +59,8 @@ export default function VentasPage() {
           </button>
         </div>
 
-        {mainTab === "crm" && <CRMVentasTab />}
-        {mainTab === "inbox" && <InboxView />}
+        {mainTab === "crm" && <CRMVentasTab onOpenConversation={handleOpenConversation} />}
+        {mainTab === "inbox" && <InboxView autoSelectId={pendingConversationId} onAutoSelected={() => setPendingConversationId(null)} />}
       </div>
     </>
   );

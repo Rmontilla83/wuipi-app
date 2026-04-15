@@ -15,6 +15,7 @@ export async function GET(request: NextRequest) {
       assigned_to: searchParams.get("assigned_to") || undefined,
       status: searchParams.get("status") || undefined,
       channel: searchParams.get("channel") || undefined,
+      lead_id: searchParams.get("lead_id") || undefined,
       search: searchParams.get("search") || undefined,
       page: parseInt(searchParams.get("page") || "1"),
       limit: Math.min(parseInt(searchParams.get("limit") || "50"), 200),

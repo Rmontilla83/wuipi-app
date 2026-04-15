@@ -32,7 +32,7 @@ const SOURCE_LABELS: Record<string, string> = {
 // ============================================
 // MAIN COMPONENT
 // ============================================
-export default function CRMVentasTab() {
+export default function CRMVentasTab({ onOpenConversation }: { onOpenConversation?: (id: string) => void } = {}) {
   const [leads, setLeads] = useState<CrmLead[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -276,7 +276,7 @@ export default function CRMVentasTab() {
       {/* Lead detail */}
       {selectedLeadId && (
         <LeadDetail leadId={selectedLeadId} products={products} salespeople={salespeople}
-          onClose={() => setSelectedLeadId(null)} onUpdated={fetchLeads} />
+          onClose={() => setSelectedLeadId(null)} onUpdated={fetchLeads} onOpenConversation={onOpenConversation} />
       )}
     </div>
   );
