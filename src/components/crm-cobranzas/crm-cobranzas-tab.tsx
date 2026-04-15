@@ -61,7 +61,7 @@ export default function CRMCobranzasTab() {
 
   const fetchCollections = useCallback(async () => {
     try {
-      setLoading(true);
+      setLoading(prev => prev || collections.length === 0);
       const params = new URLSearchParams();
       if (debouncedSearch) params.set("search", debouncedSearch);
       if (filterStage !== "all") params.set("stage", filterStage);

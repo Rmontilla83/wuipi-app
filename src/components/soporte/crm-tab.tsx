@@ -101,7 +101,7 @@ export default function CRMSoporteTab() {
 
   const fetchTickets = useCallback(async () => {
     try {
-      setLoading(true);
+      setLoading(prev => prev || tickets.length === 0);
       const params = new URLSearchParams();
       if (debouncedSearch) params.set("search", debouncedSearch);
       if (filterPriority !== "all") params.set("priority", filterPriority);

@@ -69,7 +69,7 @@ export default function CRMVentasTab() {
 
   const fetchLeads = useCallback(async () => {
     try {
-      setLoading(true);
+      setLoading(prev => prev || leads.length === 0);
       const params = new URLSearchParams();
       if (debouncedSearch) params.set("search", debouncedSearch);
       if (filterStage !== "all") params.set("stage", filterStage);
