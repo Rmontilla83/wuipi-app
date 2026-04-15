@@ -207,6 +207,11 @@ export async function updateConversation(
     unread_count?: number;
     last_message_at?: string;
     last_message_preview?: string;
+    on_hold_reason?: string | null;
+    on_hold_until?: string | null;
+    on_hold_by?: string | null;
+    followup_count?: number;
+    last_followup_at?: string | null;
   }
 ): Promise<InboxConversation> {
   const { data, error } = await supabase()

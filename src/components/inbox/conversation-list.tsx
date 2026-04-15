@@ -148,6 +148,11 @@ export default function ConversationList() {
                       <span className={`text-[9px] px-1.5 py-0.5 rounded font-semibold ${statusCfg.bg} ${statusCfg.color}`}>
                         {statusCfg.label}
                       </span>
+                      {conv.on_hold_reason && (
+                        <span className="text-[9px] px-1.5 py-0.5 rounded font-semibold bg-blue-500/10 text-blue-400">
+                          En gestión
+                        </span>
+                      )}
                     </div>
 
                     <p className="text-xs text-gray-500 truncate mt-1">

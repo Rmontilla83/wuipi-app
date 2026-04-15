@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import { useInboxStore } from "@/hooks/useInboxStore";
 import { CHANNEL_CONFIG, CONVERSATION_STATUS_CONFIG } from "@/types/inbox";
-import { Send, Bot, MessageSquare, ArrowLeft } from "lucide-react";
+import { Send, Bot, MessageSquare, ArrowLeft, PauseCircle, PlayCircle } from "lucide-react";
 import MessageBubble from "./message-bubble";
 import { useRealtimeMessages } from "@/hooks/useRealtimeMessages";
 
@@ -15,6 +15,9 @@ export default function ChatPanel({ onBack }: { onBack?: () => void }) {
 
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
+  const [showHoldModal, setShowHoldModal] = useState(false);
+  const [holdReason, setHoldReason] = useState("");
+  const [holdHours, setHoldHours] = useState(72);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Subscribe to Realtime messages for selected conversation
@@ -70,6 +73,53 @@ export default function ChatPanel({ onBack }: { onBack?: () => void }) {
     }
   };
 
+  const toggleHold = async () => {
+    if (!selectedId || !conversation) return;
+
+    if (conversation.on_hold_reason) {
+      // Remove hold
+      try {
+        await fetch(`/api/inbox/conversations/${selectedId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ on_hold_reason: null, on_hold_until: null, on_hold_by: null }),
+        });
+        updateConversation(selectedId, {
+          on_hold_reason: null,
+          on_hold_until: null,
+          on_hold_by: null,
+        } as any);
+      } catch (err) {
+        console.error("[Chat] Error removing hold:", err);
+      }
+    } else {
+      setShowHoldModal(true);
+    }
+  };
+
+  const confirmHold = async () => {
+    if (!selectedId || !holdReason.trim()) return;
+    const until = new Date(Date.now() + holdHours * 60 * 60 * 1000).toISOString();
+    try {
+      await fetch(`/api/inbox/conversations/${selectedId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ on_hold_reason: holdReason, on_hold_until: until }),
+      });
+      updateConversation(selectedId, {
+        on_hold_reason: holdReason,
+        on_hold_until: until,
+      } as any);
+      setShowHoldModal(false);
+      setHoldReason("");
+      setHoldHours(72);
+    } catch (err) {
+      console.error("[Chat] Error setting hold:", err);
+    }
+  };
+
+  const isOnHold = !!conversation?.on_hold_reason;
+
   // Empty state
   if (!selectedId || !conversation) {
     return (
@@ -116,17 +166,86 @@ export default function ChatPanel({ onBack }: { onBack?: () => void }) {
           </div>
         </div>
 
-        {/* Bot toggle */}
-        <button onClick={toggleBot}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all border ${
-            conversation.bot_active
-              ? "bg-cyan-500/10 text-cyan-400 border-cyan-500/20 hover:bg-cyan-500/20"
-              : "bg-gray-800 text-gray-500 border-gray-700 hover:bg-gray-700"
-          }`}>
-          <Bot size={14} />
-          {conversation.bot_active ? "Bot ON" : "Bot OFF"}
-        </button>
+        <div className="flex items-center gap-2">
+          {/* On-hold toggle */}
+          <button onClick={toggleHold}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all border ${
+              isOnHold
+                ? "bg-blue-500/10 text-blue-400 border-blue-500/20 hover:bg-blue-500/20"
+                : "bg-gray-800 text-gray-500 border-gray-700 hover:bg-gray-700"
+            }`}>
+            {isOnHold ? <PlayCircle size={14} /> : <PauseCircle size={14} />}
+            {isOnHold ? "Reanudar" : "En gestión"}
+          </button>
+
+          {/* Bot toggle */}
+          <button onClick={toggleBot}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all border ${
+              conversation.bot_active
+                ? "bg-cyan-500/10 text-cyan-400 border-cyan-500/20 hover:bg-cyan-500/20"
+                : "bg-gray-800 text-gray-500 border-gray-700 hover:bg-gray-700"
+            }`}>
+            <Bot size={14} />
+            {conversation.bot_active ? "Bot ON" : "Bot OFF"}
+          </button>
+        </div>
       </div>
+
+      {/* On-hold banner */}
+      {isOnHold && (
+        <div className="px-3 py-2 bg-blue-500/10 border-b border-blue-500/20 flex items-center gap-2">
+          <PauseCircle size={14} className="text-blue-400 shrink-0" />
+          <span className="text-xs text-blue-300 flex-1">
+            <strong>En gestión:</strong> {conversation.on_hold_reason}
+            {conversation.on_hold_until && (
+              <span className="text-blue-400/60 ml-1">
+                (vence {new Date(conversation.on_hold_until).toLocaleDateString("es-VE", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })})
+              </span>
+            )}
+          </span>
+          <button onClick={toggleHold} className="text-[10px] text-blue-400 hover:text-blue-300 font-semibold">
+            Reanudar
+          </button>
+        </div>
+      )}
+
+      {/* On-hold modal */}
+      {showHoldModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setShowHoldModal(false)}>
+          <div className="bg-wuipi-card border border-wuipi-border rounded-2xl p-6 w-full max-w-md" onClick={e => e.stopPropagation()}>
+            <h3 className="text-white font-semibold text-sm mb-4">Poner en gestión</h3>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">Motivo</label>
+                <input value={holdReason} onChange={e => setHoldReason(e.target.value)}
+                  placeholder="Ej: Verificando cobertura en zona X"
+                  className="w-full px-3 py-2 bg-wuipi-bg border border-wuipi-border rounded-lg text-sm text-white placeholder:text-gray-600 focus:outline-none focus:border-wuipi-accent" autoFocus />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">Tiempo estimado</label>
+                <select value={holdHours} onChange={e => setHoldHours(Number(e.target.value))}
+                  className="w-full px-3 py-2 bg-wuipi-bg border border-wuipi-border rounded-lg text-sm text-gray-300 focus:outline-none">
+                  <option value={24}>24 horas</option>
+                  <option value={48}>48 horas</option>
+                  <option value={72}>72 horas (3 días)</option>
+                  <option value={120}>5 días</option>
+                  <option value={168}>7 días</option>
+                </select>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 mt-5">
+              <button onClick={() => setShowHoldModal(false)}
+                className="px-4 py-2 text-xs text-gray-400 hover:text-white transition-colors">
+                Cancelar
+              </button>
+              <button onClick={confirmHold} disabled={!holdReason.trim()}
+                className="px-4 py-2 bg-blue-500/20 text-blue-400 border border-blue-500/20 rounded-lg text-xs font-semibold hover:bg-blue-500/30 disabled:opacity-30 transition-colors">
+                Confirmar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Messages */}
       <div ref={scrollRef} className="flex-1 overflow-auto p-4 space-y-1">

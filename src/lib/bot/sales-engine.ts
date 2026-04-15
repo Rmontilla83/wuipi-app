@@ -380,9 +380,31 @@ export async function handleInboxMessage(conversationId: string): Promise<void> 
       return;
     }
 
-    if (!conversation.bot_active) {
-      console.log("[InboxBot] Bot desactivado para conversación:", conversationId);
-      return;
+    // 1b. Reactivar si la conversación o lead estaban dormidos
+    if (conversation.status === "expired" || !conversation.bot_active) {
+      // Check if this is a new inbound message (client came back)
+      const recentMsgs = await getInboxMessages(conversationId, { limit: 1 });
+      const lastMsg = recentMsgs[recentMsgs.length - 1];
+      if (lastMsg?.direction === "inbound") {
+        // Client wrote back — reactivate!
+        await updateInboxConversation(conversationId, {
+          status: "bot",
+          bot_active: true,
+          on_hold_reason: null,
+          on_hold_until: null,
+          on_hold_by: null,
+          followup_count: 0,
+        });
+        // Reactivate dormant lead
+        if (conversation.lead_id) {
+          await sb.from("crm_leads").update({ is_dormant: false }).eq("id", conversation.lead_id);
+        }
+        conversation = (await getInboxConversation(conversationId))!;
+        console.log("[InboxBot] Conversación reactivada:", conversationId);
+      } else {
+        console.log("[InboxBot] Bot desactivado para conversación:", conversationId);
+        return;
+      }
     }
 
     // 2. Auto-crear lead si no tiene uno vinculado

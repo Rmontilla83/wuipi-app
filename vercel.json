@@ -11,6 +11,10 @@
     {
       "path": "/api/cron/drafts-alert",
       "schedule": "0 14 27-31 * *"
+    },
+    {
+      "path": "/api/cron/lead-followup",
+      "schedule": "0 15 * * *"
     }
   ]
 }

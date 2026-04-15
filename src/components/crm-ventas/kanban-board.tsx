@@ -15,6 +15,7 @@ export interface CrmLead {
   stage: string;
   source: string;
   value: number;
+  is_dormant?: boolean;
   stage_changed_at: string;
   created_at: string;
   crm_products?: { id: string; name: string; category: string } | null;
@@ -66,7 +67,7 @@ export default function KanbanBoard({ leads, draggingId, dragOverCol, onDragStar
   return (
     <div className="flex gap-3 overflow-x-auto pb-4" style={{ minHeight: "400px" }}>
       {STAGES.map(col => {
-        const colLeads = leads.filter(l => l.stage === col.key);
+        const colLeads = leads.filter(l => l.stage === col.key && !l.is_dormant);
         const isOver = dragOverCol === col.key;
         return (
           <div key={col.key}

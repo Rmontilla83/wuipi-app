@@ -41,6 +41,11 @@ export interface InboxConversation {
   last_message_preview: string | null;
   temperature: BotTemperature;
   bot_fields: Record<string, unknown>;
+  on_hold_reason: string | null;
+  on_hold_until: string | null;
+  on_hold_by: string | null;
+  followup_count: number;
+  last_followup_at: string | null;
   metadata: Record<string, unknown>;
   created_at: string;
   updated_at: string;
