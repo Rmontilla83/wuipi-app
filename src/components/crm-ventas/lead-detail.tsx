@@ -5,7 +5,9 @@ import {
   X, Save, ArrowRight, Phone, Mail, MapPin,
   MessageSquare, PhoneCall, Eye, ArrowRightLeft,
   Settings, Send, Plus, User, Clock, FileText, Trash2,
+  ExternalLink,
 } from "lucide-react";
+import EmbeddedChat from "@/components/inbox/embedded-chat";
 import { STAGES, STAGE_MAP } from "./kanban-board";
 import type { CrmLead } from "./kanban-board";
 
@@ -44,11 +46,8 @@ interface ConversationPreview {
   id: string;
   channel: string;
   status: string;
-  last_message_at: string;
-  last_message_preview: string | null;
   on_hold_reason: string | null;
   bot_active: boolean;
-  messages: { direction: string; sender_type: string; content: string; created_at: string }[];
 }
 
 export default function LeadDetail({ leadId, products, salespeople, onClose, onUpdated, onOpenConversation }: {
@@ -91,25 +90,16 @@ export default function LeadDetail({ leadId, products, salespeople, onClose, onU
 
   const fetchConversation = useCallback(async () => {
     try {
-      // Find conversation linked to this lead
       const res = await fetch(`/api/inbox/conversations?lead_id=${leadId}&limit=1`);
       const json = await res.json();
       const conv = json.data?.[0];
       if (!conv) { setConversation(null); return; }
-
-      // Fetch last 5 messages
-      const msgRes = await fetch(`/api/inbox/conversations/${conv.id}/messages?limit=5`);
-      const msgJson = await msgRes.json();
-
       setConversation({
         id: conv.id,
         channel: conv.channel,
         status: conv.status,
-        last_message_at: conv.last_message_at,
-        last_message_preview: conv.last_message_preview,
         on_hold_reason: conv.on_hold_reason,
         bot_active: conv.bot_active,
-        messages: msgJson.data || [],
       });
     } catch { setConversation(null); }
   }, [leadId]);
@@ -349,10 +339,10 @@ export default function LeadDetail({ leadId, products, salespeople, onClose, onU
             </div>
           </div>
 
-          {/* Conversation preview */}
+          {/* Conversation chat */}
           {conversation && (
-            <div className="p-3 bg-wuipi-bg rounded-lg border border-wuipi-border">
-              <div className="flex items-center justify-between mb-3">
+            <div>
+              <div className="flex items-center justify-between mb-2">
                 <span className="text-xs font-bold text-gray-400 flex items-center gap-1.5">
                   <MessageSquare size={12} /> Conversación
                   <span className={`ml-1 px-1.5 py-0.5 rounded text-[9px] font-bold ${
@@ -372,29 +362,16 @@ export default function LeadDetail({ leadId, products, salespeople, onClose, onU
                 </span>
                 {onOpenConversation && (
                   <button onClick={() => { onOpenConversation(conversation.id); onClose(); }}
-                    className="flex items-center gap-1 text-xs text-wuipi-accent hover:underline">
-                    Abrir chat <ArrowRight size={12} />
+                    className="flex items-center gap-1 text-[10px] text-gray-500 hover:text-wuipi-accent transition-colors">
+                    <ExternalLink size={10} /> Abrir en Inbox
                   </button>
                 )}
               </div>
-
-              {/* Last messages */}
-              <div className="space-y-1.5 max-h-48 overflow-y-auto">
-                {conversation.messages.map((msg, i) => (
-                  <div key={i} className={`flex ${msg.direction === "outbound" ? "justify-end" : "justify-start"}`}>
-                    <div className={`max-w-[85%] px-3 py-1.5 rounded-xl text-xs ${
-                      msg.direction === "outbound"
-                        ? msg.sender_type === "bot" ? "bg-cyan-500/10 text-cyan-200" : "bg-wuipi-accent/10 text-wuipi-accent"
-                        : "bg-wuipi-card text-gray-300"
-                    }`}>
-                      {msg.content.length > 200 ? msg.content.slice(0, 200) + "…" : msg.content}
-                    </div>
-                  </div>
-                ))}
-                {conversation.messages.length === 0 && (
-                  <p className="text-xs text-gray-600 text-center py-2">Sin mensajes</p>
-                )}
-              </div>
+              <EmbeddedChat
+                conversationId={conversation.id}
+                botActive={conversation.bot_active}
+                maxHeight="350px"
+              />
             </div>
           )}
 
