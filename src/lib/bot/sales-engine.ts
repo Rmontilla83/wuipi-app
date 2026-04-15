@@ -218,10 +218,21 @@ export async function generateResponse(
       return fallbackResponse();
     }
 
+    // Guardrail: el bot NUNCA puede mover a etapas terminales
+    const FORBIDDEN_STAGES = new Set([
+      "instalacion_programada", "ganado", "no_concretado",
+      104371260, 142, 143, // Kommo IDs equivalentes
+    ]);
+    let moveToStage = parsed.moveToStage || null;
+    if (moveToStage && FORBIDDEN_STAGES.has(moveToStage)) {
+      console.warn("[Bot] Bloqueado moveToStage prohibido:", moveToStage);
+      moveToStage = null;
+    }
+
     return {
       reply: parsed.reply,
       intent: parsed.intent || "otro",
-      moveToStage: parsed.moveToStage || null,
+      moveToStage,
       fieldsDetected: parsed.fieldsDetected || {},
       temperature: parsed.temperature || "frio",
       needsHuman: parsed.needsHuman || false,

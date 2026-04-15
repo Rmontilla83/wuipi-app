@@ -78,7 +78,7 @@ export const CHANNEL_CONFIG: Record<InboxChannel, { label: string; icon: string;
 export const CONVERSATION_STATUS_CONFIG: Record<ConversationStatus, { label: string; color: string; bg: string }> = {
   active:   { label: "Activa",    color: "text-emerald-400", bg: "bg-emerald-500/10" },
   bot:      { label: "Bot",       color: "text-cyan-400",    bg: "bg-cyan-500/10" },
-  waiting:  { label: "Esperando", color: "text-amber-400",   bg: "bg-amber-500/10" },
+  waiting:  { label: "Requiere atención", color: "text-red-400", bg: "bg-red-500/15" },
   resolved: { label: "Resuelta",  color: "text-gray-400",    bg: "bg-gray-500/10" },
   expired:  { label: "Expirada",  color: "text-red-400",     bg: "bg-red-500/10" },
 };

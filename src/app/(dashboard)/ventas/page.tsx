@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { TopBar } from "@/components/layout/topbar";
 import {
   TrendingUp, TicketCheck, MessageSquare,
@@ -12,6 +12,21 @@ type MainTab = "crm" | "inbox";
 
 export default function VentasPage() {
   const [mainTab, setMainTab] = useState<MainTab>("crm");
+  const [waitingCount, setWaitingCount] = useState(0);
+
+  const fetchWaitingCount = useCallback(async () => {
+    try {
+      const res = await fetch("/api/inbox/conversations?status=waiting&limit=1");
+      const json = await res.json();
+      setWaitingCount(json.total || 0);
+    } catch { /* silent */ }
+  }, []);
+
+  useEffect(() => {
+    fetchWaitingCount();
+    const interval = setInterval(fetchWaitingCount, 30_000);
+    return () => clearInterval(interval);
+  }, [fetchWaitingCount]);
 
   return (
     <>
@@ -26,10 +41,15 @@ export default function VentasPage() {
             <TicketCheck size={16} /> Pipeline
           </button>
           <button onClick={() => setMainTab("inbox")}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all border ${
+            className={`relative flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all border ${
               mainTab === "inbox" ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" : "text-gray-500 hover:text-gray-300 border-transparent hover:bg-wuipi-card-hover"
             }`}>
             <MessageSquare size={16} /> Inbox
+            {waitingCount > 0 && (
+              <span className="absolute -top-1.5 -right-1.5 min-w-[20px] h-5 flex items-center justify-center px-1.5 rounded-full bg-red-500 text-white text-[10px] font-bold animate-pulse">
+                {waitingCount}
+              </span>
+            )}
           </button>
         </div>
 
