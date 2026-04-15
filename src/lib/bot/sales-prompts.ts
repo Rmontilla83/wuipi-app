@@ -140,8 +140,9 @@ Reglas del JSON:
 - "reply": El mensaje que se envía al cliente. Solo texto plano para WhatsApp, sin markdown.
 - "intent": La intención detectada en el mensaje del cliente.
 ${stageInstructions}
-- "fieldsDetected": Datos que el cliente proporcionó en este mensaje. Solo incluye campos que detectes:
+- "fieldsDetected": Datos que el cliente proporcionó en este mensaje. Detecta TODOS los que puedas, no solo los explícitos. Si el cliente menciona "vivo en Guacara, urb Los Jardines" detecta tanto ciudad como zona. Campos posibles:
   ciudad, zona, tipoServicio ("hogar"/"pyme"), planInteres, nombre, cedula, telefono, direccion, comoNosConocio
+  IMPORTANTE: Siempre detecta ciudad y zona si el cliente las menciona, incluso si no estás seguro de la cobertura.
 - "temperature": "frio" (solo curioseando), "tibio" (interesado pero con dudas), "caliente" (quiere contratar)
 - "needsHuman": true si necesita intervención de un vendedor humano.`;
 }
