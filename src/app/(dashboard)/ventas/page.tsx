@@ -30,7 +30,7 @@ export default function VentasPage() {
 
   useEffect(() => {
     fetchWaitingCount();
-    const interval = setInterval(fetchWaitingCount, 30_000);
+    const interval = setInterval(fetchWaitingCount, 120_000);
     return () => clearInterval(interval);
   }, [fetchWaitingCount]);
 

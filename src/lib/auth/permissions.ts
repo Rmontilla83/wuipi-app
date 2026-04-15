@@ -28,12 +28,12 @@ export type Action = "create" | "read" | "update" | "delete" | "send" | "export"
 /** All operational modules (excludes sidebar-only pseudo-modules) */
 export const OPERATIONAL_MODULES: Module[] = [
   "cobranzas", "soporte", "ventas", "mercantil", "clientes",
-  "configuracion", "usuarios", "auditoria", "infraestructura", "erp", "bequant",
+  "configuracion", "usuarios", "auditoria", "infraestructura", "erp", "bequant", "finanzas",
 ];
 
 /** Sidebar-only modules (visibility toggle, "access" action) */
 export const SIDEBAR_ONLY_MODULES: Module[] = [
-  "comando", "supervisor_ia", "finanzas", "portal_admin", "actualizaciones",
+  "comando", "supervisor_ia", "portal_admin", "actualizaciones",
 ];
 
 /** All modules */
@@ -79,6 +79,7 @@ const PERMISSIONS: Record<string, Partial<Record<Module, Action[]>>> = {
     infraestructura: ["create", "read", "update", "delete"],
     erp: ["create", "read", "update", "delete"],
     bequant: ["create", "read", "update", "delete"],
+    finanzas: ["create", "read", "update", "delete", "export"],
   },
   admin: {
     cobranzas: ["create", "read", "update", "delete", "send", "export"],
@@ -92,6 +93,7 @@ const PERMISSIONS: Record<string, Partial<Record<Module, Action[]>>> = {
     infraestructura: ["create", "read", "update", "delete"],
     erp: ["create", "read", "update", "delete"],
     bequant: ["create", "read", "update", "delete"],
+    finanzas: ["read", "export"],
   },
   gerente: {
     cobranzas: ["read", "approve"],
@@ -105,6 +107,7 @@ const PERMISSIONS: Record<string, Partial<Record<Module, Action[]>>> = {
     infraestructura: ["read"],
     erp: ["read"],
     bequant: ["read"],
+    finanzas: ["read"],
   },
   supervisor: {
     cobranzas: ["read", "update"],
