@@ -18,7 +18,7 @@ import {
   createMessage as createInboxMessage,
   updateConversation as updateInboxConversation,
 } from "@/lib/dal/inbox";
-import { moveLead } from "@/lib/dal/crm-ventas";
+import { createLead, moveLead, updateLead } from "@/lib/dal/crm-ventas";
 
 const CLAUDE_API_KEY = process.env.ANTHROPIC_API_KEY || "";
 const CLAUDE_MODEL = "claude-sonnet-4-20250514";
@@ -349,10 +349,21 @@ async function updateConversationFields(
 // Lee/escribe directamente en inbox_messages y inbox_conversations.
 // Llamado por /api/inbox/simulate y (futuro) por el webhook de Meta.
 
+// Mapeo canal → source para crm_leads
+const CHANNEL_TO_SOURCE: Record<string, string> = {
+  whatsapp: "whatsapp",
+  instagram: "social",
+  facebook: "social",
+  web: "web",
+  manual: "other",
+};
+
 export async function handleInboxMessage(conversationId: string): Promise<void> {
+  const sb = createAdminSupabase();
+
   try {
     // 1. Cargar conversación con contact + lead
-    const conversation = await getInboxConversation(conversationId);
+    let conversation = await getInboxConversation(conversationId);
     if (!conversation) {
       console.error("[InboxBot] Conversación no encontrada:", conversationId);
       return;
@@ -363,32 +374,42 @@ export async function handleInboxMessage(conversationId: string): Promise<void> 
       return;
     }
 
-    // 2. Cargar últimos mensajes
+    // 2. Auto-crear lead si no tiene uno vinculado
+    let leadId = conversation.lead_id;
+    if (!leadId) {
+      leadId = await ensureLeadForConversation(sb, conversation);
+      if (leadId) {
+        // Re-cargar conversación para tener el join actualizado
+        conversation = (await getInboxConversation(conversationId))!;
+      }
+    }
+
+    // 3. Cargar últimos mensajes
     const recentMessages = await getInboxMessages(conversationId, { limit: 20 });
     if (recentMessages.length === 0) return;
 
     const lastMessage = recentMessages[recentMessages.length - 1];
     if (lastMessage.direction !== "inbound") return; // Solo responder a mensajes del contacto
 
-    // 3. Determinar etapa actual
+    // 4. Determinar etapa actual
     const crmStage = conversation.crm_leads?.stage || "incoming";
     const stageName = CRM_STAGE_DISPLAY_NAMES[crmStage] || "Leads Entrantes";
 
-    // 4. Convertir historial al formato del bot
+    // 5. Convertir historial al formato del bot
     const history: ConversationMessage[] = recentMessages.slice(0, -1).map((m) => ({
       role: m.direction === "inbound" ? "user" as const : "assistant" as const,
       content: m.content,
       timestamp: new Date(m.created_at).getTime() / 1000,
     }));
 
-    // 5. Generar respuesta con Claude
-    console.log("[InboxBot] Procesando conversación:", conversationId, "Stage:", stageName);
+    // 6. Generar respuesta con Claude
+    console.log("[InboxBot] Procesando conversación:", conversationId, "Stage:", stageName, "Lead:", leadId || "ninguno");
     const botResponse = await generateResponse(stageName, history, lastMessage.content, {
       channel: conversation.channel,
       useCrmStages: true,
     });
 
-    // 6. Guardar respuesta en inbox_messages
+    // 7. Guardar respuesta en inbox_messages
     await createInboxMessage({
       conversation_id: conversationId,
       direction: "outbound",
@@ -403,7 +424,7 @@ export async function handleInboxMessage(conversationId: string): Promise<void> 
       },
     });
 
-    // 7. Actualizar conversación (temperatura, campos, etc.)
+    // 8. Actualizar conversación (temperatura, campos, etc.)
     const convUpdate: Record<string, any> = {
       temperature: botResponse.temperature,
     };
@@ -414,14 +435,14 @@ export async function handleInboxMessage(conversationId: string): Promise<void> 
       convUpdate.bot_fields = { ...existingFields, ...botResponse.fieldsDetected };
     }
 
-    // 8. Si moveToStage es un string CRM y hay lead vinculado
-    if (botResponse.moveToStage && conversation.lead_id) {
+    // 9. Mover lead de etapa si Claude lo indica
+    if (botResponse.moveToStage && leadId) {
       const targetStage = typeof botResponse.moveToStage === "string"
         ? botResponse.moveToStage
         : null;
       if (targetStage && targetStage !== crmStage) {
         try {
-          await moveLead(conversation.lead_id, targetStage, "Bot IA");
+          await moveLead(leadId, targetStage, "Bot IA");
           console.log("[InboxBot] Lead movido a:", targetStage);
         } catch (err: any) {
           console.error("[InboxBot] Error moviendo lead:", err.message);
@@ -429,7 +450,12 @@ export async function handleInboxMessage(conversationId: string): Promise<void> 
       }
     }
 
-    // 9. Si necesita humano, desactivar bot
+    // 10. Actualizar datos del lead con campos detectados
+    if (leadId && Object.keys(botResponse.fieldsDetected).length > 0) {
+      await syncLeadFields(leadId, botResponse.fieldsDetected);
+    }
+
+    // 11. Si necesita humano, desactivar bot
     if (botResponse.needsHuman) {
       convUpdate.status = "waiting";
       convUpdate.bot_active = false;
@@ -456,6 +482,89 @@ export async function handleInboxMessage(conversationId: string): Promise<void> 
       });
     } catch {
       // Si ni esto funciona, ya no podemos hacer nada
+    }
+  }
+}
+
+/**
+ * Busca un lead activo del mismo contacto o crea uno nuevo.
+ * Retorna el lead_id y vincula la conversación.
+ */
+async function ensureLeadForConversation(
+  sb: ReturnType<typeof createAdminSupabase>,
+  conversation: any
+): Promise<string | null> {
+  const contactId = conversation.contact_id;
+  if (!contactId) return null;
+
+  const contact = conversation.crm_contacts;
+  const contactName = contact?.display_name || "Lead sin nombre";
+
+  try {
+    // Buscar lead activo existente para este contacto (evitar duplicados)
+    const { data: existingLead } = await sb
+      .from("crm_leads")
+      .select("id")
+      .eq("contact_id", contactId)
+      .eq("is_deleted", false)
+      .not("stage", "in", '("ganado","no_concretado")')
+      .limit(1)
+      .maybeSingle();
+
+    let leadId: string;
+
+    if (existingLead) {
+      leadId = existingLead.id;
+      console.log("[InboxBot] Lead existente encontrado:", leadId);
+    } else {
+      // Crear lead nuevo
+      const source = CHANNEL_TO_SOURCE[conversation.channel] || "other";
+      const newLead = await createLead({
+        name: contactName,
+        phone: contact?.phone || null,
+        email: contact?.email || null,
+        source,
+        contact_id: contactId,
+        notes: `Creado automáticamente desde conversación ${conversation.channel}`,
+      });
+      leadId = newLead.id;
+      console.log("[InboxBot] Lead creado:", leadId, "Code:", newLead.code);
+    }
+
+    // Vincular lead a la conversación
+    await updateInboxConversation(conversation.id, { lead_id: leadId });
+
+    return leadId;
+  } catch (err: any) {
+    console.error("[InboxBot] Error creando/vinculando lead:", err.message);
+    return null;
+  }
+}
+
+/**
+ * Sincroniza campos detectados por el bot al lead en crm_leads.
+ */
+async function syncLeadFields(
+  leadId: string,
+  fields: Record<string, any>
+): Promise<void> {
+  const updates: Record<string, any> = {};
+
+  if (fields.nombre) updates.name = fields.nombre;
+  if (fields.telefono) updates.phone = fields.telefono;
+  if (fields.ciudad) updates.city = fields.ciudad;
+  if (fields.zona) updates.sector = fields.zona;
+  if (fields.cedula) updates.document_number = fields.cedula;
+  if (fields.direccion) updates.address = fields.direccion;
+  // tipoServicio y planInteres no tienen columna directa en crm_leads,
+  // se guardan en bot_fields de la conversación
+
+  if (Object.keys(updates).length > 0) {
+    try {
+      await updateLead(leadId, updates);
+      console.log("[InboxBot] Lead actualizado con campos:", Object.keys(updates).join(", "));
+    } catch (err: any) {
+      console.error("[InboxBot] Error actualizando lead:", err.message);
     }
   }
 }
