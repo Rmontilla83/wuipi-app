@@ -5,7 +5,7 @@
 import { PLANES_CATALOGO, STAGE_NAMES, CRM_STAGE_DISPLAY_NAMES, type ConversationMessage } from "./types";
 
 const CATALOGO_TEXT = PLANES_CATALOGO.map(
-  (p) => `- ${p.name}: ${p.speed} — $${p.price}/mes (${p.tech})`
+  (p) => `- ${p.name}: ${p.speed} — $${p.price}/mes +IVA (${p.tech}) ${p.notes ? `— ${p.notes}` : ""}`
 ).join("\n");
 
 export function buildSystemPrompt(currentStage: string, options?: { channel?: string; useCrmStages?: boolean }): string {
@@ -39,7 +39,7 @@ PERSONALIDAD:
 
 SOBRE WUIPI:
 - ISP en el estado Anzoátegui, Venezuela. +8 años de experiencia.
-- Cobertura confirmada: Lechería, Barcelona, Puerto La Cruz y Guanta.
+- Cobertura confirmada: Lechería, Barcelona, Puerto La Cruz, Guanta y El Rincón.
 - IMPORTANTE SOBRE COBERTURA:
   • Si el cliente menciona una ciudad de cobertura confirmada: "Sí, tenemos cobertura en tu zona" y continúa el flujo.
   • Si el cliente menciona una ciudad/zona que NO está en la lista o es AMBIGUA (ej: "San Diego" puede ser Carabobo u otro estado, "Guacara", "Valencia", etc.): NO asumas que no hay cobertura. Pregunta para confirmar: "¿En qué estado/municipio queda esa zona?" o "¿Te refieres a [ciudad, estado]?". Marca needsHuman=true para que un asesor verifique la factibilidad.
@@ -56,9 +56,15 @@ Si el cliente tiene un problema de soporte o cobranza, dile que le pasas su caso
 PLANES DISPONIBLES:
 ${CATALOGO_TEXT}
 
-Todos los precios son en USD. El cliente puede pagar en bolívares a la tasa BCV del día (sin tasa propia, la oficial).
-Los planes de Fibra Óptica (Beam) son simétricos (misma velocidad de subida y bajada).
-NO ofrecemos: TV por cable, telefonía fija, cámaras de seguridad, ni velocidades mayores a 300 Mbps.
+REGLAS DE TECNOLOGÍA:
+- Siempre recomienda Fibra Óptica como PRIMERA opción — es el producto estrella.
+- Solo menciona Inalámbrico (Wireless) si el cliente pregunta específicamente por la opción más económica O si la zona no tiene cobertura de fibra (el agente humano lo determina, no tú).
+- NUNCA mezcles velocidades de una tecnología con precios de otra. Fibra 200 Mbps es $31, Wireless 30 Mbps es $31 — son productos diferentes.
+- Todos los planes son simétricos (misma velocidad de subida y bajada).
+- Ancho de banda compartido con garantía de 70% en hora pico.
+- Todos los precios son en USD +IVA. El cliente puede pagar en bolívares a la tasa BCV del día (tasa oficial, no propia).
+- Plan empresarial disponible con IP exclusiva y 90% de garantía — escalar a humano si preguntan.
+- NO ofrecemos: TV por cable, telefonía fija, cámaras de seguridad, ni velocidades mayores a 600 Mbps.
 
 MÉTODOS DE PAGO:
 - Pago Móvil / Débito Inmediato en bolívares (conversión automática a tasa BCV del día)

@@ -90,19 +90,20 @@ export const CRM_STAGE_FROM_NAME: Record<string, string> = Object.fromEntries(
   Object.entries(CRM_STAGE_DISPLAY_NAMES).map(([k, v]) => [v.toLowerCase(), k])
 );
 
-/** Catálogo de planes */
+/** Catálogo de planes — Residenciales */
 export const PLANES_CATALOGO = [
-  { code: "BM025", name: "Beam 25", speed: "25 Mbps simétrico", price: 20, tech: "Fibra Óptica" },
-  { code: "BM050", name: "Beam 50", speed: "50 Mbps simétrico", price: 30, tech: "Fibra Óptica" },
-  { code: "BM100", name: "Beam 100", speed: "100 Mbps simétrico", price: 45, tech: "Fibra Óptica" },
-  { code: "BM200", name: "Beam 200", speed: "200 Mbps simétrico", price: 65, tech: "Fibra Óptica" },
-  { code: "BM300", name: "Beam 300", speed: "300/150 Mbps", price: 85, tech: "Fibra Óptica" },
-  { code: "WL025", name: "Wireless 25", speed: "25 Mbps", price: 18, tech: "Inalámbrico" },
-  { code: "WL050", name: "Wireless 50", speed: "50 Mbps", price: 28, tech: "Inalámbrico" },
+  // Fibra Óptica (prioridad en recomendación)
+  { code: "FO200", name: "Fibra 200", speed: "200 Mbps simétrico", price: 31, tech: "Fibra Óptica", notes: "Ancho de banda compartido, 70% garantía en hora pico" },
+  { code: "FO300", name: "Fibra 300", speed: "300 Mbps simétrico", price: 43, tech: "Fibra Óptica", notes: "Más popular. Compartido, 70% garantía en hora pico" },
+  { code: "FO600", name: "Fibra 600", speed: "600 Mbps simétrico", price: 76, tech: "Fibra Óptica", notes: "Máxima velocidad. Compartido, 70% garantía en hora pico" },
+  // Inalámbrico (Carrier Class — solo si no hay fibra en la zona)
+  { code: "WL030", name: "Wireless 30", speed: "30 Mbps simétrico", price: 31, tech: "Inalámbrico", notes: "Carrier Class. Compartido, 70% garantía en hora pico" },
+  { code: "WL050", name: "Wireless 50", speed: "50 Mbps simétrico", price: 43, tech: "Inalámbrico", notes: "Carrier Class, más popular. Compartido, 70% garantía" },
+  { code: "WL100", name: "Wireless 100", speed: "100 Mbps simétrico", price: 76, tech: "Inalámbrico", notes: "Carrier Class, máxima velocidad. Compartido, 70% garantía" },
 ] as const;
 
 /** Ciudades con cobertura */
-export const CIUDADES_COBERTURA = ["lechería", "barcelona", "puerto la cruz", "guanta"];
+export const CIUDADES_COBERTURA = ["lechería", "barcelona", "puerto la cruz", "guanta", "el rincón"];
 
 /** Horario de atención ventas */
 export const OFFICE_HOURS = {
