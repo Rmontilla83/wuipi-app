@@ -45,6 +45,9 @@ export default function SetupPasswordPage() {
         return;
       }
 
+      // Clear the needs_password_setup flag
+      await fetch("/api/auth/clear-setup-flag", { method: "POST" });
+
       router.push("/comando");
     } catch {
       setError("Error al establecer la contrasena");

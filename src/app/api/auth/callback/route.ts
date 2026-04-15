@@ -36,9 +36,8 @@ export async function GET(request: Request) {
         console.error("[Auth Callback] Failed to sync app_metadata.role:", e);
       }
 
-      // Check if user needs to set password (invited users have no password yet)
-      const isInvited = !user.last_sign_in_at;
-      if (isInvited) {
+      // Check if user needs to set password (invited users are flagged during creation)
+      if (user.app_metadata?.needs_password_setup) {
         return NextResponse.redirect(`${origin}/setup-password`);
       }
       return NextResponse.redirect(`${origin}${next}`);

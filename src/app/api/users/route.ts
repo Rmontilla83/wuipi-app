@@ -84,9 +84,9 @@ export async function POST(request: NextRequest) {
         created_by: caller.id,
       }).eq("id", authUser.user.id);
 
-      // Sync role to app_metadata so middleware routes correctly
+      // Sync role + mark as needing password setup
       await sb.auth.admin.updateUserById(authUser.user.id, {
-        app_metadata: { ...authUser.user.app_metadata, role },
+        app_metadata: { ...authUser.user.app_metadata, role, needs_password_setup: true },
       });
     }
 
