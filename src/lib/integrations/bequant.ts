@@ -133,9 +133,11 @@ function release(): void {
 // Circuit breaker
 // ──────────────────────────────────────────────
 
-const FAIL_THRESHOLD = 5;
-const FAIL_WINDOW_MS = 30_000;
-const OPEN_DURATION_MS = 60_000;
+// Tuned for an appliance with ocasional 500s under load:
+// we only break when failures dominate, not on single blips.
+const FAIL_THRESHOLD = 10;
+const FAIL_WINDOW_MS = 60_000;
+const OPEN_DURATION_MS = 30_000;
 
 let failTimes: number[] = [];
 let openedAt = 0;
