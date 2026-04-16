@@ -43,6 +43,7 @@ interface NodeResponse {
   lastSnapshot: BequantNodeSnapshotRow | null;
   trend24h: BequantNodeSnapshotRow[];
   circuit: { open: boolean; failures: number; opensFor: number };
+  dataFreshness: { liveCount: number; hasSnapshot: boolean; snapshotAt: string | null };
 }
 
 const DPI_COLORS = [
@@ -160,18 +161,16 @@ export default function BequantDashboard() {
           </div>
         )}
 
-        {/* Show banner only when ALL live KPIs are null — means BQN truly unreachable */}
-        {data &&
-          data.kpis.volumeDl == null &&
-          data.kpis.latencyDl == null &&
-          data.kpis.congestion == null && (
-          <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-4 flex items-center gap-3">
-            <AlertTriangle className="w-5 h-5 text-yellow-400" />
-            <div className="flex-1">
-              <div className="text-yellow-400 font-medium">Sin datos en vivo del nodo</div>
-              <div className="text-xs text-gray-400">
-                Bequant no respondió en este refresh. Los datos históricos de abajo siguen siendo válidos. Probá refrescar en unos segundos.
-              </div>
+        {/* Data freshness banner: live=4/4 green, partial=mixed, 0=snapshot only */}
+        {data && data.dataFreshness && (data.dataFreshness.liveCount < 4 && data.dataFreshness.hasSnapshot) && (
+          <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-3 flex items-center gap-3">
+            <Activity className="w-4 h-4 text-blue-400 shrink-0" />
+            <div className="text-xs text-gray-300">
+              {data.dataFreshness.liveCount === 0 ? (
+                <>Mostrando último snapshot guardado ({data.dataFreshness.snapshotAt && new Date(data.dataFreshness.snapshotAt).toLocaleString("es-VE")}). Bequant no respondió en este momento — los datos se actualizan automáticamente.</>
+              ) : (
+                <>Datos parciales en vivo ({data.dataFreshness.liveCount}/4 métricas). Los valores faltantes provienen del último snapshot.</>
+              )}
             </div>
           </div>
         )}

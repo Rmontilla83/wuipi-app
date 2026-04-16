@@ -186,6 +186,44 @@ function singleflight<T>(key: string, fn: () => Promise<T>): Promise<T> {
 // Core GET — the ONLY way to call BQN. No write methods exist.
 // ──────────────────────────────────────────────
 
+async function bqnGetOnce<T>(path: string, cfg: ResolvedConfig): Promise<T | "retry" | null> {
+  await acquire();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 12_000);
+  try {
+    const res = await undiciFetch(`${cfg.origin}/api/v1${path}`, {
+      method: "GET",
+      headers: {
+        Authorization: cfg.authHeader,
+        Accept: "application/json",
+      },
+      dispatcher: cfg.dispatcher,
+      signal: controller.signal,
+    });
+    // 5xx and 408/429 are worth retrying; 4xx other than those are terminal.
+    if (res.status >= 500 || res.status === 408 || res.status === 429) {
+      console.warn(`[Bequant] HTTP ${res.status} on ${path} (will retry)`);
+      return "retry";
+    }
+    if (!res.ok) {
+      recordFailure();
+      console.error(`[Bequant] HTTP ${res.status} on ${path}`);
+      return null;
+    }
+    const text = await res.text();
+    recordSuccess();
+    return text ? (JSON.parse(text) as T) : null;
+  } catch (err) {
+    const msg = (err as Error).message?.replace(/Basic\s+[\w+/=]+/gi, "Basic [REDACTED]") || "unknown";
+    // Network / abort errors are also worth retrying once
+    console.warn(`[Bequant] ${path}: ${msg} (will retry)`);
+    return "retry";
+  } finally {
+    clearTimeout(timer);
+    release();
+  }
+}
+
 async function bqnGet<T>(path: string): Promise<T | null> {
   if (isCircuitOpen()) {
     console.warn("[Bequant] circuit open — skipping", path);
@@ -197,36 +235,19 @@ async function bqnGet<T>(path: string): Promise<T | null> {
 
   const cacheKey = `${cfg.origin}${path}`;
   return singleflight(cacheKey, async () => {
-    await acquire();
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 15_000);
-    try {
-      const res = await undiciFetch(`${cfg.origin}/api/v1${path}`, {
-        method: "GET",
-        headers: {
-          Authorization: cfg.authHeader,
-          Accept: "application/json",
-        },
-        dispatcher: cfg.dispatcher,
-        signal: controller.signal,
-      });
-      if (!res.ok) {
-        recordFailure();
-        console.error(`[Bequant] HTTP ${res.status} on ${path}`);
-        return null;
-      }
-      const text = await res.text();
-      recordSuccess();
-      return text ? (JSON.parse(text) as T) : null;
-    } catch (err) {
-      recordFailure();
-      const msg = (err as Error).message?.replace(/Basic\s+[\w+/=]+/gi, "Basic [REDACTED]") || "unknown";
-      console.error(`[Bequant] ${path}: ${msg}`);
-      return null;
-    } finally {
-      clearTimeout(timer);
-      release();
-    }
+    // First attempt
+    const r1 = await bqnGetOnce<T>(path, cfg);
+    if (r1 !== "retry") return r1;
+
+    // Backoff + retry once. Most 500s on the BQN recover within ~500ms.
+    await new Promise(resolve => setTimeout(resolve, 500));
+    const r2 = await bqnGetOnce<T>(path, cfg);
+    if (r2 !== "retry") return r2;
+
+    // Both attempts failed — record as real failure
+    recordFailure();
+    console.error(`[Bequant] ${path}: failed after retry`);
+    return null;
   });
 }
 
