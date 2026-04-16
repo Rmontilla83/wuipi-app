@@ -8,8 +8,9 @@ import { Card } from "@/components/ui/card";
 import {
   ChevronLeft, RefreshCw, Mail, Phone, MapPin, Building2,
   CreditCard, FileText, Receipt, Clock, Tag, Globe,
-  AlertTriangle, CheckCircle2, Pause, Ban, Eye,
+  AlertTriangle, CheckCircle2, Pause, Ban, Eye, Radio,
 } from "lucide-react";
+import Link from "next/link";
 import type { OdooClientDetail, OdooSubscription, OdooInvoiceDetail, OdooPayment, MikrotikService } from "@/types/odoo";
 
 type Tab = "suscripciones" | "red" | "facturacion" | "informacion" | "soporte";
@@ -542,7 +543,19 @@ function RedTab({ partnerId }: { partnerId: number }) {
                   <span className="text-xs px-2 py-0.5 rounded-full font-medium text-blue-400 bg-blue-400/10">MK Activo</span>
                 )}
               </div>
-              <span className="text-xs text-gray-500">{svc.product_name.replace(/\[.*?\]\s*/, "")}</span>
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-gray-500">{svc.product_name.replace(/\[.*?\]\s*/, "")}</span>
+                {(svc.ip_cpe || svc.ipv4) && (
+                  <Link
+                    href={`/bequant/suscriptores/${encodeURIComponent(svc.ip_cpe || svc.ipv4)}`}
+                    className="flex items-center gap-1 text-xs px-2 py-1 rounded border border-wuipi-accent/30 text-wuipi-accent hover:bg-wuipi-accent/10 transition-colors"
+                    title="Ver calidad de experiencia (QoE) en Bequant"
+                  >
+                    <Radio size={12} />
+                    QoE
+                  </Link>
+                )}
+              </div>
             </div>
 
             {/* Body */}
