@@ -59,13 +59,6 @@ function formatBytes(kb: number | null | undefined): string {
   return `${v.toFixed(v < 10 ? 2 : 1)} ${units[i]}`;
 }
 
-function formatRate(kbps: number | null | undefined): string {
-  if (kbps == null) return "—";
-  if (kbps >= 1_000_000) return `${(kbps / 1_000_000).toFixed(2)} Gbps`;
-  if (kbps >= 1000) return `${(kbps / 1000).toFixed(2)} Mbps`;
-  return `${kbps.toFixed(0)} kbps`;
-}
-
 function tsToSeries(ts: BequantTimeSeries | null) {
   if (!ts?.timestamp) return [];
   return ts.timestamp.map((t, i) => ({

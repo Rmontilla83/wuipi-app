@@ -7,7 +7,7 @@ import { TopBar } from "@/components/layout/topbar";
 import { BequantSubNav } from "@/components/bequant/sub-nav";
 import {
   ArrowLeft, RefreshCw, Activity, Clock, Wifi, TrendingDown,
-  User, Package, Radio, AlertTriangle, CheckCircle2,
+  User, Radio, AlertTriangle, CheckCircle2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {

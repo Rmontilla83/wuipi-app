@@ -59,7 +59,7 @@ export default function BequantPoliciesPage() {
             <p className="text-xs text-gray-500 mt-1">
               Las políticas se configuran directamente en el BQN por el ingeniero de red.
               Esta vista solo muestra las políticas expuestas vía la API REST del appliance
-              (típicamente las que tienen sufijo "-API"). El resto de políticas (Legacy-*, Dedicated,
+              (típicamente las que tienen sufijo &quot;-API&quot;). El resto de políticas (Legacy-*, Dedicated,
               rate-default, Ded-200, etc.) son internas y se administran vía SSH/GUI del BQN.
             </p>
           </div>
