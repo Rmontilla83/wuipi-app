@@ -33,7 +33,7 @@ export default function BequantPoliciesPage() {
   useEffect(() => { fetchPolicies(); }, [fetchPolicies]);
 
   return (
-    <div className="min-h-screen bg-wuipi-bg">
+    <>
       <TopBar
         title="Políticas Bequant"
         subtitle={`${policies.length} políticas configuradas vía API`}
@@ -49,7 +49,7 @@ export default function BequantPoliciesPage() {
         }
       />
 
-      <div className="p-6 space-y-4">
+      <div className="flex-1 overflow-auto p-6 space-y-4">
         <BequantSubNav />
 
         <div className="bg-blue-500/5 border border-blue-500/20 rounded-lg p-4 flex items-start gap-3">
@@ -117,6 +117,6 @@ export default function BequantPoliciesPage() {
           )}
         </div>
       </div>
-    </div>
+    </>
   );
 }

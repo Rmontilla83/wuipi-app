@@ -111,12 +111,12 @@ export default function BequantDashboard() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-wuipi-bg">
+      <>
         <TopBar title="Bequant QoE" subtitle="Cargando…" />
-        <div className="p-6 flex items-center justify-center h-64">
+        <div className="flex-1 overflow-auto p-6 flex items-center justify-center">
           <RefreshCw className="w-8 h-8 text-wuipi-accent animate-spin" />
         </div>
-      </div>
+      </>
     );
   }
 
@@ -131,7 +131,7 @@ export default function BequantDashboard() {
   }));
 
   return (
-    <div className="min-h-screen bg-wuipi-bg">
+    <>
       <TopBar
         title="Bequant QoE"
         subtitle="Monitor del nodo y experiencia de usuario"
@@ -147,7 +147,7 @@ export default function BequantDashboard() {
         }
       />
 
-      <div className="p-6 space-y-6">
+      <div className="flex-1 overflow-auto p-6 space-y-6">
         <BequantSubNav />
 
         {error && (
@@ -320,6 +320,6 @@ export default function BequantDashboard() {
           </div>
         )}
       </div>
-    </div>
+    </>
   );
 }

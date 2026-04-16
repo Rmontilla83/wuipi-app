@@ -64,7 +64,7 @@ export default function BequantSubscribersPage() {
   const totalPages = Math.ceil(data.total / PAGE_SIZE);
 
   return (
-    <div className="min-h-screen bg-wuipi-bg">
+    <>
       <TopBar
         title="Suscriptores Bequant"
         subtitle={`${data.total.toLocaleString("es-VE")} suscriptores sincronizados`}
@@ -80,7 +80,7 @@ export default function BequantSubscribersPage() {
         }
       />
 
-      <div className="p-6 space-y-4">
+      <div className="flex-1 overflow-auto p-6 space-y-4">
         <BequantSubNav />
 
         <div className="bg-wuipi-card border border-wuipi-border rounded-xl p-4">
@@ -242,6 +242,6 @@ export default function BequantSubscribersPage() {
           </div>
         )}
       </div>
-    </div>
+    </>
   );
 }
