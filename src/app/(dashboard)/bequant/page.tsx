@@ -164,9 +164,9 @@ export default function BequantDashboard() {
           <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-4 flex items-center gap-3">
             <AlertTriangle className="w-5 h-5 text-yellow-400" />
             <div className="flex-1">
-              <div className="text-yellow-400 font-medium">Circuit breaker abierto</div>
+              <div className="text-yellow-400 font-medium">Bequant respondiendo lento</div>
               <div className="text-xs text-gray-400">
-                Bequant no responde. Reintento en {Math.ceil((data.circuit.opensFor || 0) / 1000)}s.
+                Los datos que se muestran pueden estar desactualizados. Reintentando en {Math.ceil((data.circuit.opensFor || 0) / 1000)}s.
               </div>
             </div>
           </div>
