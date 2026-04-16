@@ -23,7 +23,7 @@ export default function BequantPoliciesPage() {
     try {
       const res = await fetch("/api/bequant/policies", { cache: "no-store" });
       const json = await res.json();
-      if (res.ok) setPolicies(json.data || []);
+      if (res.ok) setPolicies(Array.isArray(json) ? json : []);
     } finally {
       setLoading(false);
       setRefreshing(false);

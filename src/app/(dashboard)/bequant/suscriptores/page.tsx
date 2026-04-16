@@ -41,7 +41,7 @@ export default function BequantSubscribersPage() {
 
       const res = await fetch(`/api/bequant/subscribers?${params}`, { cache: "no-store" });
       const json = await res.json();
-      if (res.ok) setData(json.data);
+      if (res.ok) setData(json);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -51,10 +51,12 @@ export default function BequantSubscribersPage() {
   useEffect(() => {
     fetch("/api/bequant/node", { cache: "no-store" })
       .then(r => r.json())
-      .then(j => { if (j.data?.groups) setGroups(j.data.groups); });
+      .then(j => { if (j?.groups) setGroups(j.groups); })
+      .catch(() => {});
     fetch("/api/bequant/policies", { cache: "no-store" })
       .then(r => r.json())
-      .then(j => { if (j.data) setPolicies(j.data); });
+      .then(j => { if (Array.isArray(j)) setPolicies(j); })
+      .catch(() => {});
   }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);

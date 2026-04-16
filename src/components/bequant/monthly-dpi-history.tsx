@@ -40,7 +40,7 @@ export function MonthlyDpiHistory({ ip }: { ip: string }) {
         const res = await fetch(`/api/bequant/subscribers/${encodeURIComponent(ip)}/dpi-monthly`, { cache: "no-store" });
         const json = await res.json();
         if (!res.ok) throw new Error(json.error || "Error");
-        setRows(json.data || []);
+        setRows(Array.isArray(json) ? json : []);
       } catch (e) {
         setError((e as Error).message);
       } finally {

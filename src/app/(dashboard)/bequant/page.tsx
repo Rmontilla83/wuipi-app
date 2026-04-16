@@ -98,7 +98,7 @@ export default function BequantDashboard() {
       const res = await fetch("/api/bequant/node", { cache: "no-store" });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Error consultando Bequant");
-      setData(json.data);
+      setData(json);
     } catch (e) {
       setError((e as Error).message);
     } finally {

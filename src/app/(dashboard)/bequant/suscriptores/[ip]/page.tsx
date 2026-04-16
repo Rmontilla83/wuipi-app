@@ -79,7 +79,7 @@ export default function BequantSubscriberDetailPage() {
       const res = await fetch(`/api/bequant/subscribers/${encodeURIComponent(ip)}`, { cache: "no-store" });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Error");
-      setData(json.data);
+      setData(json);
     } catch (e) {
       setError((e as Error).message);
     } finally {

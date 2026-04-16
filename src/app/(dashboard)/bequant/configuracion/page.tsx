@@ -61,7 +61,7 @@ export default function BequantConfiguracion() {
       const res = await fetch("/api/bequant/config");
       if (res.ok) {
         const json = await res.json();
-        const configs = Array.isArray(json.data) ? json.data : [];
+        const configs = Array.isArray(json) ? json : [];
         if (configs.length > 0) {
           const c = configs[0];
           setConfig({
@@ -106,8 +106,7 @@ export default function BequantConfiguracion() {
         }),
       });
       const json = await res.json();
-      const result = json.data || json;
-      setTestResult({ success: result.success, message: result.message || json.error });
+      setTestResult({ success: json.success, message: json.message || json.error });
     } catch {
       setTestResult({ success: false, message: "Error de conexión" });
     }
