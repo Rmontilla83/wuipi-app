@@ -3,9 +3,10 @@
 import { useState, useEffect, useRef } from "react";
 import { useParams } from "next/navigation";
 import { Card } from "@/components/ui/card";
-import { RefreshCw, Eye, ArrowLeft, FileText, Package, HelpCircle, ChevronDown, ChevronUp, CreditCard, Bot, MessageSquare, Send } from "lucide-react";
+import { RefreshCw, Eye, ArrowLeft, FileText, Package, HelpCircle, ChevronDown, ChevronUp, CreditCard, Bot, MessageSquare, Send, Gauge } from "lucide-react";
 import type { OdooClientDetail, OdooInvoiceDetail } from "@/types/odoo";
 import Link from "next/link";
+import MyConnectionView from "@/app/portal/mi-conexion/my-connection-view";
 
 const fmtAmount = (n: number, currency: string) =>
   currency === "USD"
@@ -182,7 +183,7 @@ export default function PortalPreview() {
   const { partnerId } = useParams<{ partnerId: string }>();
   const [data, setData] = useState<OdooClientDetail | null>(null);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<"facturas" | "servicios" | "soporte">("facturas");
+  const [tab, setTab] = useState<"facturas" | "servicios" | "mi-conexion" | "soporte">("facturas");
   const [paymentUrl, setPaymentUrl] = useState("");
 
   useEffect(() => {
@@ -226,6 +227,7 @@ export default function PortalPreview() {
   const tabs = [
     { id: "facturas" as const, label: "Facturas", icon: FileText, count: data.invoices.length },
     { id: "servicios" as const, label: "Servicios", icon: Package, count: totalServices },
+    { id: "mi-conexion" as const, label: "Mi Conexión", icon: Gauge },
     { id: "soporte" as const, label: "Soporte", icon: HelpCircle },
   ];
 
@@ -373,6 +375,10 @@ export default function PortalPreview() {
               </Card>
             ))}
           </div>
+        )}
+
+        {tab === "mi-conexion" && (
+          <MyConnectionView partnerId={parseInt(partnerId)} />
         )}
 
         {tab === "soporte" && (

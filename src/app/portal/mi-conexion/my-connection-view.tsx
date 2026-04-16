@@ -179,7 +179,7 @@ const FAQS = [
   },
 ];
 
-export default function MyConnectionView() {
+export default function MyConnectionView({ partnerId }: { partnerId?: number } = {}) {
   const [data, setData] = useState<ServiceData[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -189,7 +189,10 @@ export default function MyConnectionView() {
     if (isRefresh) setRefreshing(true); else setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/portal/bequant/my-connection", { cache: "no-store" });
+      const url = partnerId
+        ? `/api/portal/bequant/my-connection?partnerId=${partnerId}`
+        : "/api/portal/bequant/my-connection";
+      const res = await fetch(url, { cache: "no-store" });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "No pudimos cargar tus datos");
       setData(json.services || []);
@@ -199,7 +202,7 @@ export default function MyConnectionView() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [partnerId]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 

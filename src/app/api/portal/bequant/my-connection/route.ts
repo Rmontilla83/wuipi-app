@@ -9,8 +9,9 @@
 // - Quality score 0-100 (translated on UI to excellent/good/fair/poor)
 // ============================================
 
+import { NextRequest } from "next/server";
 import { apiSuccess, apiError, apiServerError } from "@/lib/api-helpers";
-import { getPortalCaller } from "@/lib/auth/check-permission";
+import { getPortalCaller, getCallerProfile } from "@/lib/auth/check-permission";
 import { searchRead } from "@/lib/integrations/odoo";
 import {
   getSubscriberBandwidth, getSubscriberLatency,
@@ -46,13 +47,34 @@ function planSpeedFromName(name: string): number | null {
   return m ? parseInt(m[1], 10) : null;
 }
 
-export async function GET() {
+const ADMIN_ROLES = ["admin", "super_admin", "infraestructura", "gerente", "soporte"];
+
+export async function GET(request: NextRequest) {
   try {
-    const caller = await getPortalCaller();
-    if (!caller) return apiError("No autenticado", 401);
+    const { searchParams } = new URL(request.url);
+    const paramPartnerId = searchParams.get("partnerId");
+
+    let partnerId: number;
+    // Priority 1: portal client viewing their own
+    const portalCaller = await getPortalCaller();
+    if (portalCaller) {
+      // If admin accidentally hits this endpoint from the portal context with partnerId, ignore it
+      partnerId = portalCaller.odoo_partner_id;
+    } else if (paramPartnerId) {
+      // Priority 2: admin/staff querying on behalf of a client (preview mode)
+      const adminCaller = await getCallerProfile();
+      if (!adminCaller || !ADMIN_ROLES.includes(adminCaller.role)) {
+        return apiError("No autenticado", 401);
+      }
+      const pid = parseInt(paramPartnerId, 10);
+      if (Number.isNaN(pid)) return apiError("partnerId inválido", 400);
+      partnerId = pid;
+    } else {
+      return apiError("No autenticado", 401);
+    }
 
     const services = await searchRead("mikrotik.service", [
-      ["partner_id", "=", caller.odoo_partner_id],
+      ["partner_id", "=", partnerId],
       ["state", "in", ["progress", "suspended"]],
     ], {
       fields: ["id", "name", "ip_cpe", "ipv4", "product_id", "state"],
