@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Home, Wifi, FileText, Headphones } from "lucide-react";
+import { Home, Wifi, FileText, Headphones, Gauge } from "lucide-react";
 
 const NAV_ITEMS = [
   { href: "/portal/inicio", label: "Inicio", icon: Home },
   { href: "/portal/suscripciones", label: "Servicios", icon: Wifi },
+  { href: "/portal/mi-conexion", label: "Mi Conexión", icon: Gauge },
   { href: "/portal/facturas", label: "Facturas", icon: FileText },
   { href: "/portal/ayuda", label: "Soporte", icon: Headphones },
 ];
