@@ -1,209 +1,443 @@
 // ============================================
-// Bequant QoE — Integration
+// Bequant BQN — Read-only HTTP client
 // ============================================
-// Bequant API: REST at https://<bqn-ip>:3443/api/v1
-// Auth: HTTP Basic over HTTPS
+// READ-ONLY: all write methods removed. Policies/subs are managed by the
+// network engineer directly on the BQN appliance.
 //
-// Endpoints:
-// - GET /subscribers/{subscriberIp} — subscriber info
-// - GET /subscribers/{subscriberIp}/metrics?metrics=bandwidth,latency,retransmissions,flows,dpi&granularity=hour&startDate=...&endDate=...
+// Resilience layers:
+//   1. undici.Pool — keep-alive TCP/TLS connection pool (max 4 conns)
+//   2. Scoped TLS bypass for self-signed cert (only on this Pool, NOT global)
+//   3. Global semaphore — max 10 concurrent requests to BQN
+//   4. Singleflight — dedupes identical in-flight requests
+//   5. Circuit breaker — opens on 5 failures in 30s for 60s
+//   6. 15s per-request timeout
+//   7. Redacted logging (no Authorization header ever logged)
+//
+// Host allowlist enforced by bequantConfigSchema (see validations/schemas.ts).
 // ============================================
 
+import { Pool, fetch as undiciFetch } from "undici";
+import { isAllowedBequantHost } from "@/lib/validations/schemas";
 import type {
+  BequantListResponse,
   BequantSubscriber,
-  BequantMetrics,
-  BequantDPI,
-  QoEScore,
-  QoELevel,
-  BequantResponse,
+  BequantSubscriberGroup,
+  BequantRatePolicy,
+  BequantTimeSeries,
+  BequantDpiSeries,
+  BequantTestResult,
 } from "@/types/bequant";
 
-const BEQUANT_URL = process.env.BEQUANT_URL;
-const BEQUANT_USER = process.env.BEQUANT_USER;
-const BEQUANT_PASSWORD = process.env.BEQUANT_PASSWORD;
+// ──────────────────────────────────────────────
+// Config resolution (DB → env fallback)
+// ──────────────────────────────────────────────
 
-function isConfigured(): boolean {
-  return !!(BEQUANT_URL && BEQUANT_USER && BEQUANT_PASSWORD);
+interface ResolvedConfig {
+  host: string;
+  port: number;
+  authHeader: string;
+  dispatcher: Pool;
+  origin: string;
 }
 
-function getAuthHeader(): string {
-  return "Basic " + Buffer.from(`${BEQUANT_USER}:${BEQUANT_PASSWORD}`).toString("base64");
+let cachedConfig: { cfg: ResolvedConfig; expiresAt: number } | null = null;
+const CONFIG_TTL_MS = 60_000;
+
+function buildDispatcher(host: string, port: number): Pool {
+  return new Pool(`https://${host}:${port}`, {
+    connect: { rejectUnauthorized: false }, // scoped to this Pool only
+    connections: 4,
+    pipelining: 1,
+    keepAliveTimeout: 30_000,
+    keepAliveMaxTimeout: 600_000,
+    headersTimeout: 15_000,
+    bodyTimeout: 15_000,
+  });
 }
 
-function getBaseUrl(): string {
-  return `${BEQUANT_URL}/api/v1`;
+async function resolveConfig(): Promise<ResolvedConfig | null> {
+  if (cachedConfig && Date.now() < cachedConfig.expiresAt) return cachedConfig.cfg;
+
+  // 1. Try DB config (enabled row)
+  try {
+    const { getActiveBequantConfig } = await import("@/lib/dal/bequant");
+    const { decryptPassword } = await import("@/lib/utils/crypto");
+    const row = await getActiveBequantConfig();
+    if (row && isAllowedBequantHost(row.host)) {
+      const password = decryptPassword(row.encrypted_password);
+      const cfg: ResolvedConfig = {
+        host: row.host,
+        port: row.port,
+        authHeader: "Basic " + Buffer.from(`${row.username}:${password}`).toString("base64"),
+        dispatcher: buildDispatcher(row.host, row.port),
+        origin: `https://${row.host}:${row.port}`,
+      };
+      cachedConfig = { cfg, expiresAt: Date.now() + CONFIG_TTL_MS };
+      return cfg;
+    }
+  } catch {
+    // DAL unavailable during build — fall through
+  }
+
+  // 2. Env fallback
+  const url = process.env.BEQUANT_URL;
+  const user = process.env.BEQUANT_USER;
+  const pass = process.env.BEQUANT_PASSWORD;
+  if (!url || !user || !pass) return null;
+
+  let parsed: URL;
+  try { parsed = new URL(url); } catch { return null; }
+  const host = parsed.hostname;
+  const port = parsed.port ? parseInt(parsed.port, 10) : 7343;
+  if (!isAllowedBequantHost(host)) {
+    console.error("[Bequant] host blocked by allowlist:", host);
+    return null;
+  }
+
+  const cfg: ResolvedConfig = {
+    host,
+    port,
+    authHeader: "Basic " + Buffer.from(`${user}:${pass}`).toString("base64"),
+    dispatcher: buildDispatcher(host, port),
+    origin: `https://${host}:${port}`,
+  };
+  cachedConfig = { cfg, expiresAt: Date.now() + CONFIG_TTL_MS };
+  return cfg;
 }
 
-function getPeriodDates(period: "24h" | "7d" | "30d"): { startDate: string; endDate: string } {
-  const end = new Date();
-  const start = new Date();
-  if (period === "24h") start.setHours(start.getHours() - 24);
-  else if (period === "7d") start.setDate(start.getDate() - 7);
-  else start.setDate(start.getDate() - 30);
+export function invalidateConfigCache(): void {
+  if (cachedConfig) cachedConfig.cfg.dispatcher.close().catch(() => {});
+  cachedConfig = null;
+}
+
+// ──────────────────────────────────────────────
+// Global semaphore (max 10 concurrent BQN requests)
+// ──────────────────────────────────────────────
+
+const MAX_CONCURRENT = 10;
+let inFlight = 0;
+const semQueue: Array<() => void> = [];
+
+async function acquire(): Promise<void> {
+  if (inFlight < MAX_CONCURRENT) { inFlight++; return; }
+  await new Promise<void>(resolve => semQueue.push(resolve));
+  inFlight++;
+}
+function release(): void {
+  inFlight--;
+  const next = semQueue.shift();
+  if (next) next();
+}
+
+// ──────────────────────────────────────────────
+// Circuit breaker
+// ──────────────────────────────────────────────
+
+const FAIL_THRESHOLD = 5;
+const FAIL_WINDOW_MS = 30_000;
+const OPEN_DURATION_MS = 60_000;
+
+let failTimes: number[] = [];
+let openedAt = 0;
+
+function isCircuitOpen(): boolean {
+  if (openedAt === 0) return false;
+  if (Date.now() - openedAt < OPEN_DURATION_MS) return true;
+  openedAt = 0;
+  failTimes = [];
+  return false;
+}
+function recordFailure(): void {
+  const now = Date.now();
+  failTimes = failTimes.filter(t => now - t < FAIL_WINDOW_MS);
+  failTimes.push(now);
+  if (failTimes.length >= FAIL_THRESHOLD) openedAt = now;
+}
+function recordSuccess(): void {
+  if (failTimes.length > 0) failTimes = [];
+}
+
+export function getCircuitState(): { open: boolean; failures: number; opensFor: number } {
+  const open = isCircuitOpen();
   return {
-    startDate: start.toISOString(),
-    endDate: end.toISOString(),
+    open,
+    failures: failTimes.length,
+    opensFor: open ? Math.max(0, OPEN_DURATION_MS - (Date.now() - openedAt)) : 0,
   };
 }
 
-// ============================================
-// API Functions
-// ============================================
+// ──────────────────────────────────────────────
+// Singleflight — dedupe in-flight identical requests
+// ──────────────────────────────────────────────
 
-export async function getBequantSubscriber(ip: string): Promise<BequantSubscriber | null> {
-  if (!isConfigured()) return null;
+const inFlightMap = new Map<string, Promise<unknown>>();
 
-  try {
-    const res = await fetch(`${getBaseUrl()}/subscribers/${ip}`, {
-      headers: { Authorization: getAuthHeader() },
-      // Bequant uses self-signed certs in many installations
-      // @ts-expect-error Node fetch rejectUnauthorized option
-      rejectUnauthorized: false,
-    });
-    if (!res.ok) return null;
-    return await res.json();
-  } catch (err) {
-    console.error("[Bequant] Error fetching subscriber:", err);
+function singleflight<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  const existing = inFlightMap.get(key) as Promise<T> | undefined;
+  if (existing) return existing;
+  const p = fn().finally(() => inFlightMap.delete(key));
+  inFlightMap.set(key, p);
+  return p;
+}
+
+// ──────────────────────────────────────────────
+// Core GET — the ONLY way to call BQN. No write methods exist.
+// ──────────────────────────────────────────────
+
+async function bqnGet<T>(path: string): Promise<T | null> {
+  if (isCircuitOpen()) {
+    console.warn("[Bequant] circuit open — skipping", path);
     return null;
   }
+
+  const cfg = await resolveConfig();
+  if (!cfg) return null;
+
+  const cacheKey = `${cfg.origin}${path}`;
+  return singleflight(cacheKey, async () => {
+    await acquire();
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 15_000);
+    try {
+      const res = await undiciFetch(`${cfg.origin}/api/v1${path}`, {
+        method: "GET",
+        headers: {
+          Authorization: cfg.authHeader,
+          Accept: "application/json",
+        },
+        dispatcher: cfg.dispatcher,
+        signal: controller.signal,
+      });
+      if (!res.ok) {
+        recordFailure();
+        console.error(`[Bequant] HTTP ${res.status} on ${path}`);
+        return null;
+      }
+      const text = await res.text();
+      recordSuccess();
+      return text ? (JSON.parse(text) as T) : null;
+    } catch (err) {
+      recordFailure();
+      const msg = (err as Error).message?.replace(/Basic\s+[\w+/=]+/gi, "Basic [REDACTED]") || "unknown";
+      console.error(`[Bequant] ${path}: ${msg}`);
+      return null;
+    } finally {
+      clearTimeout(timer);
+      release();
+    }
+  });
 }
 
-export async function getBequantMetrics(
-  ip: string,
-  period: "24h" | "7d" | "30d" = "24h"
-): Promise<BequantMetrics | null> {
-  if (!isConfigured()) return null;
+// ──────────────────────────────────────────────
+// Test connection — accepts arbitrary creds (not cached)
+// ──────────────────────────────────────────────
+
+export async function testConnection(
+  host: string,
+  port: number,
+  username: string,
+  password: string
+): Promise<BequantTestResult> {
+  if (!isAllowedBequantHost(host)) {
+    return { success: false, message: `Host ${host} no permitido por allowlist` };
+  }
+  const dispatcher = buildDispatcher(host, port);
+  const auth = "Basic " + Buffer.from(`${username}:${password}`).toString("base64");
+  const origin = `https://${host}:${port}`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 10_000);
 
   try {
-    const { startDate, endDate } = getPeriodDates(period);
-    const granularity = period === "24h" ? "hour" : period === "7d" ? "day" : "day";
-    const params = new URLSearchParams({
-      metrics: "bandwidth,latency,retransmissions,congestion,trafficAtMaxSpeed,volume",
-      granularity,
-      startDate,
-      endDate,
-    });
+    const [polRes, subRes] = await Promise.all([
+      undiciFetch(`${origin}/api/v1/policies/rate`, {
+        headers: { Authorization: auth },
+        dispatcher,
+        signal: controller.signal,
+      }),
+      undiciFetch(`${origin}/api/v1/subscribers`, {
+        headers: { Authorization: auth },
+        dispatcher,
+        signal: controller.signal,
+      }),
+    ]);
+    if (polRes.status === 401 || subRes.status === 401) {
+      return { success: false, message: "Credenciales inválidas" };
+    }
+    if (!polRes.ok) return { success: false, message: `HTTP ${polRes.status} en /policies/rate` };
+    if (!subRes.ok) return { success: false, message: `HTTP ${subRes.status} en /subscribers` };
 
-    const res = await fetch(`${getBaseUrl()}/subscribers/${ip}/metrics?${params}`, {
-      headers: { Authorization: getAuthHeader() },
-      // @ts-expect-error Node fetch rejectUnauthorized option
-      rejectUnauthorized: false,
-    });
-    if (!res.ok) return null;
-    return await res.json();
+    const [polJson, subJson] = await Promise.all([polRes.json(), subRes.json()]);
+    const pol = polJson as { items?: unknown[] };
+    const sub = subJson as { items?: unknown[] };
+    const polCount = pol.items?.length ?? 0;
+    const subCount = sub.items?.length ?? 0;
+    return {
+      success: true,
+      message: `Conectado: ${subCount} suscriptores, ${polCount} políticas`,
+      subscribers: subCount,
+      policies: polCount,
+    };
   } catch (err) {
-    console.error("[Bequant] Error fetching metrics:", err);
-    return null;
+    const e = err as Error;
+    const msg = e.name === "AbortError" ? "Timeout (10s)" : e.message;
+    return { success: false, message: `Error: ${msg}` };
+  } finally {
+    clearTimeout(timer);
+    dispatcher.close().catch(() => {});
   }
 }
 
-export async function getBequantDPI(
-  ip: string,
-  period: "24h" | "7d" | "30d" = "24h"
-): Promise<BequantDPI | null> {
-  if (!isConfigured()) return null;
+// ──────────────────────────────────────────────
+// Public read API
+// ──────────────────────────────────────────────
 
-  try {
-    const { startDate, endDate } = getPeriodDates(period);
-    const params = new URLSearchParams({
-      metrics: "dpi",
-      granularity: period === "24h" ? "hour" : "day",
-      startDate,
-      endDate,
-    });
-
-    const res = await fetch(`${getBaseUrl()}/subscribers/${ip}/metrics?${params}`, {
-      headers: { Authorization: getAuthHeader() },
-      // @ts-expect-error Node fetch rejectUnauthorized option
-      rejectUnauthorized: false,
-    });
-    if (!res.ok) return null;
-    const data = await res.json();
-    return data?.dpi || null;
-  } catch (err) {
-    console.error("[Bequant] Error fetching DPI:", err);
-    return null;
-  }
+export async function listSubscribers(): Promise<BequantSubscriber[]> {
+  const data = await bqnGet<BequantListResponse<BequantSubscriber>>("/subscribers");
+  return data?.items ?? [];
 }
 
-// ============================================
-// QoE Score Calculator
-// ============================================
-
-export function calculateQoEScore(
-  metrics: BequantMetrics,
-  planSpeedDown?: number // Mbps contratados
-): QoEScore {
-  // Speed vs plan factor (0-100)
-  const realSpeedMbps = (metrics.bandwidth?.downlink || 0) / 1_000_000;
-  const speedFactor = planSpeedDown && planSpeedDown > 0
-    ? Math.min(100, (realSpeedMbps / planSpeedDown) * 100)
-    : metrics.trafficAtMaxSpeed || 50;
-
-  // Latency factor (0-100): <20ms=100, 20-50=80, 50-100=60, 100-200=30, >200=10
-  const lat = metrics.latency || 0;
-  const latencyFactor = lat < 20 ? 100 : lat < 50 ? 80 : lat < 100 ? 60 : lat < 200 ? 30 : 10;
-
-  // Retransmissions factor (0-100): <1%=100, 1-3%=70, 3-5%=40, >5%=10
-  const retx = metrics.retransmissions || 0;
-  const retxFactor = retx < 1 ? 100 : retx < 3 ? 70 : retx < 5 ? 40 : 10;
-
-  // Congestion factor (0-100): <5%=100, 5-20%=70, 20-50%=40, >50%=10
-  const cong = metrics.congestion || 0;
-  const congFactor = cong < 5 ? 100 : cong < 20 ? 70 : cong < 50 ? 40 : 10;
-
-  // Weighted score
-  const score = Math.round(
-    speedFactor * 0.35 +
-    latencyFactor * 0.25 +
-    retxFactor * 0.20 +
-    congFactor * 0.20
-  );
-
-  const level: QoELevel = score > 80 ? "excellent" : score > 50 ? "acceptable" : "degraded";
-
-  return {
-    score,
-    level,
-    factors: {
-      speedVsPlan: Math.round(speedFactor),
-      latency: Math.round(latencyFactor),
-      retransmissions: Math.round(retxFactor),
-      congestion: Math.round(congFactor),
-    },
-  };
+export async function getSubscriber(ip: string): Promise<BequantSubscriber | null> {
+  return bqnGet<BequantSubscriber>(`/subscribers/${encodeURIComponent(ip)}`);
 }
 
-// ============================================
-// Combined fetch for API route
-// ============================================
+export async function listSubscriberGroups(): Promise<BequantSubscriberGroup[]> {
+  const data = await bqnGet<BequantListResponse<BequantSubscriberGroup>>("/subscriberGroups");
+  return data?.items ?? [];
+}
 
-export async function getBequantData(
-  ip: string,
-  period: "24h" | "7d" | "30d" = "24h",
-  planSpeedDown?: number
-): Promise<BequantResponse> {
-  if (!isConfigured()) {
-    return { connected: false, message: "Bequant no configurado" };
+export async function listRatePolicies(): Promise<BequantRatePolicy[]> {
+  const data = await bqnGet<BequantListResponse<BequantRatePolicy>>("/policies/rate");
+  return data?.items ?? [];
+}
+
+// --- Time-series metrics ---
+
+type Interval = 5 | 15 | 60;
+type Period = 1 | 6 | 24;
+
+function tsQuery(interval: Interval, period: Period) {
+  return `?interval=${interval}&period=${period}`;
+}
+
+export async function getSubscriberBandwidth(
+  ip: string, interval: Interval = 5, period: Period = 1
+): Promise<BequantTimeSeries | null> {
+  return bqnGet(`/subscribers/${encodeURIComponent(ip)}/bandwidth${tsQuery(interval, period)}`);
+}
+export async function getSubscriberLatency(
+  ip: string, interval: Interval = 5, period: Period = 1
+): Promise<BequantTimeSeries | null> {
+  return bqnGet(`/subscribers/${encodeURIComponent(ip)}/latency${tsQuery(interval, period)}`);
+}
+export async function getSubscriberCongestion(
+  ip: string, interval: Interval = 5, period: Period = 1
+): Promise<BequantTimeSeries | null> {
+  return bqnGet(`/subscribers/${encodeURIComponent(ip)}/congestion${tsQuery(interval, period)}`);
+}
+export async function getSubscriberRetransmission(
+  ip: string, interval: Interval = 5, period: Period = 1
+): Promise<BequantTimeSeries | null> {
+  return bqnGet(`/subscribers/${encodeURIComponent(ip)}/retransmission${tsQuery(interval, period)}`);
+}
+export async function getSubscriberFlows(
+  ip: string, interval: Interval = 5, period: Period = 1
+): Promise<(BequantTimeSeries & { flowsCreated?: number[]; flowsActive?: number[] }) | null> {
+  return bqnGet(`/subscribers/${encodeURIComponent(ip)}/flows${tsQuery(interval, period)}`);
+}
+export async function getSubscriberVolume(
+  ip: string, interval: Interval = 5, period: Period = 1
+): Promise<BequantTimeSeries | null> {
+  return bqnGet(`/subscribers/${encodeURIComponent(ip)}/volume${tsQuery(interval, period)}`);
+}
+export async function getSubscriberTrafficAtMaxSpeed(
+  ip: string, interval: Interval = 5, period: Period = 1
+): Promise<BequantTimeSeries | null> {
+  return bqnGet(`/subscribers/${encodeURIComponent(ip)}/trafficAtMaxSpeed${tsQuery(interval, period)}`);
+}
+export async function getSubscriberDpiDownlink(
+  ip: string, interval: Interval = 5, period: Period = 1
+): Promise<BequantDpiSeries | null> {
+  return bqnGet(`/subscribers/${encodeURIComponent(ip)}/dpiDownlink${tsQuery(interval, period)}`);
+}
+export async function getSubscriberDpiUplink(
+  ip: string, interval: Interval = 5, period: Period = 1
+): Promise<BequantDpiSeries | null> {
+  return bqnGet(`/subscribers/${encodeURIComponent(ip)}/dpiUplink${tsQuery(interval, period)}`);
+}
+
+// --- Node metrics ---
+
+export async function getNodeBandwidth(
+  interval: Interval = 5, period: Period = 1
+): Promise<BequantTimeSeries | null> {
+  return bqnGet(`/node/bandwidth${tsQuery(interval, period)}`);
+}
+export async function getNodeLatency(
+  interval: Interval = 5, period: Period = 1
+): Promise<BequantTimeSeries | null> {
+  return bqnGet(`/node/latency${tsQuery(interval, period)}`);
+}
+export async function getNodeCongestion(
+  interval: Interval = 5, period: Period = 1
+): Promise<BequantTimeSeries | null> {
+  return bqnGet(`/node/congestion${tsQuery(interval, period)}`);
+}
+export async function getNodeRetransmission(
+  interval: Interval = 5, period: Period = 1
+): Promise<BequantTimeSeries | null> {
+  return bqnGet(`/node/retransmission${tsQuery(interval, period)}`);
+}
+export async function getNodeFlows(
+  interval: Interval = 5, period: Period = 1
+): Promise<(BequantTimeSeries & { flowsCreated?: number[]; flowsActive?: number[] }) | null> {
+  return bqnGet(`/node/flows${tsQuery(interval, period)}`);
+}
+export async function getNodeVolume(
+  interval: Interval = 5, period: Period = 1
+): Promise<BequantTimeSeries | null> {
+  return bqnGet(`/node/volume${tsQuery(interval, period)}`);
+}
+export async function getNodeTrafficAtMaxSpeed(
+  interval: Interval = 5, period: Period = 1
+): Promise<BequantTimeSeries | null> {
+  return bqnGet(`/node/trafficAtMaxSpeed${tsQuery(interval, period)}`);
+}
+export async function getNodeDpiDownlink(
+  interval: Interval = 60, period: Period = 1
+): Promise<BequantDpiSeries | null> {
+  return bqnGet(`/node/dpiDownlink${tsQuery(interval, period)}`);
+}
+export async function getNodeDpiUplink(
+  interval: Interval = 60, period: Period = 1
+): Promise<BequantDpiSeries | null> {
+  return bqnGet(`/node/dpiUplink${tsQuery(interval, period)}`);
+}
+
+// ──────────────────────────────────────────────
+// Helpers — useful for UIs
+// ──────────────────────────────────────────────
+
+/** Return the most recent non-(-1) value from a series, or null. */
+export function lastValid(values?: number[]): number | null {
+  if (!values) return null;
+  for (let i = values.length - 1; i >= 0; i--) {
+    if (values[i] !== -1 && !Number.isNaN(values[i])) return values[i];
   }
+  return null;
+}
 
-  const [subscriber, metrics, dpi] = await Promise.all([
-    getBequantSubscriber(ip),
-    getBequantMetrics(ip, period),
-    getBequantDPI(ip, period),
-  ]);
-
-  if (!subscriber && !metrics) {
-    return { connected: true, message: "Suscriptor no encontrado en Bequant" };
-  }
-
-  const qoe = metrics ? calculateQoEScore(metrics, planSpeedDown) : undefined;
-
-  return {
-    connected: true,
-    subscriber: subscriber || undefined,
-    metrics: metrics || undefined,
-    dpi: dpi || undefined,
-    qoe,
-  };
+/** Top N DPI categories summed across the period. */
+export function topDpiCategories(
+  series: BequantDpiSeries | null,
+  n = 10
+): Array<{ name: string; bytes: number }> {
+  if (!series?.categories) return [];
+  return series.categories
+    .map(c => ({
+      name: c.name,
+      bytes: (c.usage || []).filter(v => v !== -1).reduce((a, b) => a + b, 0),
+    }))
+    .filter(c => c.bytes > 0)
+    .sort((a, b) => b.bytes - a.bytes)
+    .slice(0, n);
 }

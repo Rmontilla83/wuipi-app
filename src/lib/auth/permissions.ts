@@ -78,7 +78,8 @@ const PERMISSIONS: Record<string, Partial<Record<Module, Action[]>>> = {
     auditoria: ["read"],
     infraestructura: ["create", "read", "update", "delete"],
     erp: ["create", "read", "update", "delete"],
-    bequant: ["create", "read", "update", "delete"],
+    // Bequant is READ-ONLY (appliance managed by network engineer).
+    bequant: ["read"],
     finanzas: ["create", "read", "update", "delete", "export"],
   },
   admin: {
@@ -92,7 +93,7 @@ const PERMISSIONS: Record<string, Partial<Record<Module, Action[]>>> = {
     auditoria: ["read"],
     infraestructura: ["create", "read", "update", "delete"],
     erp: ["create", "read", "update", "delete"],
-    bequant: ["create", "read", "update", "delete"],
+    bequant: ["read"],
     finanzas: ["read", "export"],
   },
   gerente: {
@@ -158,10 +159,12 @@ const PERMISSIONS: Record<string, Partial<Record<Module, Action[]>>> = {
   soporte: {
     soporte: ["create", "read", "update", "delete"],
     clientes: ["read"],
+    // Support agents can query QoE for a specific client from their ficha.
+    bequant: ["read"],
   },
   infraestructura: {
     infraestructura: ["create", "read", "update", "delete"],
-    bequant: ["create", "read", "update", "delete"],
+    bequant: ["read"],
     clientes: ["read"],
   },
   tecnico: {

@@ -15,6 +15,22 @@
     {
       "path": "/api/cron/lead-followup",
       "schedule": "0 15 * * *"
+    },
+    {
+      "path": "/api/bequant/cron/sync",
+      "schedule": "*/10 * * * *"
+    },
+    {
+      "path": "/api/bequant/cron/snapshot",
+      "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/bequant/cron/dpi-monthly",
+      "schedule": "0 7 * * *"
+    },
+    {
+      "path": "/api/bequant/cron/dpi-purge",
+      "schedule": "0 4 1 * *"
     }
   ]
 }

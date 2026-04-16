@@ -271,10 +271,23 @@ export const collectionConfirmTransferSchema = z.object({
 // ============================================
 // BEQUANT CONFIG SCHEMAS
 // ============================================
+// Host allowlist: only BQN interfaces permitted. Overridable via BEQUANT_ALLOWED_HOSTS env
+// (comma-separated) to add DR/staging hosts without code change.
+const BEQUANT_DEFAULT_ALLOWED_HOSTS = ["45.181.124.128", "10.7.37.2"];
+const ipv4Regex = /^(25[0-5]|2[0-4]\d|[01]?\d?\d)(\.(25[0-5]|2[0-4]\d|[01]?\d?\d)){3}$/;
+
+export function isAllowedBequantHost(host: string): boolean {
+  const extra = (process.env.BEQUANT_ALLOWED_HOSTS || "")
+    .split(",").map(s => s.trim()).filter(Boolean);
+  const allowed = new Set([...BEQUANT_DEFAULT_ALLOWED_HOSTS, ...extra]);
+  return allowed.has(host);
+}
+
 export const bequantConfigSchema = z.object({
   label: z.string().min(1, "Etiqueta requerida").max(100),
-  host: z.string().min(1, "Host requerido").max(255),
-  port: z.number().int().min(1).max(65535).default(3443),
+  host: z.string().regex(ipv4Regex, "Host debe ser una IPv4 válida")
+    .refine(isAllowedBequantHost, "Host no está en la lista permitida (BEQUANT_ALLOWED_HOSTS)"),
+  port: z.number().int().min(1).max(65535).default(7343),
   username: z.string().min(1, "Usuario requerido").max(100),
   password: z.string().min(1, "Contraseña requerida").max(255),
   ssl_verify: z.boolean().default(false),
@@ -286,24 +299,18 @@ export const bequantConfigUpdateSchema = bequantConfigSchema.partial().extend({
   password: z.string().max(255).optional(),
 });
 
-export const bequantRatePolicySchema = z.object({
-  policyName: z.string().min(1, "Nombre de política requerido").max(100),
-  rateLimitDownlink: z.object({
-    rate: z.number().positive("Rate debe ser mayor a 0"),
-    burstRate: z.number().min(0, "Burst rate no puede ser negativo"),
-  }),
-  rateLimitUplink: z.object({
-    rate: z.number().positive("Rate debe ser mayor a 0"),
-    burstRate: z.number().min(0, "Burst rate no puede ser negativo"),
-  }),
-});
-
 export const bequantTestConnectionSchema = z.object({
-  host: z.string().min(1, "Host requerido"),
-  port: z.number().int().min(1).max(65535).default(3443),
+  host: z.string().regex(ipv4Regex, "Host debe ser una IPv4 válida")
+    .refine(isAllowedBequantHost, "Host no está en la lista permitida"),
+  port: z.number().int().min(1).max(65535).default(7343),
   username: z.string().min(1, "Usuario requerido"),
   password: z.string().min(1, "Contraseña requerida"),
   configId: z.string().uuid().optional(),
+});
+
+/** IP validation for dynamic route params */
+export const bequantIpParamSchema = z.object({
+  ip: z.string().regex(ipv4Regex, "IP inválida"),
 });
 
 // ============================================
