@@ -5,7 +5,7 @@ import { Card } from "@/components/ui/card";
 import {
   Plus, Search, RefreshCw, Upload, Send, Download,
   CheckCircle2, Clock, AlertCircle, FileSpreadsheet, ExternalLink,
-  ChevronLeft, RotateCcw, Calendar, Trash2, Pencil, Save, X,
+  ChevronLeft, RotateCcw, Calendar, Trash2, Pencil, Save, X, Banknote,
 } from "lucide-react";
 import { parseXlsxBuffer } from "@/lib/utils/parse-xlsx";
 
@@ -981,6 +981,7 @@ function CampaignDetailView({
   const [editForm, setEditForm] = useState<Partial<CampaignItem>>({});
   const [sendingItemId, setSendingItemId] = useState<string | null>(null);
   const [sendProgress, setSendProgress] = useState<{ sent: number; total: number } | null>(null);
+  const [cashItem, setCashItem] = useState<CampaignItem | null>(null);
 
   const st = statusConfig[campaign.status] || statusConfig.draft;
   const pct =
@@ -1443,6 +1444,14 @@ function CampaignDetailView({
                             {sendingItemId === item.id ? <RefreshCw size={12} className="animate-spin" /> : <Send size={12} />}
                           </button>
                         )}
+                        {item.status !== "paid" && (
+                          <button
+                            onClick={() => setCashItem(item)}
+                            className="p-1.5 rounded text-gray-500 hover:text-emerald-400 hover:bg-emerald-400/10"
+                            title="Pago en efectivo">
+                            <Banknote size={12} />
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -1452,6 +1461,194 @@ function CampaignDetailView({
           </table>
         </div>
       </Card>
+
+      {cashItem && (
+        <CashPaymentModal
+          item={cashItem}
+          onClose={() => setCashItem(null)}
+          onDone={(msg) => {
+            setCashItem(null);
+            setMessage(msg);
+            onRefresh();
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Cash payment modal — register in-office cash collection (PLC/Lecheria)
+// ─────────────────────────────────────────────────────────────────────
+function CashPaymentModal({
+  item,
+  onClose,
+  onDone,
+}: {
+  item: CampaignItem;
+  onClose: () => void;
+  onDone: (message: string) => void;
+}) {
+  const [currency, setCurrency] = useState<"USD" | "VES">("USD");
+  const [amountStr, setAmountStr] = useState(
+    currency === "USD" ? Number(item.amount_usd).toFixed(2) : ""
+  );
+  const [location, setLocation] = useState<"PLC" | "Lecheria" | "Other">("PLC");
+  const [notes, setNotes] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async () => {
+    setError(null);
+    const amount = parseFloat(amountStr);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setError("Ingresá un monto válido");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const res = await fetch("/api/cobranzas/items/mark-cash", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          item_id: item.id,
+          paid_currency: currency,
+          paid_amount: amount,
+          location,
+          notes: notes.trim() || undefined,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setError(json.error || "No se pudo registrar el pago");
+        return;
+      }
+      onDone(
+        `${item.customer_name}: registrado pago en efectivo · ref ${json.payment_reference}`
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Error de red");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div className="bg-[#0f0f1e] border border-white/10 rounded-2xl max-w-md w-full p-5">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h3 className="text-white font-semibold flex items-center gap-2">
+              <Banknote size={18} className="text-emerald-400" />
+              Pago en efectivo
+            </h3>
+            <p className="text-gray-500 text-xs mt-0.5">
+              {item.customer_name} · ${Number(item.amount_usd).toFixed(2)} USD
+            </p>
+          </div>
+          <button onClick={onClose} className="text-gray-500 hover:text-white p-1">
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              onClick={() => { setCurrency("USD"); setAmountStr(Number(item.amount_usd).toFixed(2)); }}
+              className={`py-2 rounded-lg text-sm border ${
+                currency === "USD"
+                  ? "bg-emerald-500/10 border-emerald-400/50 text-emerald-400"
+                  : "bg-white/[0.03] border-white/10 text-gray-400"
+              }`}>
+              USD
+            </button>
+            <button
+              onClick={() => { setCurrency("VES"); setAmountStr(""); }}
+              className={`py-2 rounded-lg text-sm border ${
+                currency === "VES"
+                  ? "bg-emerald-500/10 border-emerald-400/50 text-emerald-400"
+                  : "bg-white/[0.03] border-white/10 text-gray-400"
+              }`}>
+              Bolívares
+            </button>
+          </div>
+
+          <div>
+            <label className="text-gray-500 text-xs block mb-1">
+              Monto recibido ({currency === "USD" ? "$" : "Bs"})
+            </label>
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              value={amountStr}
+              onChange={(e) => setAmountStr(e.target.value)}
+              placeholder={currency === "USD" ? "15.00" : "1234.50"}
+              className="w-full px-3 py-2 rounded-lg bg-white/[0.03] border border-white/10 text-white text-sm focus:border-emerald-400/50 focus:outline-none"
+            />
+            {currency === "VES" && (
+              <p className="text-gray-600 text-[10px] mt-1">
+                Se convierte a USD al BCV del día para comparar con el cobro.
+              </p>
+            )}
+          </div>
+
+          <div>
+            <label className="text-gray-500 text-xs block mb-1">Oficina</label>
+            <select
+              value={location}
+              onChange={(e) => setLocation(e.target.value as "PLC" | "Lecheria" | "Other")}
+              className="w-full px-3 py-2 rounded-lg bg-white/[0.03] border border-white/10 text-white text-sm focus:border-emerald-400/50 focus:outline-none">
+              <option value="PLC">Puerto La Cruz</option>
+              <option value="Lecheria">Lechería</option>
+              <option value="Other">Otra ubicación</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="text-gray-500 text-xs block mb-1">
+              Notas <span className="text-gray-600">(obligatoria si hay diferencia {'>'}5%)</span>
+            </label>
+            <textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              rows={2}
+              maxLength={200}
+              placeholder="Ej: pagó parcial, acordó saldo mañana..."
+              className="w-full px-3 py-2 rounded-lg bg-white/[0.03] border border-white/10 text-white text-sm focus:border-emerald-400/50 focus:outline-none resize-none"
+            />
+          </div>
+
+          {error && (
+            <div className="bg-red-500/10 border border-red-400/30 rounded-lg p-2.5">
+              <p className="text-red-400 text-xs">{error}</p>
+            </div>
+          )}
+
+          <div className="bg-amber-500/5 border border-amber-400/20 rounded-lg p-2.5">
+            <p className="text-amber-300/80 text-[11px] leading-relaxed">
+              Al confirmar, el sistema marca el cobro como pagado y envía WhatsApp +
+              email de &quot;pago recibido&quot; al cliente.
+            </p>
+          </div>
+
+          <div className="flex gap-2 pt-1">
+            <button
+              onClick={onClose}
+              disabled={submitting}
+              className="flex-1 py-2.5 rounded-lg bg-white/[0.03] border border-white/10 text-gray-400 text-sm hover:text-white disabled:opacity-50">
+              Cancelar
+            </button>
+            <button
+              onClick={submit}
+              disabled={submitting}
+              className="flex-1 py-2.5 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-semibold disabled:opacity-50 flex items-center justify-center gap-1.5">
+              {submitting ? <RefreshCw size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
+              Confirmar
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

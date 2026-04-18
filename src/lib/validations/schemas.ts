@@ -282,6 +282,19 @@ export const collectionConfirmTransferSchema = z.object({
   bankCode: z.enum(VENEZUELAN_BANK_CODES).optional(),
 });
 
+/**
+ * In-office cash payment. Admin marks an item as paid when the customer
+ * pays with physical cash (USD or Bs) at Puerto La Cruz or Lecheria.
+ * Triggers WhatsApp + email "pago recibido" on success.
+ */
+export const markCashSchema = z.object({
+  item_id: z.string().uuid("item_id debe ser UUID"),
+  paid_currency: z.enum(["USD", "VES"], { message: "Moneda debe ser USD o VES" }),
+  paid_amount: z.number().positive("Monto debe ser positivo").max(100000, "Monto demasiado alto"),
+  location: z.enum(["PLC", "Lecheria", "Other"], { message: "Oficina inválida" }),
+  notes: z.string().max(200, "Notas muy largas").optional(),
+});
+
 // ============================================
 // BEQUANT CONFIG SCHEMAS
 // ============================================
