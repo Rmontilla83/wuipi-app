@@ -14,8 +14,8 @@ import { checkRateLimit, getClientIP } from "@/lib/utils/rate-limit";
 import { MercantilSDK } from "@/lib/mercantil";
 
 // Wuipi bank account at Mercantil (destination of all transfers to us).
-// Full number with branch; Mercantil transfer-search expects only the account number.
-const WUIPI_ACCOUNT = "01050287051287005713";
+// Full 20-digit number; Mercantil transfer-search expects the account number.
+const WUIPI_ACCOUNT = "01050745651745103031";
 
 // transactionType=1 covers both Débito Inmediato (most common) and regular
 // interbank transfers in Mercantil's transfer-search taxonomy.

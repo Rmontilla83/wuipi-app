@@ -687,8 +687,8 @@ function TransferDetails({
         <DetailRow label="Tipo" value="Cuenta Corriente" />
         <DetailRow
           label="Cuenta"
-          value="0105 0287 05 1287005713"
-          extra={<CopyBtn text="01050287051287005713" field="cuenta" />}
+          value="0105 0745 65 1745103031"
+          extra={<CopyBtn text="01050745651745103031" field="cuenta" />}
           mono
         />
         <DetailRow

@@ -188,7 +188,7 @@ export async function POST(request: NextRequest) {
         bank_info: {
           banco: "Mercantil C.A., Banco Universal",
           tipo: "Cuenta Corriente",
-          cuenta: "0105 0287 05 1287005713",
+          cuenta: "0105 0745 65 1745103031",
           rif: "J-41156771-0",
           razon_social: "WUIPI TECH, C.A.",
           pago_movil: "04248803917",
