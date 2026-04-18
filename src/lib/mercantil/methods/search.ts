@@ -27,6 +27,11 @@ export async function searchTransfers(
   endpoints: MercantilEndpoints
 ): Promise<TransferSearchResult[]> {
   const creds = getProductCredentials(config, 'transfer_search');
+  // Per-product baseUrl lets transfer_search run in prod while the rest of
+  // the SDK (e.g. web_button) remains in sandbox until its prod creds land.
+  const url = creds.baseUrl
+    ? `${creds.baseUrl.replace(/\/$/, '')}/v1/payment/transfer-search`
+    : endpoints.searchTransfersUrl;
   const body: Record<string, unknown> = {
     merchantIdentify: getMerchantIdentify(config, creds),
     clientIdentify: {
@@ -45,7 +50,7 @@ export async function searchTransfers(
   };
 
   const response = await apiRequest<{ transactions: TransferSearchResult[] }>({
-    method: 'POST', url: endpoints.searchTransfersUrl,
+    method: 'POST', url,
     clientId: creds.clientId, body,
   });
   return response.data.transactions || [];

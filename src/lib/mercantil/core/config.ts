@@ -117,13 +117,15 @@ export function configFromEnv(): MercantilConfig {
   function loadProduct(
     merchantIdVar: string,
     secretKeyVar: string,
-    clientIdVar: string
+    clientIdVar: string,
+    baseUrlVar?: string
   ): ProductCredentials | undefined {
     const merchantId = env[merchantIdVar] || '';
     const secretKey = env[secretKeyVar] || '';
     const clientId = env[clientIdVar] || '';
+    const baseUrl = baseUrlVar ? env[baseUrlVar] : undefined;
     if (!merchantId && !secretKey && !clientId) return undefined;
-    return { merchantId, secretKey, clientId };
+    return { merchantId, secretKey, clientId, baseUrl: baseUrl || undefined };
   }
 
   return {
@@ -166,10 +168,13 @@ export function configFromEnv(): MercantilConfig {
         'MERCANTIL_SEARCH_MOBILE_CLIENT_ID'
       ),
       // Producto 6: Busqueda de Transferencias (DIFFERENT clientId!)
+      // Accepts MERCANTIL_SEARCH_TRANSFER_BASE_URL to run in prod while the rest
+      // of the SDK stays in sandbox (hybrid mode).
       transfer_search: loadProduct(
         'MERCANTIL_SEARCH_TRANSFER_MERCHANT_ID',
         'MERCANTIL_SEARCH_TRANSFER_SECRET_KEY',
-        'MERCANTIL_SEARCH_TRANSFER_CLIENT_ID'
+        'MERCANTIL_SEARCH_TRANSFER_CLIENT_ID',
+        'MERCANTIL_SEARCH_TRANSFER_BASE_URL'
       ),
       // Producto 7: Agendamiento de Cuotas
       scheduling: loadProduct(

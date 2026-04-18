@@ -51,6 +51,35 @@ interface BCVData {
 
 type PaymentMethod = "debito_inmediato" | "transferencia" | "stripe" | "paypal";
 
+// Bancos venezolanos (códigos SUDEBAN) — dropdown al confirmar transferencia.
+// El banco origen permite verificación automática contra Mercantil transfer-search.
+const BANCOS_VENEZUELA: Array<{ code: string; name: string }> = [
+  { code: "0102", name: "Banco de Venezuela" },
+  { code: "0104", name: "Venezolano de Crédito" },
+  { code: "0105", name: "Mercantil" },
+  { code: "0108", name: "BBVA Provincial" },
+  { code: "0114", name: "Bancaribe" },
+  { code: "0115", name: "Exterior" },
+  { code: "0128", name: "Banco Caroní" },
+  { code: "0134", name: "Banesco" },
+  { code: "0137", name: "Sofitasa" },
+  { code: "0138", name: "Banco Plaza" },
+  { code: "0146", name: "Bangente" },
+  { code: "0151", name: "BFC Banco Fondo Común" },
+  { code: "0156", name: "100% Banco" },
+  { code: "0157", name: "Del Sur" },
+  { code: "0163", name: "Banco del Tesoro" },
+  { code: "0166", name: "Banco Agrícola" },
+  { code: "0168", name: "Bancrecer" },
+  { code: "0169", name: "Mi Banco" },
+  { code: "0171", name: "Activo" },
+  { code: "0172", name: "Bancamiga" },
+  { code: "0174", name: "Banplus" },
+  { code: "0175", name: "Bicentenario" },
+  { code: "0177", name: "Banfanb" },
+  { code: "0191", name: "BNC" },
+];
+
 // ---------- Main Component ----------
 
 export default function PagarPage() {
@@ -65,7 +94,9 @@ export default function PagarPage() {
   const [selectedMethod, setSelectedMethod] = useState<PaymentMethod | null>(null);
   const [processing, setProcessing] = useState(false);
   const [transferRef, setTransferRef] = useState("");
+  const [originBank, setOriginBank] = useState("");
   const [confirmingSent, setConfirmingSent] = useState(false);
+  const [autoVerifiedMsg, setAutoVerifiedMsg] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
   const [pollingTimedOut, setPollingTimedOut] = useState(false);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -155,15 +186,26 @@ export default function PagarPage() {
   const handleConfirmTransfer = async () => {
     if (!transferRef.trim()) return;
     setConfirmingSent(true);
+    setAutoVerifiedMsg(null);
     try {
       const res = await fetch("/api/cobranzas/pay/confirm", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token, reference: transferRef }),
+        body: JSON.stringify({
+          token,
+          reference: transferRef,
+          ...(originBank ? { bankCode: originBank } : {}),
+        }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Error");
-      setData((prev) => prev ? { ...prev, status: "conciliating" } : prev);
+      // Server returns auto_verified=true when Mercantil confirmed the transfer.
+      // Map the UI status to "paid" on instant verification, else "conciliating".
+      const newStatus: PaymentData["status"] = json.auto_verified ? "paid" : "conciliating";
+      setData((prev) => prev ? { ...prev, status: newStatus } : prev);
+      if (json.auto_verified) {
+        setAutoVerifiedMsg(json.message || "¡Pago confirmado!");
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error al confirmar");
     } finally {
@@ -208,7 +250,7 @@ export default function PagarPage() {
   if (data.status === "paid") {
     return (
       <PageShell>
-        <PaidConfirmation data={data} />
+        <PaidConfirmation data={data} autoVerifiedMsg={autoVerifiedMsg} />
       </PageShell>
     );
   }
@@ -465,6 +507,8 @@ export default function PagarPage() {
             concept={data.invoice_number || token}
             transferRef={transferRef}
             setTransferRef={setTransferRef}
+            originBank={originBank}
+            setOriginBank={setOriginBank}
             confirming={confirmingSent}
             onConfirm={handleConfirmTransfer}
             copied={copied}
@@ -606,6 +650,8 @@ function TransferDetails({
   concept,
   transferRef,
   setTransferRef,
+  originBank,
+  setOriginBank,
   confirming,
   onConfirm,
   copied,
@@ -616,6 +662,8 @@ function TransferDetails({
   concept: string;
   transferRef: string;
   setTransferRef: (v: string) => void;
+  originBank: string;
+  setOriginBank: (v: string) => void;
   confirming: boolean;
   onConfirm: () => void;
   copied: string | null;
@@ -677,6 +725,20 @@ function TransferDetails({
       {/* Confirm transfer */}
       <div className="bg-white/[0.03] rounded-xl p-4 border border-white/5 space-y-3">
         <h4 className="text-white text-sm font-semibold">¿Ya realizaste la transferencia?</h4>
+        <p className="text-gray-500 text-[11px] leading-relaxed">
+          Seleccioná el banco desde el que transferiste y pegá la referencia.
+          Si coincide con nuestro banco, tu pago se confirma al instante.
+        </p>
+        <select
+          value={originBank}
+          onChange={(e) => setOriginBank(e.target.value)}
+          className="w-full px-4 py-3 rounded-xl bg-white/[0.03] border border-white/10 text-white text-sm focus:border-[#F46800]/50 focus:outline-none"
+        >
+          <option value="">Tu banco origen…</option>
+          {BANCOS_VENEZUELA.map(b => (
+            <option key={b.code} value={b.code}>{b.name}</option>
+          ))}
+        </select>
         <input
           value={transferRef}
           onChange={(e) => setTransferRef(e.target.value)}
@@ -727,7 +789,7 @@ function DetailRow({
   );
 }
 
-function PaidConfirmation({ data }: { data: PaymentData }) {
+function PaidConfirmation({ data, autoVerifiedMsg }: { data: PaymentData; autoVerifiedMsg?: string | null }) {
   return (
     <div className="max-w-md mx-auto text-center py-8">
       {/* Animated check */}
@@ -740,7 +802,7 @@ function PaidConfirmation({ data }: { data: PaymentData }) {
 
       <h2 className="text-white text-2xl font-bold mb-2">¡Pago recibido!</h2>
       <p className="text-gray-400 text-sm mb-6">
-        Tu pago ha sido procesado exitosamente
+        {autoVerifiedMsg || "Tu pago ha sido procesado exitosamente"}
       </p>
 
       {/* Receipt card */}

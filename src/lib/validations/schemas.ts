@@ -263,9 +263,23 @@ export const collectionPaySchema = z.object({
   method: z.enum(["debito_inmediato", "transferencia", "stripe", "paypal"], { message: "Método de pago inválido" }),
 });
 
+// Venezuelan bank codes — Mercantil 4-digit SUDEBAN codes.
+const VENEZUELAN_BANK_CODES = [
+  "0102","0104","0105","0108","0114","0115","0116","0128","0134",
+  "0137","0138","0146","0151","0156","0157","0163","0166","0168",
+  "0169","0171","0172","0173","0174","0175","0177","0191",
+] as const;
+
 export const collectionConfirmTransferSchema = z.object({
   token: z.string().regex(/^wpy_[a-f0-9]{16,64}$/, "Token de pago inválido"),
   reference: z.string().min(1, "Referencia requerida").max(50, "Referencia muy larga"),
+  /**
+   * Origin bank code (SUDEBAN). Optional so existing clients that confirm
+   * without bank selection still work (fall back to manual conciliation).
+   * When provided, server attempts automated verification via Mercantil
+   * transfer-search.
+   */
+  bankCode: z.enum(VENEZUELAN_BANK_CODES).optional(),
 });
 
 // ============================================

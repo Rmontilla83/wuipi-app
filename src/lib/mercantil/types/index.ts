@@ -27,6 +27,13 @@ export interface ProductCredentials {
   secretKey: string;
   /** X-IBM-Client-Id header value */
   clientId: string;
+  /**
+   * Optional base URL override for this product.
+   * Enables hybrid sandbox/production — e.g. transfer_search in prod while
+   * web_button stays in sandbox until its prod credentials arrive.
+   * When unset, uses the top-level MercantilConfig.baseUrl.
+   */
+  baseUrl?: string;
 }
 
 // --- Configuration ---
