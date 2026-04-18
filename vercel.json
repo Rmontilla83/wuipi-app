@@ -29,6 +29,10 @@
       "schedule": "0 7 * * *"
     },
     {
+      "path": "/api/bequant/cron/subscriber-snapshot",
+      "schedule": "0 8 * * *"
+    },
+    {
       "path": "/api/bequant/cron/dpi-purge",
       "schedule": "0 4 1 * *"
     }

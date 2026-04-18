@@ -12,6 +12,7 @@ import { requirePermission } from "@/lib/auth/check-permission";
 import type { BequantSubscriberDetail } from "@/types/bequant";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 export async function GET(
   _request: NextRequest,

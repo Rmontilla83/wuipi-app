@@ -453,6 +453,67 @@ export async function purgeOldMonthlyDpi(keepMonths = 12): Promise<number> {
 }
 
 // ══════════════════════════════════════════════
+// Per-subscriber snapshots (portal fallback)
+// ══════════════════════════════════════════════
+
+export interface BequantSubscriberSnapshotRow {
+  ip: string;
+  download_kbps: number | null;
+  upload_kbps: number | null;
+  latency_ms: number | null;
+  retransmission_pct: number | null;
+  congestion_pct: number | null;
+  traffic_at_max_speed: number | null;
+  score: number | null;
+  plan_mbps: number | null;
+  taken_at: string;
+}
+
+export async function getSubscriberSnapshot(ip: string): Promise<BequantSubscriberSnapshotRow | null> {
+  const supabase = createAdminSupabase();
+  const { data, error } = await supabase
+    .from("bequant_subscriber_snapshots")
+    .select("*")
+    .eq("ip", ip)
+    .maybeSingle();
+  if (error) {
+    console.warn(`[bequant] getSubscriberSnapshot ${ip}: ${error.message}`);
+    return null;
+  }
+  return data as BequantSubscriberSnapshotRow | null;
+}
+
+export async function upsertSubscriberSnapshots(
+  rows: Array<Omit<BequantSubscriberSnapshotRow, "taken_at">>
+): Promise<number> {
+  if (rows.length === 0) return 0;
+  const supabase = createAdminSupabase();
+  const payload = rows.map(r => ({ ...r, taken_at: new Date().toISOString() }));
+  // Chunk to avoid payload limits
+  let upserted = 0;
+  for (let i = 0; i < payload.length; i += 500) {
+    const chunk = payload.slice(i, i + 500);
+    const { error } = await supabase
+      .from("bequant_subscriber_snapshots")
+      .upsert(chunk, { onConflict: "ip" });
+    if (error) throw new Error(`Upsert sub snapshots: ${error.message}`);
+    upserted += chunk.length;
+  }
+  return upserted;
+}
+
+/** Returns IPs for active/suspended subscribers that have been synced from BQN. */
+export async function listSyncedSubscriberIps(): Promise<string[]> {
+  const supabase = createAdminSupabase();
+  const { data, error } = await supabase
+    .from("bequant_subscribers")
+    .select("ip, odoo_service_state")
+    .in("odoo_service_state", ["progress", "suspended"]);
+  if (error) throw new Error(`List sub IPs: ${error.message}`);
+  return (data || []).map((r: { ip: string }) => r.ip);
+}
+
+// ══════════════════════════════════════════════
 // Audit log
 // ══════════════════════════════════════════════
 

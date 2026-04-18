@@ -19,9 +19,12 @@ import {
   getSubscriberTrafficAtMaxSpeed,
   lastValid,
 } from "@/lib/integrations/bequant";
+import {
+  getSubscriberSnapshot, upsertSubscriberSnapshots,
+} from "@/lib/dal/bequant";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 30;
+export const maxDuration = 60;
 
 interface OdooSvc {
   id: number;
@@ -101,12 +104,16 @@ export async function GET(request: NextRequest) {
         };
       }
 
-      const [bw, lat, retx, cong, tams] = await Promise.all([
-        getSubscriberBandwidth(ip, 5, 1),
-        getSubscriberLatency(ip, 5, 1),
-        getSubscriberRetransmission(ip, 5, 1),
-        getSubscriberCongestion(ip, 5, 1),
-        getSubscriberTrafficAtMaxSpeed(ip, 5, 1),
+      // Period 6h (instead of 1h) gives 72 samples at 5min interval —
+      // much less likely to hit "all -1" when the client had no recent traffic.
+      // history_24h moved into the same Promise.all to avoid sequential 12s+retry penalty.
+      const [bw, lat, retx, cong, tams, bw24h] = await Promise.all([
+        getSubscriberBandwidth(ip, 5, 6),
+        getSubscriberLatency(ip, 5, 6),
+        getSubscriberRetransmission(ip, 5, 6),
+        getSubscriberCongestion(ip, 5, 6),
+        getSubscriberTrafficAtMaxSpeed(ip, 5, 6),
+        getSubscriberBandwidth(ip, 60, 24),
       ]);
 
       const dlKbps = lastValid(bw?.dataDownlink);
@@ -116,19 +123,62 @@ export async function GET(request: NextRequest) {
       const congPct = lastValid(cong?.dataDownlink);
       const tamsPct = lastValid(tams?.dataDownlink);
 
-      // Data presence = server reachability for this client
+      // Distinguish two "no data" cases:
+      //  (a) BQN didn't respond at all → all series are null/undefined
+      //  (b) BQN responded but every sample is -1 → client had no traffic in the window
+      const bqnResponded = bw != null || lat != null || retx != null;
       const hasData = [dlKbps, latencyMs, retxPct].some(v => v !== null);
 
+      // If BQN didn't respond, try the stored snapshot before giving up.
+      // This is the core fix for "portal sometimes shows nothing" — snapshot
+      // is populated by a daily cron + write-through from every successful live call.
+      if (!hasData && !bqnResponded) {
+        const snap = await getSubscriberSnapshot(ip);
+        if (snap && snap.download_kbps != null) {
+          const snapDlMbps = (snap.download_kbps ?? 0) / 1000;
+          const snapUlMbps = (snap.upload_kbps ?? 0) / 1000;
+          const snapIssues: string[] = [];
+          if (planMbps && snapDlMbps < planMbps * 0.5) snapIssues.push("slow_speed");
+          if ((snap.latency_ms ?? 0) > 100) snapIssues.push("high_latency");
+          if ((snap.retransmission_pct ?? 0) > 5) snapIssues.push("unstable");
+          return {
+            name: svc.name || productName,
+            plan_name: productName.replace(/^\[.*?\]\s*/, ""),
+            plan_mbps: planMbps,
+            state: svc.state,
+            available: true,
+            score: snap.score ?? 70,
+            score_level: scoreLevel(snap.score ?? 70),
+            current: {
+              download_mbps: Math.round(snapDlMbps * 10) / 10,
+              upload_mbps: Math.round(snapUlMbps * 10) / 10,
+              latency_ms: snap.latency_ms != null ? Math.round(snap.latency_ms * 10) / 10 : null,
+            },
+            issues: snapIssues,
+            history_24h: [],
+            last_updated: snap.taken_at,
+            from_snapshot: true,
+          };
+        }
+      }
+
       if (!hasData) {
+        let reason: string;
+        if (svc.state === "suspended") {
+          reason = "Servicio suspendido — sin mediciones";
+        } else if (bqnResponded) {
+          reason = "Sin tráfico reciente — tu servicio está operativo";
+        } else {
+          reason = "Sin mediciones recientes — probá actualizar en unos minutos";
+        }
         return {
           name: productName,
           plan_name: productName,
           plan_mbps: planMbps,
           state: svc.state,
           available: false,
-          reason: svc.state === "suspended"
-            ? "Servicio suspendido — sin mediciones"
-            : "Sin mediciones recientes — probá actualizar en unos minutos",
+          reason,
+          no_traffic: bqnResponded && !hasData,
         };
       }
 
@@ -170,8 +220,7 @@ export async function GET(request: NextRequest) {
       if (lat_ms > 100) issues.push("high_latency");
       if (rx > 5) issues.push("unstable");
 
-      // 24h history from BQN — bandwidth only, simplified
-      const bw24h = await getSubscriberBandwidth(ip, 60, 24);
+      // 24h history already fetched in the parallel block above.
       const history: Array<{ time: string; download_mbps: number | null }> = [];
       if (bw24h?.timestamp) {
         for (let i = 0; i < bw24h.timestamp.length; i++) {
@@ -184,6 +233,20 @@ export async function GET(request: NextRequest) {
           });
         }
       }
+
+      // Write-through to snapshot table (fire-and-forget) so next time the
+      // BQN hiccups, this client still sees a value instead of "Sin mediciones".
+      upsertSubscriberSnapshots([{
+        ip,
+        download_kbps: dlKbps,
+        upload_kbps: ulKbps,
+        latency_ms: latencyMs,
+        retransmission_pct: retxPct,
+        congestion_pct: congPct,
+        traffic_at_max_speed: tamsPct,
+        score,
+        plan_mbps: planMbps,
+      }]).catch(err => console.warn("[my-connection] snapshot upsert:", (err as Error).message));
 
       return {
         name: svc.name || productName,
@@ -201,6 +264,7 @@ export async function GET(request: NextRequest) {
         issues,
         history_24h: history,
         last_updated: new Date().toISOString(),
+        from_snapshot: false,
       };
     }));
 

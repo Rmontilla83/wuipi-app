@@ -8,6 +8,7 @@ import { apiSuccess, apiError, apiServerError } from "@/lib/api-helpers";
 import { requirePermission } from "@/lib/auth/check-permission";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 export async function GET() {
   try {

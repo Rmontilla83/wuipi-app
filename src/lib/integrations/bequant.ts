@@ -114,7 +114,7 @@ export function invalidateConfigCache(): void {
 // Global semaphore (max 10 concurrent BQN requests)
 // ──────────────────────────────────────────────
 
-const MAX_CONCURRENT = 10;
+const MAX_CONCURRENT = 20;
 let inFlight = 0;
 const semQueue: Array<() => void> = [];
 

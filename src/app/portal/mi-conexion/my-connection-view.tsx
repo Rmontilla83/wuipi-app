@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Card } from "@/components/ui/card";
 import {
   Gauge, Download, Upload, Zap, RefreshCw, AlertTriangle, CheckCircle2,
@@ -20,6 +21,8 @@ interface ServiceData {
   state: string;
   available: boolean;
   reason?: string;
+  no_traffic?: boolean;
+  from_snapshot?: boolean;
   score?: number;
   score_level?: ScoreLevel;
   current?: {
@@ -179,34 +182,30 @@ const FAQS = [
   },
 ];
 
+async function fetchMyConnection(partnerId?: number): Promise<ServiceData[]> {
+  const url = partnerId
+    ? `/api/portal/bequant/my-connection?partnerId=${partnerId}`
+    : "/api/portal/bequant/my-connection";
+  const res = await fetch(url);
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error || "No pudimos cargar tus datos");
+  return json.services || [];
+}
+
 export default function MyConnectionView({ partnerId }: { partnerId?: number } = {}) {
-  const [data, setData] = useState<ServiceData[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { data = [], isLoading, isFetching, error, refetch } = useQuery<ServiceData[]>({
+    queryKey: ["portal-my-connection", partnerId ?? "self"],
+    queryFn: () => fetchMyConnection(partnerId),
+    staleTime: 60_000,          // 1 min fresh
+    gcTime: 10 * 60_000,        // keep for 10 min
+    refetchInterval: 5 * 60_000, // silent refetch every 5 min
+    refetchOnWindowFocus: true,
+    retry: 1,
+  });
 
-  const fetchData = useCallback(async (isRefresh = false) => {
-    if (isRefresh) setRefreshing(true); else setLoading(true);
-    setError(null);
-    try {
-      const url = partnerId
-        ? `/api/portal/bequant/my-connection?partnerId=${partnerId}`
-        : "/api/portal/bequant/my-connection";
-      const res = await fetch(url, { cache: "no-store" });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || "No pudimos cargar tus datos");
-      setData(json.services || []);
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, [partnerId]);
-
-  useEffect(() => { fetchData(); }, [fetchData]);
-
-  if (loading) {
+  // Only show the full-screen spinner on the very first load — subsequent
+  // refetches render over previously cached data (no flicker).
+  if (isLoading && data.length === 0) {
     return (
       <div className="flex items-center justify-center py-24">
         <RefreshCw size={24} className="animate-spin text-gray-500" />
@@ -214,13 +213,13 @@ export default function MyConnectionView({ partnerId }: { partnerId?: number } =
     );
   }
 
-  if (error) {
+  if (error && data.length === 0) {
     return (
       <Card className="text-center py-10">
         <AlertTriangle size={32} className="mx-auto mb-3 text-amber-400" />
         <p className="text-sm text-gray-300 mb-1">No pudimos cargar tu información</p>
-        <p className="text-xs text-gray-500 mb-4">{error}</p>
-        <button onClick={() => fetchData(true)}
+        <p className="text-xs text-gray-500 mb-4">{(error as Error).message}</p>
+        <button onClick={() => refetch()}
           className="text-sm px-4 py-2 rounded bg-wuipi-accent/10 text-wuipi-accent hover:bg-wuipi-accent/20">
           Intentar de nuevo
         </button>
@@ -246,11 +245,11 @@ export default function MyConnectionView({ partnerId }: { partnerId?: number } =
           <p className="text-sm text-gray-500">Cómo está funcionando tu internet en este momento</p>
         </div>
         <button
-          onClick={() => fetchData(true)}
-          disabled={refreshing}
+          onClick={() => refetch()}
+          disabled={isFetching}
           className="flex items-center gap-2 px-3 py-2 text-sm bg-wuipi-card border border-wuipi-border rounded-lg hover:border-wuipi-accent disabled:opacity-50"
         >
-          <RefreshCw size={14} className={refreshing ? "animate-spin" : ""} />
+          <RefreshCw size={14} className={isFetching ? "animate-spin" : ""} />
           Actualizar
         </button>
       </div>
@@ -371,7 +370,11 @@ export default function MyConnectionView({ partnerId }: { partnerId?: number } =
 
             {svc.last_updated && (
               <p className="text-[10px] text-gray-600 text-center">
-                Última medición: {new Date(svc.last_updated).toLocaleTimeString("es-VE", { hour: "2-digit", minute: "2-digit" })}
+                {svc.from_snapshot ? "Última medición disponible: " : "Última medición: "}
+                {new Date(svc.last_updated).toLocaleString("es-VE", {
+                  day: "2-digit", month: "2-digit",
+                  hour: "2-digit", minute: "2-digit",
+                })}
               </p>
             )}
           </div>

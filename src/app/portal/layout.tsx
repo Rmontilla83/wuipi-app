@@ -3,6 +3,7 @@ import { createServerSupabase } from "@/lib/supabase/server";
 import { PortalProvider } from "@/lib/portal/context";
 import { PortalHeader } from "@/components/portal/header";
 import { PortalNav } from "@/components/portal/nav";
+import { QueryProvider } from "@/components/layout/query-provider";
 
 export default async function PortalLayout({ children }: { children: React.ReactNode }) {
   // Check if this is the login page — skip auth check
@@ -21,16 +22,18 @@ export default async function PortalLayout({ children }: { children: React.React
   }
 
   return (
-    <PortalProvider partnerId={partnerId} customerName={customerName} email={user.email || ""}>
-      <div className="min-h-screen bg-wuipi-bg flex flex-col">
-        <PortalHeader />
-        <PortalNav />
-        <main className="flex-1 pb-20 sm:pb-4">
-          <div className="max-w-3xl mx-auto px-4 py-6">
-            {children}
-          </div>
-        </main>
-      </div>
-    </PortalProvider>
+    <QueryProvider>
+      <PortalProvider partnerId={partnerId} customerName={customerName} email={user.email || ""}>
+        <div className="min-h-screen bg-wuipi-bg flex flex-col">
+          <PortalHeader />
+          <PortalNav />
+          <main className="flex-1 pb-20 sm:pb-4">
+            <div className="max-w-3xl mx-auto px-4 py-6">
+              {children}
+            </div>
+          </main>
+        </div>
+      </PortalProvider>
+    </QueryProvider>
   );
 }
