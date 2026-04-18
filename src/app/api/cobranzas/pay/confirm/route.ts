@@ -111,8 +111,14 @@ export async function POST(request: NextRequest) {
           );
         }
       } catch (err) {
-        autoVerifyError = (err as Error).message;
-        console.warn(`[PayConfirm] transfer-search failed: ${autoVerifyError}`);
+        const e = err as { message?: string; status?: number; details?: unknown };
+        autoVerifyError = e.message || "unknown";
+        // Log full Mercantil error details — includes the x-global-transaction-id
+        // that their support team needs to investigate (code=99999 is generic).
+        console.warn(
+          `[PayConfirm] transfer-search failed: status=${e.status || "?"} ` +
+          `message=${autoVerifyError} details=${JSON.stringify(e.details || {})}`
+        );
         // Fall through to conciliating — don't block the client on Mercantil hiccups.
       }
     }

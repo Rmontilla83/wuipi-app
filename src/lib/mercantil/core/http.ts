@@ -82,11 +82,14 @@ export async function apiRequest<T = unknown>(
       const responseData = await response.json();
 
       if (!response.ok) {
+        // Expose x-global-transaction-id in details — Mercantil support needs it
+        // to trace a failing request on their side (generic code=99999 otherwise).
+        const gtid = response.headers.get("x-global-transaction-id") || undefined;
         throw new MercantilApiError({
           status: response.status,
           code: responseData?.code || `HTTP_${response.status}`,
           message: responseData?.message || response.statusText,
-          details: responseData,
+          details: { ...responseData, _gtid: gtid, _endpoint: url },
         });
       }
 
