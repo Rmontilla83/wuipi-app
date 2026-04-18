@@ -12,6 +12,7 @@ import { sendPaymentConfirmationWhatsApp } from "@/lib/notifications/whatsapp";
 import { sendPaymentConfirmationEmail } from "@/lib/notifications/email";
 import { checkRateLimit, getClientIP } from "@/lib/utils/rate-limit";
 import { MercantilSDK } from "@/lib/mercantil";
+import { fetchBCVRate, convertUsdToBs } from "@/lib/integrations/bcv";
 
 // Wuipi bank account at Mercantil (destination of all transfers to us).
 // Full 20-digit number; Mercantil transfer-search expects the account number.
@@ -42,16 +43,34 @@ export async function POST(request: NextRequest) {
 
     // ── Attempt automated verification against Mercantil ────────────────
     // Requires: bankCode from client, customer_cedula_rif stored on item,
-    //           amount_bss calculated during /api/cobranzas/pay, and
+    //           amount in Bs (either persisted or computed now from BCV), and
     //           transfer_search product configured with prod credentials.
     let autoVerified = false;
     let autoVerifyError: string | null = null;
+
+    // Ensure amount_bss is populated. The transfer-flow UI never hits
+    // /api/cobranzas/pay (that's only for debito_inmediato/stripe/paypal),
+    // so amount_bss is typically null when we arrive here. Compute + persist
+    // from the BCV rate so downstream Mercantil search has a value to compare.
+    let amountBss = item.amount_bss ? Number(item.amount_bss) : null;
+    if (!amountBss) {
+      try {
+        const bcv = await fetchBCVRate();
+        amountBss = convertUsdToBs(Number(item.amount_usd), bcv.usd_to_bs);
+        await updateItem(item.id, {
+          amount_bss: amountBss,
+          bcv_rate: bcv.usd_to_bs,
+        } as Record<string, unknown>);
+      } catch (err) {
+        console.warn("[PayConfirm] BCV fetch failed:", (err as Error).message);
+      }
+    }
 
     const sdk = new MercantilSDK();
     const canVerify =
       bankCode &&
       item.customer_cedula_rif &&
-      item.amount_bss &&
+      amountBss &&
       sdk.isProductConfigured("transfer_search");
 
     if (canVerify) {
@@ -69,7 +88,7 @@ export async function POST(request: NextRequest) {
           issuerBankId: parseInt(bankCode!, 10),
           transactionType: TRANSACTION_TYPE_DEFAULT,
           paymentReference: reference,
-          amount: Number(item.amount_bss),
+          amount: amountBss!,
         });
 
         // Match: Mercantil returned at least one transaction matching ref+amount.
@@ -77,7 +96,7 @@ export async function POST(request: NextRequest) {
         // reference_number field inconsistently).
         const hit = results.find(t => {
           const refMatches = !t.reference_number || t.reference_number === reference;
-          const amtDiff = Math.abs(Number(t.amount) - Number(item.amount_bss));
+          const amtDiff = Math.abs(Number(t.amount) - amountBss!);
           return refMatches && amtDiff < 0.01;
         });
 
@@ -88,7 +107,7 @@ export async function POST(request: NextRequest) {
           );
         } else {
           console.log(
-            `[PayConfirm] no match on Mercantil — ref=${reference} cedula=${cedulaDigits} bank=${bankCode} amount=${item.amount_bss} → conciliating`
+            `[PayConfirm] no match on Mercantil — ref=${reference} cedula=${cedulaDigits} bank=${bankCode} amount=${amountBss} results=${results.length} → conciliating`
           );
         }
       } catch (err) {
