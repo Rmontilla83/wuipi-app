@@ -15,10 +15,11 @@ export default async function PortalLayout({ children }: { children: React.React
   const partnerId = user?.app_metadata?.odoo_partner_id;
   const customerName = user?.app_metadata?.customer_name || "";
 
-  // If not authenticated or no partner_id, only allow login and callback pages
+  // If not authenticated or no partner_id (e.g. admin previewing, or login page),
+  // skip the client-portal shell but KEEP QueryProvider so children that use
+  // useQuery (e.g. /portal/preview/[partnerId] → MyConnectionView) still work.
   if (!user || !partnerId) {
-    // Return children without the shell — login page handles its own layout
-    return <>{children}</>;
+    return <QueryProvider>{children}</QueryProvider>;
   }
 
   return (
