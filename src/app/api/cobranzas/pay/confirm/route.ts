@@ -134,7 +134,21 @@ export async function POST(request: NextRequest) {
     }
     await updateItem(item.id, update);
 
-    // Notifications (fire-and-forget)
+    // Only send "pago recibido" confirmations when the payment is ACTUALLY
+    // paid (auto-verified against Mercantil). For 'conciliating' we must NOT
+    // imply the payment is received — the client already sees "en proceso
+    // de verificación" on the portal, and a false confirmation by WA/email
+    // would be misleading. When manual admin promotion to 'paid' is added,
+    // notifications fire from that path.
+    if (!autoVerified) {
+      return apiSuccess({
+        status: newStatus,
+        auto_verified: false,
+        message: "Transferencia reportada. Será verificada en las próximas horas.",
+      });
+    }
+
+    // Notifications (fire-and-forget) — only on real confirmation
     const amount = `$${Number(item.amount_usd).toFixed(2)} USD`;
     const concept = item.concept || "Servicio WUIPI";
 
@@ -160,10 +174,8 @@ export async function POST(request: NextRequest) {
 
     return apiSuccess({
       status: newStatus,
-      auto_verified: autoVerified,
-      message: autoVerified
-        ? "¡Pago confirmado! Tu transferencia fue verificada con el banco."
-        : "Transferencia reportada. Será verificada en las próximas horas.",
+      auto_verified: true,
+      message: "¡Pago confirmado! Tu transferencia fue verificada con el banco.",
     });
   } catch (error) {
     return apiServerError(error);
