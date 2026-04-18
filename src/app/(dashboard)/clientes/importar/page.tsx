@@ -9,7 +9,7 @@ import {
   AlertTriangle, Loader2, ArrowRight, Table2, MapPin, Trash2,
 } from "lucide-react";
 import Papa from "papaparse";
-import * as XLSX from "xlsx";
+import { parseXlsxBuffer } from "@/lib/utils/parse-xlsx";
 
 // ============================================
 // TYPES
@@ -153,20 +153,27 @@ export default function ImportarClientesPage() {
       });
     } else if (ext === "xlsx" || ext === "xls") {
       const reader = new FileReader();
-      reader.onload = (e) => {
-        const data = new Uint8Array(e.target?.result as ArrayBuffer);
-        const wb = XLSX.read(data, { type: "array" });
-        const ws = wb.Sheets[wb.SheetNames[0]];
-        const json: Record<string, string>[] = XLSX.utils.sheet_to_json(ws, { defval: "" });
-        if (json.length === 0) {
-          setValidationErrors(["El archivo está vacío o no tiene datos."]);
-          return;
+      reader.onload = async (e) => {
+        try {
+          const buffer = e.target?.result as ArrayBuffer;
+          const parsed = await parseXlsxBuffer(buffer);
+          if (parsed.length === 0) {
+            setValidationErrors(["El archivo está vacío o no tiene datos."]);
+            return;
+          }
+          const json: Record<string, string>[] = parsed.map(row => {
+            const out: Record<string, string> = {};
+            for (const [k, v] of Object.entries(row)) out[k] = String(v ?? "");
+            return out;
+          });
+          const headers = Object.keys(json[0]);
+          setRawHeaders(headers);
+          setRawRows(json);
+          setMapping(autoMap(headers));
+          setStep("mapping");
+        } catch {
+          setValidationErrors(["Error al leer el archivo Excel."]);
         }
-        const headers = Object.keys(json[0]);
-        setRawHeaders(headers);
-        setRawRows(json);
-        setMapping(autoMap(headers));
-        setStep("mapping");
       };
       reader.readAsArrayBuffer(file);
     } else {

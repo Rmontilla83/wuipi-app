@@ -13,6 +13,7 @@ import {
 } from "@/lib/integrations/bequant";
 import { insertNodeSnapshot } from "@/lib/dal/bequant";
 import type { BequantNodeSnapshot } from "@/types/bequant";
+import { requireCronAuth } from "@/lib/auth/cron-guard";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -20,11 +21,8 @@ export const maxDuration = 30;
 export async function GET(request: NextRequest) {
   const started = Date.now();
   try {
-    const authHeader = request.headers.get("authorization");
-    const cronSecret = process.env.CRON_SECRET;
-    if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const unauth = requireCronAuth(request);
+    if (unauth) return unauth;
 
     // Parallel fetch — undici Pool reuses TCP connections
     const [volume, latency, congestion, retransmission, flows, tams, dpiDl, dpiUl] =

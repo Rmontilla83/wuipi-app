@@ -2,18 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminSupabase } from "@/lib/supabase/server";
 import { fetchBCVRate } from "@/lib/integrations/bcv";
 import { isConfigured, sendMessage, getChannels } from "@/lib/integrations/telegram";
+import { requireCronAuth } from "@/lib/auth/cron-guard";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 15;
 
 export async function GET(request: NextRequest) {
   try {
-    // Verify cron secret
-    const authHeader = request.headers.get("authorization");
-    const cronSecret = process.env.CRON_SECRET;
-    if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const unauth = requireCronAuth(request);
+    if (unauth) return unauth;
 
     if (!isConfigured()) {
       return NextResponse.json({ error: "Telegram not configured" }, { status: 503 });

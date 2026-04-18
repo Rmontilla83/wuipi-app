@@ -2,6 +2,7 @@
 // Zabbix JSON-RPC API Client
 // ===========================================
 
+import { Agent, fetch as undiciFetch } from "undici";
 import type {
   ZabbixHost,
   ZabbixProblem,
@@ -28,18 +29,15 @@ const ZABBIX_URL = process.env.ZABBIX_URL;       // e.g. http://45.181.126.127:6
 const ZABBIX_AUTH_TOKEN = process.env.ZABBIX_AUTH_TOKEN;
 
 // Self-signed SSL: Zabbix server uses a self-signed certificate.
-// We scope the TLS override to only affect Zabbix API calls.
-function withInsecureTLS<T>(fn: () => Promise<T>): Promise<T> {
-  const prev = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
-  process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
-  return fn().finally(() => {
-    if (prev === undefined) {
-      delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
-    } else {
-      process.env.NODE_TLS_REJECT_UNAUTHORIZED = prev;
-    }
-  });
-}
+// Scoped dispatcher — TLS bypass applies ONLY to requests that pass this agent.
+// Replaced the previous withInsecureTLS() wrapper which mutated
+// process.env.NODE_TLS_REJECT_UNAUTHORIZED globally (race condition with
+// any other HTTPS call running in parallel).
+const zabbixDispatcher = new Agent({
+  connect: { rejectUnauthorized: false },
+  bodyTimeout: 30_000,
+  headersTimeout: 30_000,
+});
 
 export function isConfigured(): boolean {
   return !!(ZABBIX_URL && ZABBIX_AUTH_TOKEN);
@@ -80,22 +78,21 @@ async function zabbixCall<T>(method: string, params: Record<string, unknown> = {
   };
 
   // Zabbix 7.0+ uses Bearer token in HTTP header (not "auth" in body)
-  const response = await withInsecureTLS(() =>
-    fetch(ZABBIX_URL!, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${ZABBIX_AUTH_TOKEN}`,
-      },
-      body: JSON.stringify(body),
-    })
-  );
+  const response = await undiciFetch(ZABBIX_URL!, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${ZABBIX_AUTH_TOKEN}`,
+    },
+    body: JSON.stringify(body),
+    dispatcher: zabbixDispatcher,
+  });
 
   if (!response.ok) {
     throw new Error(`Zabbix API HTTP ${response.status}: ${response.statusText}`);
   }
 
-  const json = await response.json();
+  const json = await response.json() as { result?: T; error?: { message: string; data: unknown } };
   if (json.error) {
     throw new Error(`Zabbix API: ${json.error.message} - ${json.error.data}`);
   }

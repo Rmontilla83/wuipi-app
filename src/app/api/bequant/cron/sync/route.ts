@@ -14,6 +14,7 @@ import {
   fetchOdooEnrichmentMap,
 } from "@/lib/dal/bequant";
 import { isOdooConfigured } from "@/lib/integrations/odoo";
+import { requireCronAuth } from "@/lib/auth/cron-guard";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -21,11 +22,8 @@ export const maxDuration = 60;
 export async function GET(request: NextRequest) {
   const started = Date.now();
   try {
-    const authHeader = request.headers.get("authorization");
-    const cronSecret = process.env.CRON_SECRET;
-    if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const unauth = requireCronAuth(request);
+    if (unauth) return unauth;
 
     // 1. Fetch from BQN (3 calls)
     const [subs, groups, policies] = await Promise.all([

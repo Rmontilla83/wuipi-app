@@ -5,6 +5,7 @@ import { isConfigured as isTelegramConfigured, sendBriefingToAllChannels } from 
 import { BUSINESS_RULES, getBillingCycleContext } from "@/lib/supervisor/business-rules";
 import { createAdminSupabase } from "@/lib/supabase/server";
 import { saveBriefingToCache } from "@/lib/supervisor/briefing-cache";
+import { requireCronAuth } from "@/lib/auth/cron-guard";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60; // Vercel Pro: dual AI + Telegram sends
@@ -88,12 +89,8 @@ function buildContext(data: any): string {
 
 export async function GET(request: NextRequest) {
   try {
-    // Verify cron secret (Vercel sends this header for cron jobs)
-    const authHeader = request.headers.get("authorization");
-    const cronSecret = process.env.CRON_SECRET;
-    if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const unauth = requireCronAuth(request);
+    if (unauth) return unauth;
 
     if (!isAnyEngineConfigured()) {
       return NextResponse.json({ error: "No AI engine configured" }, { status: 503 });

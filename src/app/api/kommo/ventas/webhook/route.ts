@@ -5,12 +5,21 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { handleSalesbotTrigger } from "@/lib/bot/sales-engine";
+import { checkRateLimit, getClientIP } from "@/lib/utils/rate-limit";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
 
 export async function POST(request: NextRequest) {
   try {
+    // Cheap IP-level rate limit — bounds LLM cost if anyone floods the webhook.
+    // Kommo legitimate traffic is low volume per origin.
+    const ip = getClientIP(request.headers);
+    const rlIp = checkRateLimit(`kommo-webhook:${ip}`, 60, 60_000);
+    if (!rlIp.allowed) {
+      return NextResponse.json({ status: "rate_limited" }, { status: 429 });
+    }
+
     const contentType = request.headers.get("content-type") || "";
     let payload: Record<string, any> = {};
 
@@ -34,6 +43,14 @@ export async function POST(request: NextRequest) {
     if (!leadId) {
       console.log("[Kommo Bot] No se pudo extraer leadId del payload:", JSON.stringify(payload).slice(0, 500));
       return NextResponse.json({ status: "ignored", reason: "no_lead_id" });
+    }
+
+    // Per-lead rate limit — prevents abuse where the same lead triggers the bot
+    // repeatedly (loop, adversarial spam). 10 triggers/min per lead is generous.
+    const rlLead = checkRateLimit(`salesbot:${leadId}`, 10, 60_000);
+    if (!rlLead.allowed) {
+      console.log(`[Kommo Bot] rate-limited lead=${leadId}`);
+      return NextResponse.json({ status: "rate_limited" }, { status: 429 });
     }
 
     console.log("[Kommo Bot] Trigger recibido para lead:", leadId);

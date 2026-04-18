@@ -23,6 +23,29 @@ export function isOdooConfigured(): boolean {
   return !!(ODOO_URL && ODOO_DB && ODOO_USER && ODOO_API_KEY);
 }
 
+/**
+ * Sanitize a user-supplied search string before it reaches an Odoo `ilike` domain.
+ *
+ * - Caps length (prevents sending multi-MB payloads through XML-RPC).
+ * - Strips control characters and SQL-LIKE wildcards (%, _) so the caller
+ *   controls the match semantics, not the user.
+ * - Collapses whitespace.
+ *
+ * NOTE: Odoo's `ilike` runs as Postgres `ILIKE` with `%` bracketing done by the
+ * ORM. User-supplied `%` or `_` inside the value are the only wildcards that
+ * reach the DB — we strip them to keep matches predictable and prevent
+ * adversarial "give me everything" queries.
+ */
+export function sanitizeOdooSearch(value: unknown, maxLen = 80): string {
+  if (value == null) return "";
+  return String(value)
+    .replace(/[\u0000-\u001F\u007F]/g, "")
+    .replace(/[%_]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, maxLen);
+}
+
 interface JsonRpcResponse {
   jsonrpc: "2.0";
   id: number;
@@ -205,9 +228,10 @@ export async function getPendingInvoices(options?: {
 
   // If searching by customer name, first find matching partners
   let partnerIds: number[] | null = null;
-  if (options?.search) {
+  const safeSearch = sanitizeOdooSearch(options?.search);
+  if (safeSearch) {
     const partners = await searchRead("res.partner", [
-      ["name", "ilike", options.search],
+      ["name", "ilike", safeSearch],
     ], { fields: ["id"], limit: 100 });
     partnerIds = partners.map((p: any) => p.id);
 
@@ -313,9 +337,10 @@ export async function getPendingByCustomer(options?: {
     ["state", "=", "draft"],
   ];
 
-  if (options?.search) {
+  const safeSearch = sanitizeOdooSearch(options?.search);
+  if (safeSearch) {
     const partners = await searchRead("res.partner", [
-      ["name", "ilike", options.search],
+      ["name", "ilike", safeSearch],
     ], { fields: ["id"], limit: 200 });
     const pids = partners.map((p: any) => p.id);
     if (pids.length === 0) {
@@ -537,11 +562,11 @@ export async function getMonthlyHistory(months = 6, bcvRate?: number): Promise<M
   const fullEnd = ranges[ranges.length - 1].end;
 
   const [allBankMoves] = await Promise.all([
-    // Bank/cash journal entries in range (actual money collected)
+    // Bank/cash journal entries in range (posted + draft for complete picture)
     searchRead("account.move", [
       ["move_type", "=", "entry"],
       ["journal_id.type", "in", ["bank", "cash"]],
-      ["state", "=", "posted"],
+      ["state", "in", ["posted", "draft"]],
       ["date", ">=", fullStart],
       ["date", "<", fullEnd],
     ], { fields: ["amount_total", "date", "currency_id"], limit: 10000 }),
@@ -596,11 +621,17 @@ export interface JournalPayment {
   count: number;
   total: number;
   currency: string;
+  posted_count: number;
+  posted_total: number;
+  draft_count: number;
+  draft_total: number;
 }
 
 /**
  * Get payment distribution by bank journal for a given month.
  * Payments are account.move entries with journal type bank/cash.
+ * Includes both posted and draft entries — draft = registered but unassigned.
+ * total = posted + draft for a complete picture.
  * Only returns journals with activity (count > 0).
  */
 export async function getPaymentsByJournal(year: number, month: number): Promise<JournalPayment[]> {
@@ -612,11 +643,11 @@ export async function getPaymentsByJournal(year: number, month: number): Promise
   const moves = await searchRead("account.move", [
     ["move_type", "=", "entry"],
     ["journal_id.type", "in", ["bank", "cash"]],
-    ["state", "=", "posted"],
+    ["state", "in", ["posted", "draft"]],
     ["date", ">=", startDate],
     ["date", "<", endDate],
   ], {
-    fields: ["amount_total", "journal_id", "currency_id"],
+    fields: ["amount_total", "journal_id", "currency_id", "state"],
     limit: 5000,
   });
 
@@ -631,11 +662,23 @@ export async function getPaymentsByJournal(year: number, month: number): Promise
         count: 0,
         total: 0,
         currency: m.currency_id?.[1] || "VED",
+        posted_count: 0,
+        posted_total: 0,
+        draft_count: 0,
+        draft_total: 0,
       });
     }
     const j = byJournal.get(jid)!;
+    const amt = m.amount_total || 0;
     j.count++;
-    j.total += m.amount_total || 0;
+    j.total += amt;
+    if (m.state === "draft") {
+      j.draft_count++;
+      j.draft_total += amt;
+    } else {
+      j.posted_count++;
+      j.posted_total += amt;
+    }
   }
 
   return Array.from(byJournal.values())
@@ -825,8 +868,9 @@ export async function getOdooClients(options?: {
   }
 
   // Search filter — search partners first, then filter by ID
-  if (options?.search) {
-    const q = options.search;
+  const safeQ = sanitizeOdooSearch(options?.search);
+  if (safeQ) {
+    const q = safeQ;
     const matchingPartners = await searchRead("res.partner", [
       "|", "|", "|", "|",
       ["name", "ilike", q],
@@ -1320,12 +1364,13 @@ export async function getMikrotikNodeDetail(
     domain.push(["state", "in", ["progress", "suspended"]]);
   }
 
-  if (options?.search) {
+  const safeSvcSearch = sanitizeOdooSearch(options?.search);
+  if (safeSvcSearch) {
     domain.unshift("|", "|", "|");
     domain.push(
-      ["name", "ilike", options.search],
-      ["ip_cpe", "ilike", options.search],
-      ["partner_id.name", "ilike", options.search],
+      ["name", "ilike", safeSvcSearch],
+      ["ip_cpe", "ilike", safeSvcSearch],
+      ["partner_id.name", "ilike", safeSvcSearch],
     );
   }
 

@@ -85,6 +85,80 @@ export async function createPayPalOrder(params: {
   };
 }
 
+/**
+ * Verifies a PayPal webhook signature via PayPal's official verification endpoint.
+ * Docs: https://developer.paypal.com/api/rest/webhooks/rest/#verify-webhook-signature
+ *
+ * Requires env var PAYPAL_WEBHOOK_ID (configure in PayPal dashboard when subscribing).
+ *
+ * Returns { verified: true } on success, or { verified: false, reason } otherwise.
+ * Caller MUST reject on verified=false — unsigned webhook = untrusted source.
+ */
+export async function verifyPayPalWebhook(params: {
+  headers: Headers;
+  rawBody: string;
+}): Promise<{ verified: boolean; reason?: string }> {
+  const webhookId = process.env.PAYPAL_WEBHOOK_ID;
+  if (!webhookId) {
+    return { verified: false, reason: "PAYPAL_WEBHOOK_ID not configured" };
+  }
+
+  // PayPal sends these headers; all required for verification
+  const get = (name: string) => params.headers.get(name) || "";
+  const transmissionId = get("paypal-transmission-id");
+  const transmissionTime = get("paypal-transmission-time");
+  const transmissionSig = get("paypal-transmission-sig");
+  const certUrl = get("paypal-cert-url");
+  const authAlgo = get("paypal-auth-algo");
+
+  if (!transmissionId || !transmissionTime || !transmissionSig || !certUrl || !authAlgo) {
+    return { verified: false, reason: "Missing PayPal signature headers" };
+  }
+
+  // Only accept cert_url from PayPal domains — prevents attacker from hosting
+  // their own cert that technically "verifies" a forged signature.
+  try {
+    const u = new URL(certUrl);
+    if (!u.hostname.endsWith(".paypal.com")) {
+      return { verified: false, reason: "cert_url not from paypal.com" };
+    }
+  } catch {
+    return { verified: false, reason: "Invalid cert_url" };
+  }
+
+  let webhookEvent: unknown;
+  try {
+    webhookEvent = JSON.parse(params.rawBody);
+  } catch {
+    return { verified: false, reason: "Invalid JSON body" };
+  }
+
+  const token = await getAccessToken();
+  const res = await fetch(`${BASE_URL}/v1/notifications/verify-webhook-signature`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      transmission_id: transmissionId,
+      transmission_time: transmissionTime,
+      cert_url: certUrl,
+      auth_algo: authAlgo,
+      transmission_sig: transmissionSig,
+      webhook_id: webhookId,
+      webhook_event: webhookEvent,
+    }),
+  });
+
+  if (!res.ok) {
+    return { verified: false, reason: `verify call HTTP ${res.status}` };
+  }
+  const data = await res.json().catch(() => ({}));
+  if (data.verification_status === "SUCCESS") return { verified: true };
+  return { verified: false, reason: `verification_status=${data.verification_status}` };
+}
+
 export async function capturePayPalOrder(orderId: string): Promise<{
   status: string;
   captureId: string;

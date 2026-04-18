@@ -57,11 +57,18 @@ const GEMINI_MODELS = ["gemini-2.5-flash", "gemini-1.5-flash"];
 
 async function geminiRequest(body: object): Promise<any> {
   let lastError = "";
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) throw new Error("GEMINI_API_KEY missing");
   for (const model of GEMINI_MODELS) {
-    const url = `${GEMINI_API_BASE}/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`;
+    // API key sent as header, NOT query string — query strings leak through
+    // Vercel logs, CDN access logs, and Referer headers.
+    const url = `${GEMINI_API_BASE}/${model}:generateContent`;
     const res = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": apiKey,
+      },
       body: JSON.stringify(body),
     });
     if (res.status === 404) {

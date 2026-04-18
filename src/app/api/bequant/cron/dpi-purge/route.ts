@@ -5,17 +5,15 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { purgeOldMonthlyDpi } from "@/lib/dal/bequant";
+import { requireCronAuth } from "@/lib/auth/cron-guard";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 export async function GET(request: NextRequest) {
   try {
-    const authHeader = request.headers.get("authorization");
-    const cronSecret = process.env.CRON_SECRET;
-    if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const unauth = requireCronAuth(request);
+    if (unauth) return unauth;
 
     const deleted = await purgeOldMonthlyDpi(12);
     return NextResponse.json({ ok: true, deleted });

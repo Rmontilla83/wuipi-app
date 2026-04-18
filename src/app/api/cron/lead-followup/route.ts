@@ -5,9 +5,10 @@
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { createAdminSupabase } from "@/lib/supabase/server";
 import { createMessage } from "@/lib/dal/inbox";
+import { requireCronAuth } from "@/lib/auth/cron-guard";
 
 const FOLLOWUP_1_HOURS = 24;
 const FOLLOWUP_2_HOURS = 48;
@@ -19,7 +20,10 @@ const FOLLOWUP_MESSAGES = [
   "Hola de nuevo! Solo queríamos recordarte que estamos aquí si necesitas internet. ¿Te gustaría que te contacte un asesor directamente?",
 ];
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const unauth = requireCronAuth(request);
+  if (unauth) return unauth;
+
   const sb = createAdminSupabase();
   const now = new Date();
   const stats = {

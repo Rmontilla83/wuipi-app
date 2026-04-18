@@ -9,3 +9,23 @@ next-env.d.ts
 .vercel
 .DS_Store
 .env*.local
+
+# Documentos y data sensible — NUNCA commitear a repo público
+# (Mercantil SDK, documentación interna, datos de prueba con PII)
+*.pdf
+*.docx
+*.xlsx
+*.xlsm
+*.xls
+*.zip
+mercantil-diagnostic-*.json
+
+# Scripts one-off que usan tokens productivos (Kommo, etc.)
+scripts/extract-kommo-*.ts
+
+# Robot / SDK externos copiados al workspace
+robot*/
+wuipi-mercantil-sdk*/
+
+# Artefactos Supabase local
+supabase/.temp/

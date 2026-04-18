@@ -4,6 +4,7 @@ import { chatWithSupervisor, isAnyEngineConfigured } from "@/lib/ai/model-router
 import { gatherBusinessData } from "@/lib/supervisor/gather-data";
 import { BUSINESS_RULES, getBillingCycleContext } from "@/lib/supervisor/business-rules";
 import { requirePermission } from "@/lib/auth/check-permission";
+import { checkRateLimit } from "@/lib/utils/rate-limit";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60; // Vercel Pro: 60s for AI + data gathering
@@ -13,6 +14,16 @@ export async function POST(request: NextRequest) {
     const caller = await requirePermission("supervisor_ia", "read");
     if (!caller) return NextResponse.json({ error: "Sin permisos" }, { status: 403 });
 
+    // Rate limit per user — prevents economic DoS against Claude/Gemini.
+    // Supervisor is an executive tool, 5 msgs/min is ample.
+    const rl = checkRateLimit(`supervisor-chat:${caller.id}`, 5, 60_000);
+    if (!rl.allowed) {
+      return NextResponse.json(
+        { error: "Demasiadas consultas. Esperá un momento y reintenta." },
+        { status: 429 }
+      );
+    }
+
     if (!isAnyEngineConfigured()) {
       return NextResponse.json(
         { content: "Supervisor IA no configurado. Agregar GEMINI_API_KEY o ANTHROPIC_API_KEY.", engine: "gemini" },
@@ -20,10 +31,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { message, history } = await request.json();
-    if (!message || typeof message !== "string") {
-      return apiError("Message required", 400);
-    }
+    const body = await request.json();
+    const rawMessage = typeof body?.message === "string" ? body.message : "";
+    const history = Array.isArray(body?.history) ? body.history : [];
+    const message = rawMessage.slice(0, 4000);
+    if (!message) return apiError("Message required", 400);
 
     // 1. Gather business data
     let businessData: any = {};

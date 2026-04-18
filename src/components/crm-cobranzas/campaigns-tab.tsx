@@ -7,7 +7,7 @@ import {
   CheckCircle2, Clock, AlertCircle, FileSpreadsheet, ExternalLink,
   ChevronLeft, RotateCcw, Calendar, Trash2, Pencil, Save, X,
 } from "lucide-react";
-import * as XLSX from "xlsx";
+import { parseXlsxBuffer } from "@/lib/utils/parse-xlsx";
 
 // ---------- Types ----------
 
@@ -394,10 +394,7 @@ function CreateCampaignView({
     const reader = new FileReader();
     reader.onload = async (evt) => {
       try {
-        const data = new Uint8Array(evt.target?.result as ArrayBuffer);
-        const wb = XLSX.read(data, { type: "array" });
-        const ws = wb.Sheets[wb.SheetNames[0]];
-        const jsonRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws);
+        const jsonRows = await parseXlsxBuffer(evt.target?.result as ArrayBuffer);
 
         const parsed: UploadRow[] = [];
         const errs: string[] = [];

@@ -5,7 +5,7 @@ import { NextRequest } from "next/server";
 import { apiError, apiServerError } from "@/lib/api-helpers";
 import { requirePermission } from "@/lib/auth/check-permission";
 import { getCampaign, getItemsByCampaign } from "@/lib/dal/collection-campaigns";
-import * as XLSX from "xlsx";
+import ExcelJS from "exceljs";
 
 export async function POST(request: NextRequest) {
   try {
@@ -25,45 +25,40 @@ export async function POST(request: NextRequest) {
       return apiError("No hay pagos confirmados para exportar", 400);
     }
 
-    // Build rows — Odoo 18 Asiento Contable template
-    const rows = paidItems.map((item) => {
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet("Asiento Contable");
+
+    ws.columns = [
+      { header: "date", key: "date", width: 12 },
+      { header: "journal_id", key: "journal_id", width: 24 },
+      { header: "Memo", key: "memo", width: 30 },
+      { header: "amount", key: "amount", width: 14 },
+      { header: "state", key: "state", width: 10 },
+      { header: "Moneda", key: "moneda", width: 8 },
+      { header: "Cliente/proveedor", key: "cliente", width: 35 },
+      { header: "Tasa de Imputación", key: "tasa", width: 18 },
+    ];
+
+    for (const item of paidItems) {
       const isStripe = item.payment_method === "stripe";
       const isBs = item.payment_method === "debito_inmediato" || item.payment_method === "transferencia";
-
-      return {
+      ws.addRow({
         date: item.paid_at
           ? new Date(item.paid_at).toISOString().split("T")[0]
           : new Date().toISOString().split("T")[0],
         journal_id: isStripe ? "Stripe USD" : "Banco Mercantil 3031",
-        Memo: item.mercantil_reference || item.payment_reference || item.stripe_session_id || "",
+        memo: item.mercantil_reference || item.payment_reference || item.stripe_session_id || "",
         amount: isStripe
           ? Number(item.amount_usd)
           : (item.amount_bss ? Number(item.amount_bss) : Number(item.amount_usd)),
         state: "Borrador",
-        Moneda: isStripe ? "USD" : "VED",
-        "Cliente/proveedor": item.customer_name,
-        "Tasa de Imputación": isBs && item.bcv_rate ? Number(item.bcv_rate) : "",
-      };
-    });
+        moneda: isStripe ? "USD" : "VED",
+        cliente: item.customer_name,
+        tasa: isBs && item.bcv_rate ? Number(item.bcv_rate) : "",
+      });
+    }
 
-    const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.json_to_sheet(rows);
-
-    // Column widths
-    ws["!cols"] = [
-      { wch: 12 },  // date
-      { wch: 24 },  // journal_id
-      { wch: 30 },  // Memo
-      { wch: 14 },  // amount
-      { wch: 10 },  // state
-      { wch: 8 },   // Moneda
-      { wch: 35 },  // Cliente/proveedor
-      { wch: 18 },  // Tasa de Imputación
-    ];
-
-    XLSX.utils.book_append_sheet(wb, ws, "Asiento Contable");
-
-    const buffer = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
+    const buffer = await wb.xlsx.writeBuffer();
     const today = new Date().toISOString().split("T")[0];
 
     return new Response(buffer, {
