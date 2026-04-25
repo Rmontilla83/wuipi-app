@@ -13,7 +13,7 @@ export async function middleware(request: NextRequest) {
     "/api/mercantil/status/",
     "/api/cobranzas/webhook/",
     "/api/cobranzas/bcv",
-    "/api/cobranzas/pay",       // includes /pay and /pay/confirm
+    "/api/cobranzas/pay",       // includes /pay, /pay/confirm, /pay/c2p-confirm
     "/api/cobranzas/wpy_",      // public payment tokens
     "/api/pagar/",              // Public client payment endpoints
     "/pagar/cliente/",          // Public client payment page

@@ -181,6 +181,49 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    // ---- C2P Pago Movil (Paso 1: solicitar OTP) ----
+    // Mercantil envia un SMS con el codigo (clave de compra) al telefono del cliente.
+    // El cliente ingresa el codigo en el portal y se confirma via /api/cobranzas/pay/c2p-confirm.
+    if (method === "c2p") {
+      if (!parsed.data.c2p) {
+        return apiError("Faltan datos de C2P (cedula, telefono, banco)", 400);
+      }
+      const { cedula, phone, bankCode } = parsed.data.c2p;
+      try {
+        const sdk = new MercantilSDK();
+        const ip = getClientIP(request.headers) || "0.0.0.0";
+        const ua = request.headers.get("user-agent") || "WUIPI-Portal";
+        const result = await sdk.requestC2PKey(
+          {
+            destinationId: cedula,
+            destinationMobile: phone,
+          },
+          { ipaddress: ip, browser_agent: ua }
+        );
+        // Persist what we'll need at confirm-time so the client only sends the OTP.
+        await updateItem(item.id, {
+          metadata: {
+            ...((item.metadata as Record<string, unknown>) || {}),
+            c2p: { cedula, phone, bankCode, key_reference: result.key_reference || null, requested_at: new Date().toISOString() },
+          },
+        });
+        return apiSuccess({
+          method: "c2p",
+          step: "otp_requested",
+          message: "Te enviamos una clave por SMS. Ingresala para completar el pago.",
+          amount_bss: amountBss,
+          bcv_rate: bcv.usd_to_bs,
+        });
+      } catch (err: unknown) {
+        const e = err as { message?: string; details?: Record<string, unknown> };
+        console.error("[Pay] C2P key request error:", e.message, e.details || {});
+        return apiError(
+          e.message || "No se pudo solicitar la clave de pago movil. Verifica los datos.",
+          502
+        );
+      }
+    }
+
     // ---- Transferencia — no redirect, just info ----
     if (method === "transferencia") {
       return apiSuccess({

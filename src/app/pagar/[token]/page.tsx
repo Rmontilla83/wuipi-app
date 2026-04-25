@@ -49,7 +49,9 @@ interface BCVData {
   source: string;
 }
 
-type PaymentMethod = "debito_inmediato" | "transferencia" | "stripe" | "paypal";
+type PaymentMethod = "debito_inmediato" | "transferencia" | "stripe" | "paypal" | "c2p";
+
+type C2PStep = "form" | "otp" | "processing";
 
 // Bancos venezolanos (códigos SUDEBAN) — dropdown al confirmar transferencia.
 // El banco origen permite verificación automática contra Mercantil transfer-search.
@@ -97,6 +99,13 @@ export default function PagarPage() {
   const [originBank, setOriginBank] = useState("");
   const [confirmingSent, setConfirmingSent] = useState(false);
   const [autoVerifiedMsg, setAutoVerifiedMsg] = useState<string | null>(null);
+  // C2P wizard state
+  const [c2pStep, setC2pStep] = useState<C2PStep>("form");
+  const [c2pCedula, setC2pCedula] = useState("");
+  const [c2pPhone, setC2pPhone] = useState("");
+  const [c2pBank, setC2pBank] = useState("");
+  const [c2pOtp, setC2pOtp] = useState("");
+  const [c2pInfo, setC2pInfo] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
   const [pollingTimedOut, setPollingTimedOut] = useState(false);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -179,6 +188,57 @@ export default function PagarPage() {
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error al procesar");
+    }
+    setProcessing(false);
+  };
+
+  // C2P paso 1: solicita el OTP a Mercantil. Cliente recibe SMS con la clave.
+  const handleC2PRequestOtp = async () => {
+    setProcessing(true);
+    setError("");
+    setC2pInfo(null);
+    try {
+      const res = await fetch("/api/cobranzas/pay", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          token,
+          method: "c2p",
+          c2p: { cedula: c2pCedula, phone: c2pPhone, bankCode: c2pBank },
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Error solicitando clave");
+      setC2pInfo(json.message || "Te enviamos una clave por SMS.");
+      setC2pStep("otp");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al solicitar clave");
+    }
+    setProcessing(false);
+  };
+
+  // C2P paso 2: confirma el cobro con el OTP. Aprobado → pago marcado y notificacion.
+  const handleC2PConfirm = async () => {
+    setProcessing(true);
+    setError("");
+    try {
+      const res = await fetch("/api/cobranzas/pay/c2p-confirm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          token,
+          cedula: c2pCedula,
+          phone: c2pPhone,
+          bankCode: c2pBank,
+          otp: c2pOtp,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Error confirmando pago");
+      // Refrescar para mostrar pantalla de "Pago recibido"
+      await fetchData();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al confirmar pago");
     }
     setProcessing(false);
   };
@@ -465,6 +525,22 @@ export default function PagarPage() {
             accent="#03318C"
           />
 
+          {/* Pago Movil C2P */}
+          <PaymentMethodCard
+            icon={<Smartphone className="w-5 h-5" />}
+            title="Pago Móvil"
+            subtitle={`Bs. ${amountBss > 0 ? amountBss.toLocaleString("es-VE", { minimumFractionDigits: 2 }) : "..."}`}
+            description="Paga desde tu banco con tu teléfono (C2P)"
+            selected={selectedMethod === "c2p"}
+            onClick={() => {
+              setSelectedMethod("c2p");
+              setC2pStep("form");
+              setC2pInfo(null);
+              setError("");
+            }}
+            accent="#10B981"
+          />
+
           {/* Transferencia */}
           <PaymentMethodCard
             icon={<Building2 className="w-5 h-5" />}
@@ -513,6 +589,24 @@ export default function PagarPage() {
             onConfirm={handleConfirmTransfer}
             copied={copied}
             onCopy={copyToClipboard}
+          />
+        ) : selectedMethod === "c2p" ? (
+          <C2PWizard
+            step={c2pStep}
+            cedula={c2pCedula}
+            setCedula={setC2pCedula}
+            phone={c2pPhone}
+            setPhone={setC2pPhone}
+            bank={c2pBank}
+            setBank={setC2pBank}
+            otp={c2pOtp}
+            setOtp={setC2pOtp}
+            info={c2pInfo}
+            processing={processing}
+            amountBss={amountBss}
+            onRequestOtp={handleC2PRequestOtp}
+            onConfirm={handleC2PConfirm}
+            onBack={() => { setC2pStep("form"); setC2pInfo(null); setError(""); }}
           />
         ) : selectedMethod ? (
           <div className="sticky bottom-0 left-0 right-0 bg-[#0a0a1a]/95 backdrop-blur-lg py-4 -mx-4 px-4 border-t border-white/5 sm:static sm:bg-transparent sm:backdrop-blur-none sm:py-0 sm:mx-0 sm:px-0 sm:border-0">
@@ -761,6 +855,126 @@ function TransferDetails({
   );
 }
 
+function C2PWizard({
+  step,
+  cedula,
+  setCedula,
+  phone,
+  setPhone,
+  bank,
+  setBank,
+  otp,
+  setOtp,
+  info,
+  processing,
+  amountBss,
+  onRequestOtp,
+  onConfirm,
+  onBack,
+}: {
+  step: C2PStep;
+  cedula: string;
+  setCedula: (v: string) => void;
+  phone: string;
+  setPhone: (v: string) => void;
+  bank: string;
+  setBank: (v: string) => void;
+  otp: string;
+  setOtp: (v: string) => void;
+  info: string | null;
+  processing: boolean;
+  amountBss: number;
+  onRequestOtp: () => void;
+  onConfirm: () => void;
+  onBack: () => void;
+}) {
+  const formValid = /^\d{6,9}$/.test(cedula) && /^04\d{9}$/.test(phone) && bank.length === 4;
+  const otpValid = /^\d{4,8}$/.test(otp);
+
+  if (step === "form") {
+    return (
+      <div className="bg-white/[0.03] rounded-xl p-4 border border-white/5 space-y-3">
+        <h4 className="text-white text-sm font-semibold">Pago Móvil C2P</h4>
+        <p className="text-gray-500 text-[11px] leading-relaxed">
+          Ingresá tu cédula, el teléfono asociado a tu banco y selecciona tu banco.
+          Recibirás una clave por SMS para autorizar el pago de
+          <span className="text-emerald-400 font-semibold"> Bs. {amountBss.toLocaleString("es-VE", { minimumFractionDigits: 2 })}</span>.
+        </p>
+        <input
+          inputMode="numeric"
+          value={cedula}
+          onChange={(e) => setCedula(e.target.value.replace(/\D/g, "").slice(0, 9))}
+          placeholder="Cédula (sin V, solo números)"
+          className="w-full px-4 py-3 rounded-xl bg-white/[0.03] border border-white/10 text-white text-sm placeholder-gray-600 focus:border-emerald-400/50 focus:outline-none"
+        />
+        <input
+          inputMode="numeric"
+          value={phone}
+          onChange={(e) => setPhone(e.target.value.replace(/\D/g, "").slice(0, 11))}
+          placeholder="Teléfono (04XXXXXXXXX)"
+          className="w-full px-4 py-3 rounded-xl bg-white/[0.03] border border-white/10 text-white text-sm placeholder-gray-600 focus:border-emerald-400/50 focus:outline-none"
+        />
+        <select
+          value={bank}
+          onChange={(e) => setBank(e.target.value)}
+          className="w-full px-4 py-3 rounded-xl bg-white/[0.03] border border-white/10 text-white text-sm focus:border-emerald-400/50 focus:outline-none"
+        >
+          <option value="">Tu banco…</option>
+          {BANCOS_VENEZUELA.map(b => (
+            <option key={b.code} value={b.code}>{b.name}</option>
+          ))}
+        </select>
+        <button
+          onClick={onRequestOtp}
+          disabled={processing || !formValid}
+          className="w-full py-3.5 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-600 text-white font-semibold text-sm transition-all hover:shadow-lg active:scale-[0.98] disabled:opacity-50"
+        >
+          {processing ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : "Solicitar clave por SMS"}
+        </button>
+      </div>
+    );
+  }
+
+  // step === "otp"
+  return (
+    <div className="bg-white/[0.03] rounded-xl p-4 border border-white/5 space-y-3">
+      <h4 className="text-white text-sm font-semibold">Ingresá la clave</h4>
+      {info && (
+        <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
+          <p className="text-emerald-300 text-xs">{info}</p>
+        </div>
+      )}
+      <p className="text-gray-500 text-[11px] leading-relaxed">
+        Tu banco te envió un SMS con la clave de compra. Ingresala para confirmar el pago.
+      </p>
+      <input
+        inputMode="numeric"
+        value={otp}
+        onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 8))}
+        placeholder="Clave (ej: 1234)"
+        autoFocus
+        className="w-full px-4 py-3 rounded-xl bg-white/[0.03] border border-white/10 text-white text-center text-lg font-mono tracking-widest placeholder-gray-600 focus:border-emerald-400/50 focus:outline-none"
+      />
+      <div className="flex gap-2">
+        <button
+          onClick={onBack}
+          disabled={processing}
+          className="flex-1 py-3 rounded-xl border border-white/10 text-gray-400 text-sm font-medium hover:bg-white/[0.02] disabled:opacity-50"
+        >
+          Atrás
+        </button>
+        <button
+          onClick={onConfirm}
+          disabled={processing || !otpValid}
+          className="flex-[2] py-3.5 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-600 text-white font-semibold text-sm transition-all hover:shadow-lg active:scale-[0.98] disabled:opacity-50"
+        >
+          {processing ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : `Pagar Bs. ${amountBss.toLocaleString("es-VE", { minimumFractionDigits: 2 })}`}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function DetailRow({
   label,
   value,
@@ -827,6 +1041,10 @@ function PaidConfirmation({ data, autoVerifiedMsg }: { data: PaymentData; autoVe
                 ? "Débito Inmediato"
                 : data.payment_method === "transferencia"
                 ? "Transferencia Bancaria"
+                : data.payment_method === "c2p"
+                ? "Pago Móvil C2P"
+                : data.payment_method === "paypal"
+                ? "PayPal"
                 : "Tarjeta Internacional"}
             </span>
           </div>

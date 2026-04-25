@@ -258,17 +258,31 @@ export const collectionUploadSchema = z.object({
   rows: z.array(collectionUploadRowSchema).min(1, "Debe incluir al menos un registro"),
 });
 
-export const collectionPaySchema = z.object({
-  token: z.string().regex(/^wpy_[a-f0-9]{16,64}$/, "Token de pago inválido"),
-  method: z.enum(["debito_inmediato", "transferencia", "stripe", "paypal"], { message: "Método de pago inválido" }),
-});
-
 // Venezuelan bank codes — Mercantil 4-digit SUDEBAN codes.
 const VENEZUELAN_BANK_CODES = [
   "0102","0104","0105","0108","0114","0115","0116","0128","0134",
   "0137","0138","0146","0151","0156","0157","0163","0166","0168",
   "0169","0171","0172","0173","0174","0175","0177","0191",
 ] as const;
+
+export const collectionPaySchema = z.object({
+  token: z.string().regex(/^wpy_[a-f0-9]{16,64}$/, "Token de pago inválido"),
+  method: z.enum(["debito_inmediato", "transferencia", "stripe", "paypal", "c2p"], { message: "Método de pago inválido" }),
+  // Solo requeridos cuando method === "c2p" (paso 1: solicitar clave OTP)
+  c2p: z.object({
+    cedula: z.string().regex(/^\d{6,9}$/, "Cédula debe tener 6-9 dígitos"),
+    phone: z.string().regex(/^04\d{9}$/, "Teléfono debe tener formato 04XXXXXXXXX"),
+    bankCode: z.enum(VENEZUELAN_BANK_CODES, { message: "Banco inválido" }),
+  }).optional(),
+});
+
+export const collectionC2PConfirmSchema = z.object({
+  token: z.string().regex(/^wpy_[a-f0-9]{16,64}$/, "Token de pago inválido"),
+  cedula: z.string().regex(/^\d{6,9}$/, "Cédula debe tener 6-9 dígitos"),
+  phone: z.string().regex(/^04\d{9}$/, "Teléfono debe tener formato 04XXXXXXXXX"),
+  bankCode: z.enum(VENEZUELAN_BANK_CODES, { message: "Banco inválido" }),
+  otp: z.string().regex(/^\d{4,8}$/, "Clave OTP debe ser numérica de 4-8 dígitos"),
+});
 
 export const collectionConfirmTransferSchema = z.object({
   token: z.string().regex(/^wpy_[a-f0-9]{16,64}$/, "Token de pago inválido"),
