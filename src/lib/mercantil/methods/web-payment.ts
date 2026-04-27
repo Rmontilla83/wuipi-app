@@ -13,7 +13,7 @@ import type {
 } from '../types';
 import { encryptTransactionData } from '../core/crypto';
 import { getProductCredentials } from '../core/config';
-import { generatePaymentToken } from '../utils/helpers';
+import { generatePaymentToken, MERCANTIL_INVOICE_NUMBER_MAX_LENGTH } from '../utils/helpers';
 
 /**
  * Builds the transactiondata JSON per Mercantil v3.1 spec.
@@ -25,6 +25,14 @@ function buildTransactionData(
   config: MercantilConfig
 ): Record<string, unknown> {
   const creds = getProductCredentials(config, 'web_button');
+
+  // Mercantil enforces a 12-char max on invoiceNumber.number (root cause of
+  // production error 821, confirmed by support 2026-04-27).
+  if (params.invoiceNumber.number.length > MERCANTIL_INVOICE_NUMBER_MAX_LENGTH) {
+    throw new Error(
+      `[MercantilSDK] invoiceNumber.number exceeds ${MERCANTIL_INVOICE_NUMBER_MAX_LENGTH} chars: "${params.invoiceNumber.number}" (${params.invoiceNumber.number.length})`
+    );
+  }
 
   const data: Record<string, unknown> = {
     amount: params.amount,

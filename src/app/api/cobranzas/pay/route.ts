@@ -4,7 +4,7 @@ export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { apiSuccess, apiError, apiServerError } from "@/lib/api-helpers";
 import { validate, collectionPaySchema } from "@/lib/validations/schemas";
-import { getItemsByToken, updateItem } from "@/lib/dal/collection-campaigns";
+import { getItemsByToken, updateItem, ensureMercantilInvoiceId } from "@/lib/dal/collection-campaigns";
 import { fetchBCVRate, convertUsdToBs } from "@/lib/integrations/bcv";
 import { MercantilSDK } from "@/lib/mercantil";
 import { checkRateLimit, getClientIP } from "@/lib/utils/rate-limit";
@@ -57,13 +57,17 @@ export async function POST(request: NextRequest) {
         const today = new Date().toISOString().split("T")[0];
         const dueDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
 
+        // Mercantil caps invoiceNumber.number at 12 chars (root cause of error 821).
+        // Persist the short ID so the webhook can map back to the payment_token.
+        const mercantilInvoiceId = await ensureMercantilInvoiceId(item.id, item.payment_token);
+
         const result = sdk.createPayment({
           amount: amountBss,
           customerName: item.customer_name,
           returnUrl: `${getAppUrl()}/pagar/${token}?status=callback`,
           currency: "ves",
           invoiceNumber: {
-            number: item.invoice_number || token,
+            number: mercantilInvoiceId,
             invoiceCreationDate: today,
             invoiceCancelledDate: dueDate,
           },

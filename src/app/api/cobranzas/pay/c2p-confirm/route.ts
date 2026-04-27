@@ -6,7 +6,7 @@ export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { apiSuccess, apiError, apiServerError } from "@/lib/api-helpers";
 import { validate, collectionC2PConfirmSchema } from "@/lib/validations/schemas";
-import { getItemsByToken, markItemPaid } from "@/lib/dal/collection-campaigns";
+import { getItemsByToken, markItemPaid, ensureMercantilInvoiceId } from "@/lib/dal/collection-campaigns";
 import { fetchBCVRate, convertUsdToBs } from "@/lib/integrations/bcv";
 import { MercantilSDK } from "@/lib/mercantil";
 import { checkRateLimit, getClientIP } from "@/lib/utils/rate-limit";
@@ -42,6 +42,9 @@ export async function POST(request: NextRequest) {
       return apiError("Pago Movil C2P no esta disponible en este momento", 503);
     }
 
+    // Mercantil caps invoiceNumber at 12 chars (Boton Web + C2P, same constraint).
+    const mercantilInvoiceId = await ensureMercantilInvoiceId(item.id, item.payment_token);
+
     let reference: string;
     try {
       const result = await sdk.createC2PPayment(
@@ -53,7 +56,7 @@ export async function POST(request: NextRequest) {
           originMobile,
           // destinationMobile = telefono del CLIENTE que paga
           destinationMobile: phone,
-          invoiceNumber: item.invoice_number || token,
+          invoiceNumber: mercantilInvoiceId,
           purchaseKey: otp,
         },
         { ipaddress: ip || "0.0.0.0", browser_agent: ua }

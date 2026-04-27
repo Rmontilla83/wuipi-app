@@ -13,6 +13,30 @@ export function generateInvoiceNumber(prefix = 'WUIPI'): string {
   return prefix + '-' + ts + '-' + rand;
 }
 
+/** Mercantil enforces a 12-char max on `invoiceNumber.number` (Boton Web + C2P). */
+export const MERCANTIL_INVOICE_NUMBER_MAX_LENGTH = 12;
+
+/**
+ * Derives a 12-char Mercantil-compatible invoice ID from a wpy_* payment token.
+ * Format: "WPY-" + 8 uppercase hex chars from the token (12 chars total).
+ *
+ * `sliceIndex` lets the DAL retry with a different 4-hex-char window on the
+ * extremely rare UNIQUE collision (~1e-4 over the lifetime of the system).
+ * Token has 64 hex chars → 14 disjoint 4-hex slices available before the
+ * 8-char window runs off the end.
+ */
+export function mercantilShortInvoiceId(paymentToken: string, sliceIndex = 0): string {
+  const hex = paymentToken.replace(/^wpy_/, '');
+  const start = sliceIndex * 4;
+  const slice = hex.substring(start, start + 8);
+  if (slice.length < 8) {
+    throw new Error(
+      `[Mercantil] Token too short to derive invoice ID at slice ${sliceIndex} (token=${paymentToken.length} chars)`
+    );
+  }
+  return 'WPY-' + slice.toUpperCase();
+}
+
 /** Format amount for Mercantil API (2 decimal places, string) */
 export function formatAmount(amount: number): string {
   return amount.toFixed(2);

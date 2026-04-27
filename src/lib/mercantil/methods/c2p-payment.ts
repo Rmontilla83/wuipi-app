@@ -11,6 +11,7 @@ import type {
 import { encryptField } from '../core/crypto';
 import { getProductCredentials, getMerchantIdentify } from '../core/config';
 import { apiRequest } from '../core/http';
+import { MERCANTIL_INVOICE_NUMBER_MAX_LENGTH } from '../utils/helpers';
 
 /**
  * Initiates a C2P (Commerce to Person) mobile payment.
@@ -36,6 +37,14 @@ export async function createC2PPayment(
   endpoints: MercantilEndpoints
 ): Promise<C2PPaymentResponse> {
   const creds = getProductCredentials(config, 'c2p_payment');
+
+  // Mercantil enforces a 12-char max on invoice_number across products.
+  if (params.invoiceNumber.length > MERCANTIL_INVOICE_NUMBER_MAX_LENGTH) {
+    throw new Error(
+      `[MercantilSDK] invoiceNumber exceeds ${MERCANTIL_INVOICE_NUMBER_MAX_LENGTH} chars: "${params.invoiceNumber}" (${params.invoiceNumber.length})`
+    );
+  }
+
   const bankId = typeof params.destinationBankId === 'string'
     ? parseInt(params.destinationBankId, 10) || params.destinationBankId
     : params.destinationBankId;

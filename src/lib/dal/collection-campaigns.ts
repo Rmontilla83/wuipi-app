@@ -4,6 +4,7 @@
 
 import { createAdminSupabase } from "@/lib/supabase/server";
 import crypto from "crypto";
+import { mercantilShortInvoiceId } from "@/lib/mercantil/utils/helpers";
 
 // ---------- Types ----------
 
@@ -40,6 +41,7 @@ export interface CollectionItem {
   status: "pending" | "sent" | "viewed" | "paid" | "failed" | "expired" | "conciliating";
   stripe_session_id: string | null;
   mercantil_reference: string | null;
+  mercantil_invoice_id: string | null;
   metadata: Record<string, unknown>;
   created_at: string;
   paid_at: string | null;
@@ -152,6 +154,59 @@ export async function getItemsByToken(token: string): Promise<CollectionItem | n
     .single();
   if (error && error.code !== "PGRST116") throw error;
   return data;
+}
+
+/**
+ * Look up a collection_item by its 12-char Mercantil short invoice ID
+ * (e.g. "WPY-A8DA0EEE"). Used by the Mercantil webhook to map
+ * `payload.invoice_number` back to the long payment_token.
+ */
+export async function getItemByMercantilInvoiceId(
+  invoiceId: string
+): Promise<CollectionItem | null> {
+  const sb = createAdminSupabase();
+  const { data, error } = await sb
+    .from("collection_items")
+    .select("*")
+    .eq("mercantil_invoice_id", invoiceId)
+    .single();
+  if (error && error.code !== "PGRST116") throw error;
+  return data;
+}
+
+/**
+ * Lazily assigns a 12-char Mercantil short invoice ID (WPY-XXXXXXXX) to the
+ * item. Idempotent: returns the existing ID if already set. Deterministic
+ * derivation from the payment token; on the rare UNIQUE collision, retries
+ * with the next 4-hex-char window of the token.
+ */
+export async function ensureMercantilInvoiceId(
+  itemId: string,
+  paymentToken: string
+): Promise<string> {
+  const sb = createAdminSupabase();
+  const { data: current, error: readErr } = await sb
+    .from("collection_items")
+    .select("mercantil_invoice_id")
+    .eq("id", itemId)
+    .single();
+  if (readErr) throw readErr;
+  if (current?.mercantil_invoice_id) return current.mercantil_invoice_id as string;
+
+  const MAX_ATTEMPTS = 14;
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    const candidate = mercantilShortInvoiceId(paymentToken, attempt);
+    const { error: upErr } = await sb
+      .from("collection_items")
+      .update({ mercantil_invoice_id: candidate })
+      .eq("id", itemId);
+    if (!upErr) return candidate;
+    if (upErr.code !== "23505") throw upErr;
+    // 23505 = UNIQUE violation → another item already owns this ID, try next slice
+  }
+  throw new Error(
+    `[Mercantil] Could not assign short invoice ID for item ${itemId} after ${MAX_ATTEMPTS} attempts`
+  );
 }
 
 export async function getItemsByCampaign(
