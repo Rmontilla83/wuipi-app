@@ -91,7 +91,11 @@ export async function POST(request: NextRequest) {
             invoiceCreationDate: today,
             invoiceCancelledDate: dueDate,
           },
-          paymentConcepts: ["b2b", "c2p", "tdd"],
+          // Solo "b2b" (Debito Inmediato puro) — c2p/tdd unificados pueden no
+          // estar habilitados en prod para este merchant, lo que genera 7000/7008
+          // en /v1/gateway/login. Si Mercantil confirma habilitacion completa,
+          // volver a ["b2b","c2p","tdd"].
+          paymentConcepts: ["b2b"],
         });
 
         return apiSuccess({
