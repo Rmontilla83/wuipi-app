@@ -52,14 +52,34 @@ export async function POST(request: NextRequest) {
 
     // ---- Débito Inmediato (Mercantil Web Button) ----
     if (method === "debito_inmediato") {
+      // Mercantil caps invoiceNumber.number at 12 chars (root cause of error 821).
+      // Persist the short ID so the webhook can map back to the payment_token.
+      // Run OUTSIDE the SDK try so DB errors get distinct logging.
+      let mercantilInvoiceId: string;
+      try {
+        mercantilInvoiceId = await ensureMercantilInvoiceId(item.id, item.payment_token);
+      } catch (err: unknown) {
+        const e = err as { message?: string; code?: string; details?: unknown };
+        console.error("[Pay] ensureMercantilInvoiceId failed:", {
+          message: e.message,
+          code: e.code,
+          details: e.details,
+          itemId: item.id,
+        });
+        const isMissingColumn =
+          e.code === "42703" || (e.message || "").toLowerCase().includes("mercantil_invoice_id");
+        return apiError(
+          isMissingColumn
+            ? "La migracion 014 (mercantil_invoice_id) no esta aplicada en Supabase. Aplicala y reintenta."
+            : `Error preparando ID de factura: ${e.message || "desconocido"}`,
+          500
+        );
+      }
+
       try {
         const sdk = new MercantilSDK();
         const today = new Date().toISOString().split("T")[0];
         const dueDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
-
-        // Mercantil caps invoiceNumber.number at 12 chars (root cause of error 821).
-        // Persist the short ID so the webhook can map back to the payment_token.
-        const mercantilInvoiceId = await ensureMercantilInvoiceId(item.id, item.payment_token);
 
         const result = sdk.createPayment({
           amount: amountBss,
@@ -79,11 +99,18 @@ export async function POST(request: NextRequest) {
           redirect_url: result.redirectUrl,
           amount_bss: amountBss,
           bcv_rate: bcv.usd_to_bs,
+          mercantil_invoice_id: mercantilInvoiceId,
         });
-      } catch (err) {
-        console.error("[Pay] Mercantil SDK error:", err);
+      } catch (err: unknown) {
+        const e = err as { message?: string; details?: unknown };
+        console.error("[Pay] Mercantil SDK error:", {
+          message: e.message,
+          details: e.details,
+          itemId: item.id,
+          mercantilInvoiceId,
+        });
         return apiError(
-          "Error al generar enlace de Mercantil. Intente con otro método de pago.",
+          `Error al generar enlace de Mercantil: ${e.message || "desconocido"}. Intente con otro metodo.`,
           500
         );
       }
