@@ -74,12 +74,15 @@ export function createWebPayment(
   const encryptedData = encryptTransactionData(rawData, creds.secretKey);
   const encodedData = encodeURIComponent(encryptedData);
 
-  // Path de la SPA Angular del Boton Web en produccion: /select-payment-method
-  // (la doc v3.1 muestra "/mercantil/botondepagos" pero ese path NO existe en
-  // botondepagos.mercantilbanco.com — solo en el dominio sandbox de IBM Cloud).
-  // Las rutas reales en prod son: select-payment-method, b2b, c2p, tdd, error.
+  // En produccion la URL correcta es la base sin path adicional. Mercantil
+  // confirmo (2026-04-29) que NO debe llevar "/select-payment-method"; el
+  // SPA hace el routing internamente a partir de la URL base + query params.
+  // El path "/select-payment-method" provenia del sandbox y rompia la SPA en prod.
+  const base = endpoints.webPaymentButton.endsWith('/')
+    ? endpoints.webPaymentButton
+    : `${endpoints.webPaymentButton}/`;
   const redirectUrl =
-    `${endpoints.webPaymentButton}/select-payment-method` +
+    `${base}` +
     `?merchantid=${creds.merchantId}` +
     `&integratorid=${config.integratorId}` +
     `&transactiondata=${encodedData}`;
