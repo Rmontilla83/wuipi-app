@@ -341,10 +341,44 @@ export async function POST(request: NextRequest) {
             processingError = "No se encontro item para invoice " + normalized.invoice_number;
             console.warn("[Mercantil Alias] " + processingError);
           }
-        } else if (normalized.status !== "approved") {
-          // No-approved: solo loggea, no toca items
+        } else if (normalized.status !== "approved" && normalized.invoice_number) {
+          // Banco rechazo el pago. Marcar el item como failed para que la UI
+          // muestre el mensaje de error inmediato en vez de esperar 5 minutos
+          // de polling sin novedad.
+          let item = await getItemByMercantilInvoiceId(normalized.invoice_number);
+          if (!item) {
+            const { data: items } = await supabase
+              .from("collection_items")
+              .select("*")
+              .or(`invoice_number.eq.${normalized.invoice_number},payment_token.eq.${normalized.invoice_number}`)
+              .in("status", ["pending", "sent", "viewed"])
+              .limit(1);
+            item = items && items[0] ? items[0] : null;
+          }
+          if (item && item.status !== "paid") {
+            // Solo marcar failed si el item NO esta ya pagado. Mercantil a
+            // veces manda webhooks fuera de orden — un decline tardio no
+            // debe sobre-escribir un pago exitoso anterior.
+            await supabase
+              .from("collection_items")
+              .update({
+                status: "failed",
+                payment_reference: normalized.reference_number || null,
+              })
+              .eq("id", item.id)
+              .neq("status", "paid");
+            console.log(
+              "[Mercantil Alias] Item " + item.id + " marcado como failed (codigo=" +
+              normalized.raw_status + " mensaje=" + (normalized.message || "") + ")"
+            );
+          } else if (item && item.status === "paid") {
+            console.log(
+              "[Mercantil Alias] Item " + item.id + " ya esta paid — ignorando decline tardio"
+            );
+          }
           processingError = "Status no aprobado: " + normalized.raw_status +
-            (normalized.error_code ? " (code=" + normalized.error_code + ")" : "");
+            (normalized.message ? " (" + normalized.message + ")" : "") +
+            (normalized.error_code ? " code=" + normalized.error_code : "");
         }
 
         // Actualiza el audit log con la info normalizada

@@ -134,14 +134,17 @@ export default function PagarPage() {
   const fetchData = useCallback(async () => {
     try {
       setLoading(true);
-      const res = await fetch(`/api/cobranzas/${token}`);
+      // cache: 'no-store' es CRITICO. Sin esto, Next.js puede cachear el
+      // response y el polling se queda viendo el status viejo "viewed" para
+      // siempre, sin enterarse de que el webhook ya marco el item como paid.
+      const res = await fetch(`/api/cobranzas/${token}`, { cache: "no-store" });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Error al cargar");
       setData(json);
 
       // Fetch BCV rate
       if (json.amount_usd) {
-        const bcvRes = await fetch(`/api/cobranzas/bcv?amount=${json.amount_usd}`);
+        const bcvRes = await fetch(`/api/cobranzas/bcv?amount=${json.amount_usd}`, { cache: "no-store" });
         const bcvJson = await bcvRes.json();
         if (bcvRes.ok) setBcv(bcvJson);
       }
@@ -164,9 +167,11 @@ export default function PagarPage() {
       // Mercantil que tarda ~60-90s en mandar el webhook tras el callback).
       pollingRef.current = setInterval(async () => {
         try {
-          const res = await fetch(`/api/cobranzas/${token}`);
+          const res = await fetch(`/api/cobranzas/${token}`, { cache: "no-store" });
           const poll = await res.json();
-          if (res.ok && (poll.status === "paid" || poll.status === "conciliating")) {
+          // Tambien detectar "failed" para mostrar error inmediato en vez de
+          // esperar el timeout completo cuando el banco rechazo el pago.
+          if (res.ok && (poll.status === "paid" || poll.status === "conciliating" || poll.status === "failed")) {
             setData(poll);
             if (pollingRef.current) clearInterval(pollingRef.current);
             if (timeoutRef.current) clearTimeout(timeoutRef.current);
@@ -184,9 +189,9 @@ export default function PagarPage() {
         // Background polling cada 10s — mucho menos agresivo
         pollingRef.current = setInterval(async () => {
           try {
-            const res = await fetch(`/api/cobranzas/${token}`);
+            const res = await fetch(`/api/cobranzas/${token}`, { cache: "no-store" });
             const poll = await res.json();
-            if (res.ok && (poll.status === "paid" || poll.status === "conciliating")) {
+            if (res.ok && (poll.status === "paid" || poll.status === "conciliating" || poll.status === "failed")) {
               setData(poll);
               if (pollingRef.current) clearInterval(pollingRef.current);
             }
