@@ -160,7 +160,8 @@ export default function PagarPage() {
       // If already paid or no post-payment callback, don't poll
       if (!isPostPayment || !json || json.status === "paid" || json.status === "conciliating") return;
 
-      // Start polling every 3 seconds
+      // Polling agresivo en los primeros 90s (cubre el caso tipico de
+      // Mercantil que tarda ~60-90s en mandar el webhook tras el callback).
       pollingRef.current = setInterval(async () => {
         try {
           const res = await fetch(`/api/cobranzas/${token}`);
@@ -173,11 +174,30 @@ export default function PagarPage() {
         } catch { /* ignore polling errors */ }
       }, 3000);
 
-      // Timeout after 30 seconds — stop spinner, show success message
+      // Tras 90s: mostrar pantalla "No pudimos confirmar" PERO seguir
+      // chequeando en background cada 10s por hasta 5 min totales. Si el
+      // webhook llega tarde, la UI flip automatico a "Pago recibido" sin
+      // que el usuario tenga que recargar.
       timeoutRef.current = setTimeout(() => {
-        if (pollingRef.current) clearInterval(pollingRef.current);
         setPollingTimedOut(true);
-      }, 30000);
+        if (pollingRef.current) clearInterval(pollingRef.current);
+        // Background polling cada 10s — mucho menos agresivo
+        pollingRef.current = setInterval(async () => {
+          try {
+            const res = await fetch(`/api/cobranzas/${token}`);
+            const poll = await res.json();
+            if (res.ok && (poll.status === "paid" || poll.status === "conciliating")) {
+              setData(poll);
+              if (pollingRef.current) clearInterval(pollingRef.current);
+            }
+          } catch { /* ignore */ }
+        }, 10000);
+
+        // Stop final tras 5 min totales — el usuario ya tiene el boton "Intentar de nuevo".
+        setTimeout(() => {
+          if (pollingRef.current) clearInterval(pollingRef.current);
+        }, 4 * 60 * 1000); // 90s + 4min = 5.5 min total
+      }, 90_000);
     });
 
     return () => {
