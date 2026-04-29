@@ -11,6 +11,9 @@ export async function middleware(request: NextRequest) {
     "/api/mercantil/webhook",
     "/api/mercantil/callback",
     "/api/mercantil/status/",
+    // /api/mercantil (root) tambien recibe webhooks — Mercantil lo registro
+    // sin /webhook. Se chequea exact-match abajo para no abrir /reconcile
+    // ni /create-payment, que son admin-only.
     "/api/cobranzas/webhook/",
     "/api/cobranzas/bcv",
     "/api/cobranzas/pay",       // includes /pay, /pay/confirm, /pay/c2p-confirm
@@ -22,7 +25,9 @@ export async function middleware(request: NextRequest) {
     "/api/kommo/ventas/webhook", // Kommo sales bot webhook (external)
   ];
   const { pathname } = request.nextUrl;
-  const isPublic = publicPaths.some((path) => pathname.startsWith(path));
+  const isPublic =
+    publicPaths.some((path) => pathname.startsWith(path)) ||
+    pathname === "/api/mercantil"; // exact match — no abrir subrutas admin
 
   if (isPublic) return NextResponse.next();
 
