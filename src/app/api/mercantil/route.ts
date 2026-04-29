@@ -29,8 +29,17 @@ function pickField(raw: Record<string, unknown>, ...names: string[]): unknown {
   for (const n of names) {
     if (raw[n] !== undefined && raw[n] !== null && raw[n] !== "") return raw[n];
   }
-  // Tambien busca dentro de bloques anidados comunes (merchant_response, transaction_response)
-  for (const wrapper of ["merchant_response", "transaction_response", "response", "data", "result"]) {
+  // Busca dentro de wrappers conocidos. webhookNotificationIn es el wrapper
+  // del Boton Web (schema en espanol confirmado en logs 2026-04-29).
+  for (const wrapper of [
+    "webhookNotificationIn",
+    "notification",
+    "merchant_response",
+    "transaction_response",
+    "response",
+    "data",
+    "result",
+  ]) {
     const inner = raw[wrapper];
     if (inner && typeof inner === "object") {
       const val = pickField(inner as Record<string, unknown>, ...names);
@@ -59,9 +68,10 @@ interface NormalizedPayload {
 }
 
 function normalizeWebhookPayload(raw: Record<string, unknown>): NormalizedPayload {
-  // status: aprueba si llega cualquiera de las variantes conocidas
+  // status: el Boton Web usa `codigo` ("00" = OPERACION EXITOSA).
+  // Otros productos pueden usar `status`, `transactionStatus`, etc.
   const rawStatus = asString(
-    pickField(raw, "status", "transactionStatus", "trxStatus", "transaction_status", "responseStatus")
+    pickField(raw, "status", "transactionStatus", "trxStatus", "transaction_status", "responseStatus", "codigo")
   );
   const sLower = rawStatus.toLowerCase();
   let status: NormalizedPayload["status"] = "pending";
@@ -75,9 +85,10 @@ function normalizeWebhookPayload(raw: Record<string, unknown>): NormalizedPayloa
     status = "error";
   }
 
-  // invoice_number: puede ser string directo o objeto {number: ...}
+  // invoice_number: puede ser string directo, objeto {number: ...}, o "numeroFactura"
+  // (Boton Web: "numeroFactura" trae el WPY-XXXXXXXX que generamos).
   let invoice_number = "";
-  const invoiceCandidate = pickField(raw, "invoice_number", "invoiceNumber", "invoice");
+  const invoiceCandidate = pickField(raw, "invoice_number", "invoiceNumber", "invoice", "numeroFactura");
   if (typeof invoiceCandidate === "string") {
     invoice_number = invoiceCandidate;
   } else if (invoiceCandidate && typeof invoiceCandidate === "object") {
@@ -86,24 +97,32 @@ function normalizeWebhookPayload(raw: Record<string, unknown>): NormalizedPayloa
     else if (typeof inner === "number") invoice_number = String(inner);
   }
 
+  // reference_number: Boton Web usa "referenciaBancoOrdenante".
   const reference_number = asString(
-    pickField(raw, "reference_number", "referenceNumber", "paymentReference", "trxRef", "transactionId", "trxId")
+    pickField(
+      raw,
+      "reference_number", "referenceNumber", "paymentReference", "trxRef", "transactionId", "trxId",
+      "referenciaBancoOrdenante", "referenciaBancoBeneficiario"
+    )
   );
 
-  const amtRaw = pickField(raw, "amount", "transactionAmount", "trxAmount");
+  // amount: Boton Web usa "monto" (string con decimales).
+  const amtRaw = pickField(raw, "amount", "transactionAmount", "trxAmount", "monto");
   const amount =
     typeof amtRaw === "number" ? amtRaw : (typeof amtRaw === "string" && amtRaw ? parseFloat(amtRaw) : undefined);
 
+  // payment_method: Boton Web usa "concepto" ("DEBITO INMEDIATO", "PAGO MOVIL", etc).
   const payment_method = asString(
-    pickField(raw, "payment_method", "paymentMethod", "paymentConcept", "paymentType")
+    pickField(raw, "payment_method", "paymentMethod", "paymentConcept", "paymentType", "concepto")
   ) || undefined;
 
   const authorization_code = asString(
     pickField(raw, "authorization_code", "authorizationCode", "authCode")
   ) || undefined;
 
+  // message: Boton Web usa "mensajeCliente" / "mensajeSistema".
   const message = asString(
-    pickField(raw, "message", "responseMessage", "description", "errorMessage")
+    pickField(raw, "message", "responseMessage", "description", "errorMessage", "mensajeCliente", "mensajeSistema")
   ) || undefined;
 
   const error_code = asString(pickField(raw, "errorCode", "error_code", "responseCode", "code")) || undefined;
