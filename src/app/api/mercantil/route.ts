@@ -16,11 +16,100 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminSupabase } from "@/lib/supabase/server";
-import { MercantilSDK } from "@/lib/mercantil";
+import { decrypt } from "@/lib/mercantil/core/crypto";
+import { configFromEnv, getAllSecretKeys } from "@/lib/mercantil/core/config";
 import { markItemPaid, getItemByMercantilInvoiceId } from "@/lib/dal/collection-campaigns";
 import { getClientIP } from "@/lib/utils/rate-limit";
 
 export const dynamic = "force-dynamic";
+
+// ---- Helpers de normalizacion (Web Button usa camelCase, SDK valida snake_case) ----
+
+function pickField(raw: Record<string, unknown>, ...names: string[]): unknown {
+  for (const n of names) {
+    if (raw[n] !== undefined && raw[n] !== null && raw[n] !== "") return raw[n];
+  }
+  // Tambien busca dentro de bloques anidados comunes (merchant_response, transaction_response)
+  for (const wrapper of ["merchant_response", "transaction_response", "response", "data", "result"]) {
+    const inner = raw[wrapper];
+    if (inner && typeof inner === "object") {
+      const val = pickField(inner as Record<string, unknown>, ...names);
+      if (val !== undefined) return val;
+    }
+  }
+  return undefined;
+}
+
+function asString(v: unknown): string {
+  if (v === null || v === undefined) return "";
+  if (typeof v === "string") return v;
+  return String(v);
+}
+
+interface NormalizedPayload {
+  status: "approved" | "declined" | "error" | "pending";
+  raw_status: string;
+  invoice_number: string;
+  reference_number: string;
+  amount?: number;
+  payment_method?: string;
+  authorization_code?: string;
+  message?: string;
+  error_code?: string;
+}
+
+function normalizeWebhookPayload(raw: Record<string, unknown>): NormalizedPayload {
+  // status: aprueba si llega cualquiera de las variantes conocidas
+  const rawStatus = asString(
+    pickField(raw, "status", "transactionStatus", "trxStatus", "transaction_status", "responseStatus")
+  );
+  const sLower = rawStatus.toLowerCase();
+  let status: NormalizedPayload["status"] = "pending";
+  if (
+    ["approved", "ok", "00", "000", "success", "successful", "completed", "aprobado", "exitoso"].includes(sLower)
+  ) {
+    status = "approved";
+  } else if (["declined", "rejected", "fail", "failed", "denied", "rechazado"].includes(sLower)) {
+    status = "declined";
+  } else if (["error", "err"].includes(sLower)) {
+    status = "error";
+  }
+
+  // invoice_number: puede ser string directo o objeto {number: ...}
+  let invoice_number = "";
+  const invoiceCandidate = pickField(raw, "invoice_number", "invoiceNumber", "invoice");
+  if (typeof invoiceCandidate === "string") {
+    invoice_number = invoiceCandidate;
+  } else if (invoiceCandidate && typeof invoiceCandidate === "object") {
+    const inner = (invoiceCandidate as Record<string, unknown>).number;
+    if (typeof inner === "string") invoice_number = inner;
+    else if (typeof inner === "number") invoice_number = String(inner);
+  }
+
+  const reference_number = asString(
+    pickField(raw, "reference_number", "referenceNumber", "paymentReference", "trxRef", "transactionId", "trxId")
+  );
+
+  const amtRaw = pickField(raw, "amount", "transactionAmount", "trxAmount");
+  const amount =
+    typeof amtRaw === "number" ? amtRaw : (typeof amtRaw === "string" && amtRaw ? parseFloat(amtRaw) : undefined);
+
+  const payment_method = asString(
+    pickField(raw, "payment_method", "paymentMethod", "paymentConcept", "paymentType")
+  ) || undefined;
+
+  const authorization_code = asString(
+    pickField(raw, "authorization_code", "authorizationCode", "authCode")
+  ) || undefined;
+
+  const message = asString(
+    pickField(raw, "message", "responseMessage", "description", "errorMessage")
+  ) || undefined;
+
+  const error_code = asString(pickField(raw, "errorCode", "error_code", "responseCode", "code")) || undefined;
+
+  return { status, raw_status: rawStatus, invoice_number, reference_number, amount, payment_method, authorization_code, message, error_code };
+}
 
 // GET — Mercantil a veces hace healthcheck. Solo confirma que el endpoint existe.
 export async function GET() {
@@ -122,38 +211,76 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // ---- 4. Intentar procesar via SDK — nunca fallar la respuesta ----
+  // ---- 4. Descifrado manual + normalizacion (Web Button usa schema distinto al SDK) ----
+  // El SDK valida payload.status / payload.invoice_number en snake_case, pero
+  // Mercantil Web Button manda camelCase (invoiceNumber.number, transactionStatus, etc).
+  // Aqui desciframos manualmente, logueamos las keys, y normalizamos campos
+  // antes de hacer el matching contra collection_items.
   let processed = false;
   let processingError: string | null = null;
-  let parsedPayload: Record<string, unknown> | null = null;
+  let normalized: NormalizedPayload | null = null;
+  let decryptedKeys: string[] = [];
 
   try {
-    const sdk = new MercantilSDK();
-    if (sdk.isConfigured) {
-      // Si tenemos parsedBody con transactionData → pasa el objeto.
-      // Si no, pasa el rawText como string (SDK intenta descifrar string crudo).
-      const input: string | Record<string, unknown> =
-        parsedBody && parsedBody.transactionData ? parsedBody : rawText;
+    const ciphertext = parsedBody && typeof parsedBody.transactionData === "string"
+      ? (parsedBody.transactionData as string)
+      : rawText;
 
-      if (input && (typeof input === "string" ? input.length > 0 : Object.keys(input).length > 0)) {
-        const payload = sdk.parseWebhook(input as Record<string, unknown>);
-        parsedPayload = payload as unknown as Record<string, unknown>;
+    if (!ciphertext) {
+      processingError = "Body vacio o sin campo cifrado";
+      console.warn("[Mercantil Alias] " + processingError);
+    } else {
+      const config = configFromEnv();
+      const secretKeys = getAllSecretKeys(config);
+
+      let decrypted: Record<string, unknown> | null = null;
+      let usedKeyHint: string | null = null;
+      for (const key of secretKeys) {
+        try {
+          const json = decrypt(ciphertext, key);
+          const obj = JSON.parse(json);
+          if (obj && typeof obj === "object" && !Array.isArray(obj)) {
+            decrypted = obj as Record<string, unknown>;
+            usedKeyHint = "len=" + key.length;
+            break;
+          }
+        } catch { /* probar siguiente clave */ }
+      }
+
+      if (!decrypted) {
+        processingError = "No se pudo descifrar con ninguna secretKey (" + secretKeys.length + " probadas)";
+        console.warn("[Mercantil Alias] " + processingError);
+      } else {
+        decryptedKeys = Object.keys(decrypted);
+        console.log("[Mercantil Alias] Descifrado OK con " + usedKeyHint);
+        console.log("[Mercantil Alias] Keys descifradas:", decryptedKeys);
+        // Loguea valores sanitizados para diagnostico (sin numeros de tarjeta)
+        const sanitized: Record<string, unknown> = {};
+        for (const [k, v] of Object.entries(decrypted)) {
+          if (/card|pan|cvv/i.test(k)) sanitized[k] = "[redacted]";
+          else sanitized[k] = typeof v === "object" ? "[object]" : v;
+        }
+        console.log("[Mercantil Alias] Sample:", JSON.stringify(sanitized).slice(0, 1500));
+
+        normalized = normalizeWebhookPayload(decrypted);
         console.log(
-          "[Mercantil Alias] Payload descifrado | status=" + payload.status +
-          " invoice=" + payload.invoice_number +
-          " ref=" + payload.reference_number
+          "[Mercantil Alias] Normalizado | status=" + normalized.status +
+          " (raw=" + normalized.raw_status + ")" +
+          " invoice=" + normalized.invoice_number +
+          " ref=" + normalized.reference_number +
+          (normalized.error_code ? " errorCode=" + normalized.error_code : "")
         );
 
-        // Idempotencia por reference_number
-        if (payload.reference_number) {
+        // Idempotencia por reference_number (si tiene)
+        if (normalized.reference_number) {
           const { data: prior } = await supabase
             .from("payment_webhook_logs")
             .select("id")
-            .eq("reference_number", payload.reference_number)
+            .eq("reference_number", normalized.reference_number)
             .eq("processed", true)
             .limit(1);
           if (prior && prior.length > 0) {
-            console.log("[Mercantil Alias] Duplicate ref " + payload.reference_number + " — skipping");
+            console.log("[Mercantil Alias] Duplicate ref " + normalized.reference_number + " — skipping");
             if (logId) {
               await supabase
                 .from("payment_webhook_logs")
@@ -161,23 +288,23 @@ export async function POST(request: NextRequest) {
                 .eq("id", logId);
             }
             return NextResponse.json(
-              { received: true, duplicate: true, reference: payload.reference_number },
+              { received: true, duplicate: true, reference: normalized.reference_number },
               { status: 200 }
             );
           }
         }
 
-        // Marcar item de cobranza como pagado si encontramos match
-        if (payload.status === "approved" && payload.invoice_number) {
-          // Primero por mercantil_invoice_id (WPY-XXXXXXXX)
-          let item = await getItemByMercantilInvoiceId(payload.invoice_number);
+        // Marcar item de cobranza como pagado si status approved y tenemos invoice
+        if (normalized.status === "approved" && normalized.invoice_number) {
+          // Primero por mercantil_invoice_id (WPY-XXXXXXXX corto generado por nosotros)
+          let item = await getItemByMercantilInvoiceId(normalized.invoice_number);
 
-          // Fallback: por invoice_number directo o payment_token
+          // Fallback: por invoice_number Odoo o por payment_token
           if (!item) {
             const { data: items } = await supabase
               .from("collection_items")
               .select("*")
-              .or(`invoice_number.eq.${payload.invoice_number},payment_token.eq.${payload.invoice_number}`)
+              .or(`invoice_number.eq.${normalized.invoice_number},payment_token.eq.${normalized.invoice_number}`)
               .in("status", ["pending", "sent", "viewed"])
               .limit(1);
             item = items && items[0] ? items[0] : null;
@@ -186,37 +313,36 @@ export async function POST(request: NextRequest) {
           if (item) {
             await markItemPaid(item.payment_token, {
               payment_method: "debito_inmediato",
-              payment_reference: payload.reference_number || "",
-              amount_bss: payload.amount ? parseFloat(String(payload.amount)) : undefined,
+              payment_reference: normalized.reference_number || "",
+              amount_bss: normalized.amount,
             });
             console.log("[Mercantil Alias] Item " + item.id + " marcado como paid");
             processed = true;
           } else {
-            console.warn("[Mercantil Alias] No se encontro item para invoice " + payload.invoice_number);
+            processingError = "No se encontro item para invoice " + normalized.invoice_number;
+            console.warn("[Mercantil Alias] " + processingError);
           }
+        } else if (normalized.status !== "approved") {
+          // No-approved: solo loggea, no toca items
+          processingError = "Status no aprobado: " + normalized.raw_status +
+            (normalized.error_code ? " (code=" + normalized.error_code + ")" : "");
         }
 
-        // Actualiza el audit log con la info parseada
+        // Actualiza el audit log con la info normalizada
         if (logId) {
           await supabase
             .from("payment_webhook_logs")
             .update({
-              invoice_number: payload.invoice_number,
-              status: payload.status,
-              payment_method: payload.payment_method,
-              reference_number: payload.reference_number,
-              amount: payload.amount,
+              invoice_number: normalized.invoice_number || null,
+              status: normalized.raw_status || null,
+              payment_method: normalized.payment_method || null,
+              reference_number: normalized.reference_number || null,
+              amount: normalized.amount || null,
               processed,
             })
             .eq("id", logId);
         }
-      } else {
-        processingError = "Body vacio o sin transactionData";
-        console.warn("[Mercantil Alias] " + processingError);
       }
-    } else {
-      processingError = "SDK no configurado";
-      console.warn("[Mercantil Alias] " + processingError);
     }
   } catch (err) {
     processingError = err instanceof Error ? err.message : "Error desconocido";
@@ -239,7 +365,8 @@ export async function POST(request: NextRequest) {
       received: true,
       processed,
       parse_strategy: parseStrategy,
-      ...(parsedPayload ? { status: parsedPayload.status } : {}),
+      decrypted_keys: decryptedKeys,
+      ...(normalized ? { status: normalized.status, raw_status: normalized.raw_status } : {}),
     },
     { status: 200 }
   );
