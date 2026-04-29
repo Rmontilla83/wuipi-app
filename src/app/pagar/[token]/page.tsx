@@ -115,6 +115,22 @@ export default function PagarPage() {
   const callbackStatus = searchParams.get("status");
   const isPostPayment = callbackStatus === "callback" || callbackStatus === "success";
 
+  // Detect Mercantil error/decline signals from the returnUrl query params.
+  // Mercantil may append responseCode/errorCode/error/code on decline (e.g. 4025).
+  // We treat any non-success code as a hint that the payment was rejected, even
+  // though the DB status remains the source of truth.
+  const mercantilErrorCode = (() => {
+    const candidates = ["errorCode", "error_code", "responseCode", "response_code", "error", "code"];
+    for (const key of candidates) {
+      const v = searchParams.get(key);
+      if (!v) continue;
+      // "000" / "00" / "0000" are success markers in Venezuelan banking
+      if (/^0+$/.test(v)) continue;
+      return v;
+    }
+    return null;
+  })();
+
   const fetchData = useCallback(async () => {
     try {
       setLoading(true);
@@ -388,24 +404,59 @@ export default function PagarPage() {
   }
 
   // ---- Waiting for callback ----
+  // CRITICAL: We only show success when the DB confirms status === "paid" (handled
+  // above at the "Already paid" branch). Reaching this block means the callback
+  // came back from Mercantil but the DB has not flipped to "paid" yet — either the
+  // webhook is in-flight, or Mercantil rejected the payment (e.g. error 4025).
+  // We MUST NOT assume success on timeout.
   if (isPostPayment) {
-    // Polling timed out — show reassuring message instead of infinite spinner
+    const handleRetry = () => {
+      // Strip the callback query params and reset method selection so the user
+      // can pick a method again. router.replace would also work, but a hard nav
+      // guarantees the polling effect resets cleanly.
+      window.location.href = `/pagar/${token}`;
+    };
+
+    // Polling timed out without a "paid" status — assume the payment did NOT
+    // go through. Show retry instead of false confirmation.
     if (pollingTimedOut) {
       return (
         <PageShell>
           <div className="max-w-md mx-auto text-center py-12">
-            <div className="relative w-20 h-20 mx-auto mb-6">
-              <div className="relative w-20 h-20 rounded-full bg-emerald-500/10 flex items-center justify-center">
-                <CheckCircle2 className="w-10 h-10 text-emerald-400" />
-              </div>
+            <div className="w-20 h-20 mx-auto mb-6 rounded-full bg-amber-500/10 flex items-center justify-center">
+              <AlertCircle className="w-10 h-10 text-amber-400" />
             </div>
-            <h2 className="text-white text-xl font-semibold mb-2">Tu pago fue recibido</h2>
-            <p className="text-gray-400 text-sm mb-4">
-              Estamos procesando la confirmación. Esto puede tomar unos minutos.
+            <h2 className="text-white text-xl font-semibold mb-2">
+              No pudimos confirmar tu pago
+            </h2>
+            <p className="text-gray-400 text-sm mb-2">
+              Si realizaste el pago correctamente, recibirás confirmación por WhatsApp y email
+              en los próximos minutos.
             </p>
-            <p className="text-gray-500 text-xs">
-              Recibirás una confirmación por WhatsApp y email. Ya puedes cerrar esta página.
+            <p className="text-gray-400 text-sm mb-6">
+              Si el pago fue rechazado por tu banco, puedes intentar de nuevo.
             </p>
+            {mercantilErrorCode && (
+              <p className="text-gray-600 text-[10px] mb-4 font-mono">
+                Código del banco: {mercantilErrorCode}
+              </p>
+            )}
+            <div className="flex flex-col gap-2 max-w-xs mx-auto">
+              <button
+                onClick={handleRetry}
+                className="w-full py-3.5 rounded-xl bg-gradient-to-r from-[#F46800] to-[#ff8534] text-white font-semibold text-sm transition-all hover:shadow-lg active:scale-[0.98]"
+              >
+                Intentar de nuevo
+              </button>
+              <a
+                href="https://wa.me/584248800723"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-full py-3 rounded-xl border border-white/10 text-gray-300 text-sm font-medium hover:bg-white/[0.02] inline-flex items-center justify-center gap-2"
+              >
+                Contactar por WhatsApp
+              </a>
+            </div>
           </div>
         </PageShell>
       );
