@@ -1766,6 +1766,9 @@ export interface PreviewResult {
   invoice: DraftInvoiceForSync;
   lines: InvoiceLineForSync[];
   rate: UsdRate;
+  /** "convert": factura en USD, hay que convertir lineas a VES.
+   *  "skip-conversion": factura ya en VED, solo postear (caso reentrada). */
+  scenario: "convert" | "skip-conversion";
   conversion: {
     line_id: number;
     product: string;
@@ -1782,11 +1785,16 @@ export interface PreviewResult {
     total_usd: number;
     total_ves: number;
   };
+  /** Mes calculado para `month_billed` (ej. "Mayo"). null si no se pudo determinar. */
+  month_billed: string | null;
+  /** Subscription origen leida (puede ser null si no se encontro) */
+  subscription: { id: number; name: string; next_invoice_date: string | false } | null;
   validations: {
     invoice_exists: boolean;
     invoice_is_draft: boolean;
     rate_is_valid: boolean;
     has_lines: boolean;
+    month_billed_resolved: boolean;
   };
   warnings: string[];
 }
@@ -1802,6 +1810,70 @@ export interface PostResult {
 }
 
 // ── Funciones de lectura para sync ────────────────────────────
+
+/**
+ * Lee una suscripcion (sale.order) por su `name` (ej. "S20548").
+ * Usado para encontrar la suscripcion origen de una factura draft via
+ * `account.move.invoice_origin`.
+ */
+export async function getSubscriptionByName(name: string): Promise<{
+  id: number;
+  name: string;
+  next_invoice_date: string | false;
+  subscription_plan: string;
+} | null> {
+  const list = await searchRead("sale.order",
+    [["name", "=", name]],
+    {
+      fields: ["id", "name", "next_invoice_date", "subscription_plan_id", "is_subscription"],
+      limit: 1,
+    }
+  );
+  if (!list[0]) return null;
+  const so = list[0];
+  return {
+    id: so.id,
+    name: so.name,
+    next_invoice_date: so.next_invoice_date,
+    subscription_plan: so.subscription_plan_id?.[1] || "",
+  };
+}
+
+/**
+ * Calcula el campo `month_billed` (texto del mes en espanol) que Odoo
+ * espera en facturas con `custom_month_billed=true`.
+ *
+ * Logica: a partir del `next_invoice_date` de la suscripcion, calcular
+ * el midpoint del periodo cubierto por la factura draft actual y devolver
+ * el nombre del mes correspondiente.
+ *
+ * Ejemplo:
+ *   next_invoice_date = "2026-05-27" (proxima factura)
+ *   periodo cubierto = 2026-04-27 -> 2026-05-26
+ *   midpoint = ~11 de mayo
+ *   resultado = "Mayo"
+ */
+export function computeMonthBilled(nextInvoiceDate: string): string {
+  const next = new Date(nextInvoiceDate + "T12:00:00Z");
+  if (Number.isNaN(next.getTime())) return "";
+
+  // periodo = [next_invoice_date - 1 mes, next_invoice_date - 1 dia]
+  const periodEnd = new Date(next);
+  periodEnd.setUTCDate(periodEnd.getUTCDate() - 1);
+
+  const periodStart = new Date(periodEnd);
+  periodStart.setUTCMonth(periodStart.getUTCMonth() - 1);
+  periodStart.setUTCDate(periodStart.getUTCDate() + 1);
+
+  // midpoint
+  const midpoint = new Date((periodStart.getTime() + periodEnd.getTime()) / 2);
+
+  const meses = [
+    "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+    "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
+  ];
+  return meses[midpoint.getUTCMonth()];
+}
 
 /**
  * Lee la tasa USD live desde res.currency. Esta es la tasa que Odoo aplica
@@ -1878,10 +1950,14 @@ export async function getInvoiceLines(invoiceId: number): Promise<InvoiceLineFor
 }
 
 /**
- * Genera el preview de un posting: lee factura, lineas y tasa, calcula la
- * conversion completa, y devuelve un objeto con todo. NO toca Odoo.
+ * Genera el preview de un posting: lee factura, lineas, tasa, suscripcion
+ * origen y calcula todo lo que se va a hacer. NO toca Odoo.
  *
- * Esto es el dry-run que se usa para validar antes de hacer el posting real.
+ * Maneja 2 escenarios:
+ *  - "convert": factura draft en USD -> hay que convertir a VES y postear
+ *  - "skip-conversion": factura ya en VED (reentrada despues de revertir
+ *    desde posted) -> solo llenar month_billed y postear, NO multiplicar
+ *    precios otra vez (sino seria 243 * 486 = 118k erroneo).
  */
 export async function previewInvoicePosting(invoiceId: number): Promise<PreviewResult> {
   const invoice = await getInvoiceById(invoiceId);
@@ -1891,6 +1967,7 @@ export async function previewInvoicePosting(invoiceId: number): Promise<PreviewR
     invoice_is_draft: invoice?.state === "draft",
     rate_is_valid: false,
     has_lines: false,
+    month_billed_resolved: false,
   };
 
   if (!invoice) {
@@ -1899,8 +1976,11 @@ export async function previewInvoicePosting(invoiceId: number): Promise<PreviewR
       invoice: {} as DraftInvoiceForSync,
       lines: [],
       rate: {} as UsdRate,
+      scenario: "convert",
       conversion: [],
       totals: {} as PreviewResult["totals"],
+      month_billed: null,
+      subscription: null,
       validations,
       warnings: ["Factura no encontrada"],
     };
@@ -1910,8 +1990,13 @@ export async function previewInvoicePosting(invoiceId: number): Promise<PreviewR
     warnings.push(`La factura esta en estado "${invoice.state}", no draft. No se puede postear.`);
   }
 
-  if (invoice.currency_id?.[1] !== "USD") {
-    warnings.push(`La factura esta en ${invoice.currency_id?.[1]}, no USD. Sync espera draft USD.`);
+  // Detectar escenario por moneda actual
+  const currentCurrencyName = invoice.currency_id?.[1];
+  const scenario: "convert" | "skip-conversion" =
+    currentCurrencyName === "VED" ? "skip-conversion" : "convert";
+
+  if (scenario === "convert" && currentCurrencyName !== "USD") {
+    warnings.push(`La factura esta en ${currentCurrencyName}, esperamos USD o VED. Aborta.`);
   }
 
   const lines = await getInvoiceLines(invoiceId);
@@ -1922,16 +2007,33 @@ export async function previewInvoicePosting(invoiceId: number): Promise<PreviewR
   validations.rate_is_valid = rate.bsPerUsd > 0;
 
   // Calcular conversion linea por linea
-  const conversion = lines.map(line => ({
-    line_id: line.id,
-    product: Array.isArray(line.product_id) ? line.product_id[1] : line.name,
-    price_unit_usd: line.price_unit,
-    price_unit_ves: round4(line.price_unit * rate.bsPerUsd),
-    price_subtotal_usd: line.price_subtotal,
-    price_subtotal_ves: round2(line.price_subtotal * rate.bsPerUsd),
-  }));
+  // - scenario=convert: precio actual es USD, multiplicamos por bsPerUsd
+  // - scenario=skip-conversion: precio actual ya es VES (no multiplicar)
+  const conversion = lines.map(line => {
+    const isAlreadyVes = scenario === "skip-conversion";
+    const price_unit_usd = isAlreadyVes ? round4(line.price_unit / rate.bsPerUsd) : line.price_unit;
+    const price_unit_ves = isAlreadyVes ? line.price_unit : round4(line.price_unit * rate.bsPerUsd);
+    const price_subtotal_usd = isAlreadyVes ? round2(line.price_subtotal / rate.bsPerUsd) : line.price_subtotal;
+    const price_subtotal_ves = isAlreadyVes ? line.price_subtotal : round2(line.price_subtotal * rate.bsPerUsd);
+    return {
+      line_id: line.id,
+      product: Array.isArray(line.product_id) ? line.product_id[1] : line.name,
+      price_unit_usd,
+      price_unit_ves,
+      price_subtotal_usd,
+      price_subtotal_ves,
+    };
+  });
 
-  const totals = {
+  const isAlreadyVes = scenario === "skip-conversion";
+  const totals = isAlreadyVes ? {
+    untaxed_usd: round2(invoice.amount_untaxed / rate.bsPerUsd),
+    untaxed_ves: invoice.amount_untaxed,
+    tax_usd: round2(invoice.amount_tax / rate.bsPerUsd),
+    tax_ves: invoice.amount_tax,
+    total_usd: round2(invoice.amount_total / rate.bsPerUsd),
+    total_ves: invoice.amount_total,
+  } : {
     untaxed_usd: invoice.amount_untaxed,
     untaxed_ves: round2(invoice.amount_untaxed * rate.bsPerUsd),
     tax_usd: invoice.amount_tax,
@@ -1940,25 +2042,42 @@ export async function previewInvoicePosting(invoiceId: number): Promise<PreviewR
     total_ves: round2(invoice.amount_total * rate.bsPerUsd),
   };
 
-  const ok = validations.invoice_exists && validations.invoice_is_draft &&
-             validations.rate_is_valid && validations.has_lines && warnings.length === 0;
+  // Resolver month_billed desde la suscripcion origen
+  let subscription: PreviewResult["subscription"] = null;
+  let month_billed: string | null = null;
+  if (typeof invoice.invoice_origin === "string" && invoice.invoice_origin) {
+    const sub = await getSubscriptionByName(invoice.invoice_origin);
+    if (sub) {
+      subscription = { id: sub.id, name: sub.name, next_invoice_date: sub.next_invoice_date };
+      if (typeof sub.next_invoice_date === "string" && sub.next_invoice_date) {
+        month_billed = computeMonthBilled(sub.next_invoice_date) || null;
+      }
+    }
+  }
+  validations.month_billed_resolved = !!month_billed;
+  if (!month_billed) {
+    warnings.push("No se pudo resolver month_billed desde la suscripcion origen — sin esto el action_post puede quedarse silenciosamente en draft");
+  }
 
-  return { ok, invoice, lines, rate, conversion, totals, validations, warnings };
+  const ok = validations.invoice_exists && validations.invoice_is_draft &&
+             validations.rate_is_valid && validations.has_lines &&
+             validations.month_billed_resolved && warnings.length === 0;
+
+  return { ok, invoice, lines, rate, scenario, conversion, totals, month_billed, subscription, validations, warnings };
 }
 
 /**
  * POSTING REAL — modifica Odoo. Usar solo tras validar dry-run.
  *
  * Flujo:
- *   1. Validar preview ok (factura existe, esta draft, etc)
- *   2. Buscar el ID de la moneda VED
- *   3. write account.move: currency_id = VED.id
- *   4. write cada line: price_unit = price_unit * bsPerUsd
- *   5. action_post sobre la factura
- *   6. Releer la factura para obtener el nuevo `name` (numero asignado)
+ *   1. Validar preview ok
+ *   2. Si scenario="convert": cambiar currency a VED + recalcular precios
+ *      Si scenario="skip-conversion": NO tocar moneda ni precios (ya estan en VES)
+ *   3. Escribir month_billed (CRITICO — sin esto action_post se queda en draft silente)
+ *   4. action_post
+ *   5. Releer state — si NO esta posted, fallar explicitamente (no fallar silente)
  *
- * NO valida whitelist ni kill switch — eso es responsabilidad del caller
- * (endpoint /api/admin/odoo/post-invoice).
+ * NO valida whitelist ni kill switch — eso es responsabilidad del caller.
  */
 export async function postInvoiceInVes(invoiceId: number): Promise<PostResult> {
   const errors: string[] = [];
@@ -1975,45 +2094,73 @@ export async function postInvoiceInVes(invoiceId: number): Promise<PostResult> {
     };
   }
 
-  // 1. Buscar el ID de VED en Odoo
-  const vedList = await searchRead("res.currency",
-    [["name", "=", "VED"]], { fields: ["id"], limit: 1 }
-  );
-  if (!vedList[0]) {
-    return {
-      ok: false,
-      invoice_id: invoiceId,
-      invoice_name: false,
-      partner_id: preview.invoice.partner_id?.[0] || 0,
-      amount_ves: 0,
-      bcv_rate: preview.rate.bsPerUsd,
-      errors: ["No se encontro la moneda VED en Odoo"],
-    };
-  }
-  const vedId = vedList[0].id;
+  const partnerId = preview.invoice.partner_id?.[0] || 0;
 
   try {
-    // 2. Cambiar currency_id de la factura a VED
-    await odooWrite("account.move", [invoiceId], { currency_id: vedId });
+    // 1. Solo si scenario=convert: cambiar moneda y precios
+    if (preview.scenario === "convert") {
+      // Buscar el ID de VED en Odoo
+      const vedList = await searchRead("res.currency",
+        [["name", "=", "VED"]], { fields: ["id"], limit: 1 }
+      );
+      if (!vedList[0]) {
+        return {
+          ok: false, invoice_id: invoiceId, invoice_name: false, partner_id: partnerId,
+          amount_ves: 0, bcv_rate: preview.rate.bsPerUsd,
+          errors: ["No se encontro la moneda VED en Odoo"],
+        };
+      }
+      const vedId = vedList[0].id;
 
-    // 3. Recalcular price_unit de cada linea
-    for (const line of preview.lines) {
-      const newPriceUnit = round4(line.price_unit * preview.rate.bsPerUsd);
-      await odooWrite("account.move.line", [line.id], { price_unit: newPriceUnit });
+      await odooWrite("account.move", [invoiceId], { currency_id: vedId });
+      for (const line of preview.lines) {
+        const newPriceUnit = round4(line.price_unit * preview.rate.bsPerUsd);
+        await odooWrite("account.move.line", [line.id], { price_unit: newPriceUnit });
+      }
     }
+    // Si scenario=skip-conversion: NO tocar moneda ni precios (ya estan en VES por
+    // posting previo que se revirtio a draft).
 
-    // 4. action_post
+    // 2. Escribir month_billed (CRITICO)
+    if (!preview.month_billed) {
+      return {
+        ok: false, invoice_id: invoiceId, invoice_name: false, partner_id: partnerId,
+        amount_ves: 0, bcv_rate: preview.rate.bsPerUsd,
+        errors: ["month_billed no resuelto — abort para no quedar silenciosamente en draft"],
+      };
+    }
+    await odooWrite("account.move", [invoiceId], {
+      custom_month_billed: true,
+      month_billed: preview.month_billed,
+    });
+
+    // 3. action_post
     await odooCallMethod("account.move", [invoiceId], "action_post");
 
-    // 5. Releer para obtener nuevo nombre
-    const posted = await getInvoiceById(invoiceId);
+    // 4. Releer state — verificar que efectivamente se posteo
+    const after = await getInvoiceById(invoiceId);
+    if (!after) {
+      return {
+        ok: false, invoice_id: invoiceId, invoice_name: false, partner_id: partnerId,
+        amount_ves: 0, bcv_rate: preview.rate.bsPerUsd,
+        errors: ["Factura desaparecio tras action_post"],
+      };
+    }
+    if (after.state !== "posted") {
+      return {
+        ok: false, invoice_id: invoiceId, invoice_name: after.name || false,
+        partner_id: partnerId, amount_ves: after.amount_total,
+        bcv_rate: preview.rate.bsPerUsd,
+        errors: [`action_post no posteo la factura — quedo en state="${after.state}". Validacion de Odoo bloqueo el post (probablemente otro campo custom requerido).`],
+      };
+    }
 
     return {
       ok: true,
       invoice_id: invoiceId,
-      invoice_name: posted?.name || false,
-      partner_id: preview.invoice.partner_id?.[0] || 0,
-      amount_ves: posted?.amount_total || preview.totals.total_ves,
+      invoice_name: after.name || false,
+      partner_id: partnerId,
+      amount_ves: after.amount_total,
       bcv_rate: preview.rate.bsPerUsd,
     };
   } catch (err) {
@@ -2022,7 +2169,7 @@ export async function postInvoiceInVes(invoiceId: number): Promise<PostResult> {
       ok: false,
       invoice_id: invoiceId,
       invoice_name: false,
-      partner_id: preview.invoice.partner_id?.[0] || 0,
+      partner_id: partnerId,
       amount_ves: 0,
       bcv_rate: preview.rate.bsPerUsd,
       errors,

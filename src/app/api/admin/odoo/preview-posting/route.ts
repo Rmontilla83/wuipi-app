@@ -82,6 +82,17 @@ export async function POST(request: NextRequest) {
   }
 
   // 7. Devolver
+  const willDo: string[] = [];
+  if (preview.scenario === "convert") {
+    willDo.push(`WRITE account.move id=${invoiceId} → currency_id = VED`);
+    willDo.push(`WRITE ${preview.lines.length} account.move.line(s) → price_unit *= ${preview.rate.bsPerUsd.toFixed(4)}`);
+  } else {
+    willDo.push(`SKIP conversion (factura ya en VED, posting previo revertido a draft)`);
+  }
+  willDo.push(`WRITE account.move id=${invoiceId} → month_billed = "${preview.month_billed || '???'}", custom_month_billed = true`);
+  willDo.push(`CALL account.move(${invoiceId}).action_post() → factura queda posted en ${preview.totals.total_ves} Bs`);
+  willDo.push(`VERIFY state === "posted" tras action_post (sino abort con error)`);
+
   return NextResponse.json({
     ok: preview.ok,
     whitelist_active: whitelistActive,
@@ -90,15 +101,14 @@ export async function POST(request: NextRequest) {
     partner_name: invoice.partner_id?.[1] || null,
     invoice_state: invoice.state,
     invoice_origin: invoice.invoice_origin,
+    scenario: preview.scenario,
+    subscription: preview.subscription,
+    month_billed: preview.month_billed,
     rate: preview.rate,
     conversion: preview.conversion,
     totals: preview.totals,
     validations: preview.validations,
     warnings: preview.warnings,
-    will_do: preview.ok ? {
-      step_1: `WRITE account.move id=${invoiceId} → currency_id = VED`,
-      step_2: `WRITE ${preview.lines.length} account.move.line(s) → price_unit *= ${preview.rate.bsPerUsd.toFixed(4)}`,
-      step_3: `CALL account.move(${invoiceId}).action_post() → factura queda posted en ${preview.totals.total_ves} Bs`,
-    } : null,
+    will_do: preview.ok ? willDo : null,
   });
 }
