@@ -42,7 +42,7 @@ export async function POST(request: NextRequest) {
   }
 
   // 3. Body
-  let body: { invoice_id?: number; expected_amount_ves?: number };
+  let body: { invoice_id?: number; expected_amount_ves?: number; force?: boolean };
   try {
     body = await request.json();
   } catch {
@@ -52,6 +52,7 @@ export async function POST(request: NextRequest) {
   if (!invoiceId || !Number.isInteger(invoiceId) || invoiceId <= 0) {
     return NextResponse.json({ error: "invoice_id requerido (numero entero positivo)" }, { status: 400 });
   }
+  const force = body.force === true;
 
   // 4. Lee factura para validar
   const invoice = await getInvoiceById(invoiceId);
@@ -102,7 +103,10 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // 8. Idempotencia — chequear que no haya un posting exitoso previo
+  // 8. Idempotencia — chequear que no haya un posting exitoso previo.
+  // Excepcion: si la factura volvio a draft (revertida manualmente para
+  // corregir algo) Y se pasa force=true, permitir re-posting. Eso registra
+  // un nuevo log mientras preserva el log original.
   const { data: priorPosts } = await sb
     .from("odoo_sync_log")
     .select("id, status, mode, created_at")
@@ -112,10 +116,14 @@ export async function POST(request: NextRequest) {
     .limit(1);
 
   if (priorPosts && priorPosts.length > 0) {
-    return NextResponse.json({
-      error: "Esta factura ya fue posteada previamente",
-      previous_post: priorPosts[0],
-    }, { status: 409 });
+    if (!force) {
+      return NextResponse.json({
+        error: "Esta factura ya fue posteada previamente. Si la revertiste a draft a proposito y queres re-postearla, agrega \"force\": true al body.",
+        previous_post: priorPosts[0],
+        hint: "Body ejemplo: { invoice_id: 43350, expected_amount_ves: 282, force: true }",
+      }, { status: 409 });
+    }
+    console.log(`[OdooSync POST] FORCE re-post: factura ${invoiceId} tenia posting previo (id=${priorPosts[0].id}), revertida a draft, ahora se re-postea`);
   }
 
   // 9. POSTING REAL
