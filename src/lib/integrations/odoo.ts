@@ -2185,3 +2185,245 @@ function round2(n: number): number {
 function round4(n: number): number {
   return Math.round(n * 10000) / 10000;
 }
+
+// ============================================================
+// PAYMENT REGISTER (Sprint 1) — Crear account.payment + reconciliar
+// ============================================================
+//
+// Tras postear la factura draft USD -> posted VES (postInvoiceInVes), este
+// modulo registra el pago en el banco y lo reconcilia con la factura. Solo
+// asi la factura queda como paid en Odoo y el cliente deja de ver deuda en
+// su portal.
+//
+// Mapeo metodo de pago -> journal Odoo:
+
+export interface PaymentMethodMapping {
+  journalId: number;
+  paymentMethodLineId: number;
+  currencyId: number;
+  description: string;
+}
+
+/**
+ * Mapeo de metodo de pago de collection_items -> journal/payment_method_line
+ * en Odoo. IDs verificados directamente en Odoo prod (2026-04-30).
+ *
+ * Sprint 1: solo debito_inmediato + Mercantil Bs (BNK1).
+ * Sprint 3: agregar c2p, transferencia, cash, stripe, paypal.
+ */
+export const PAYMENT_METHOD_MAPPING: Record<string, PaymentMethodMapping> = {
+  debito_inmediato: {
+    journalId: 29,                  // BNK1 "Bank" -> cuenta 1102002 BANCO MERCANTIL 3031
+    paymentMethodLineId: 47,        // "Pago manual" del journal Bank
+    currencyId: 166,                // VED
+    description: "Mercantil Bs (cuenta 3031)",
+  },
+};
+
+export interface PaymentRegisterResult {
+  ok: boolean;
+  payment_id?: number;
+  payment_name?: string;
+  payment_state?: string;
+  invoice_payment_state_after?: string;
+  reconciled: boolean;
+  errors?: string[];
+}
+
+export interface PaymentRegisterPreview {
+  ok: boolean;
+  invoice_id: number;
+  invoice_state: string;
+  invoice_payment_state: string;
+  partner_id: number;
+  partner_name: string;
+  amount: number;
+  currency: string;
+  mapping: PaymentMethodMapping;
+  payment_date: string;
+  memo: string;
+  validations: {
+    invoice_exists: boolean;
+    invoice_is_posted: boolean;
+    invoice_not_already_paid: boolean;
+    mapping_exists: boolean;
+  };
+  warnings: string[];
+}
+
+/**
+ * Genera el preview de registrar un pago en Odoo. NO toca Odoo.
+ */
+export async function previewRegisterPayment(opts: {
+  invoiceId: number;
+  paymentMethod: string;          // "debito_inmediato" | "c2p" | etc.
+  paymentReference: string;       // ref bancaria, ej. "000000031187535"
+  paymentToken: string;           // ej. "WPY-E3849DB4"
+  paymentDate?: string;           // YYYY-MM-DD, default hoy
+}): Promise<PaymentRegisterPreview> {
+  const warnings: string[] = [];
+  const validations = {
+    invoice_exists: false,
+    invoice_is_posted: false,
+    invoice_not_already_paid: false,
+    mapping_exists: false,
+  };
+
+  const invoice = await getInvoiceById(opts.invoiceId);
+  validations.invoice_exists = !!invoice;
+  if (!invoice) {
+    return {
+      ok: false,
+      invoice_id: opts.invoiceId,
+      invoice_state: "",
+      invoice_payment_state: "",
+      partner_id: 0,
+      partner_name: "",
+      amount: 0,
+      currency: "",
+      mapping: {} as PaymentMethodMapping,
+      payment_date: "",
+      memo: "",
+      validations,
+      warnings: ["Factura no encontrada"],
+    };
+  }
+
+  // Leer payment_state actual
+  const fullInv = (await read("account.move", [opts.invoiceId], ["payment_state", "amount_residual"]))[0];
+  const paymentState = fullInv?.payment_state || "not_paid";
+
+  validations.invoice_is_posted = invoice.state === "posted";
+  if (invoice.state !== "posted") {
+    warnings.push(`Factura esta en state="${invoice.state}", debe estar posted antes de registrar pago`);
+  }
+
+  validations.invoice_not_already_paid = paymentState === "not_paid" || paymentState === "partial";
+  if (paymentState === "paid" || paymentState === "in_payment") {
+    warnings.push(`Factura ya tiene payment_state="${paymentState}" — no es necesario registrar otro pago`);
+  }
+
+  const mapping = PAYMENT_METHOD_MAPPING[opts.paymentMethod];
+  validations.mapping_exists = !!mapping;
+  if (!mapping) {
+    warnings.push(`Metodo de pago "${opts.paymentMethod}" no tiene mapeo a journal Odoo. Sprint 1 solo soporta: ${Object.keys(PAYMENT_METHOD_MAPPING).join(", ")}`);
+  }
+
+  const paymentDate = opts.paymentDate || new Date().toISOString().split("T")[0];
+  const memo = `${opts.paymentToken} — Mercantil Web ref:${opts.paymentReference}`;
+
+  const ok = validations.invoice_exists && validations.invoice_is_posted &&
+             validations.invoice_not_already_paid && validations.mapping_exists &&
+             warnings.length === 0;
+
+  return {
+    ok,
+    invoice_id: opts.invoiceId,
+    invoice_state: invoice.state,
+    invoice_payment_state: paymentState,
+    partner_id: invoice.partner_id?.[0] || 0,
+    partner_name: invoice.partner_id?.[1] || "",
+    amount: invoice.amount_total,
+    currency: invoice.currency_id?.[1] || "",
+    mapping: mapping || ({} as PaymentMethodMapping),
+    payment_date: paymentDate,
+    memo,
+    validations,
+    warnings,
+  };
+}
+
+/**
+ * REGISTER REAL — crea el account.payment y lo reconcilia con la factura.
+ * Usar via wizard `account.payment.register` que es la forma oficial (lo que
+ * hace la UI cuando hace clic en "Registrar pago" en una factura).
+ */
+export async function registerPaymentForInvoice(opts: {
+  invoiceId: number;
+  paymentMethod: string;
+  paymentReference: string;
+  paymentToken: string;
+  paymentDate?: string;
+}): Promise<PaymentRegisterResult> {
+  const errors: string[] = [];
+  const preview = await previewRegisterPayment(opts);
+  if (!preview.ok) {
+    return {
+      ok: false,
+      reconciled: false,
+      errors: ["Preview no valido: " + preview.warnings.join("; ")],
+    };
+  }
+
+  const uid = await authenticate();
+
+  try {
+    // 1. Crear el wizard account.payment.register desde la factura
+    const wizardId = await jsonRpc("object", "execute_kw", [
+      ODOO_DB, uid, ODOO_API_KEY,
+      "account.payment.register", "create",
+      [{
+        payment_date: preview.payment_date,
+        amount: preview.amount,
+        journal_id: preview.mapping.journalId,
+        payment_method_line_id: preview.mapping.paymentMethodLineId,
+        currency_id: preview.mapping.currencyId,
+        communication: preview.memo,
+      }],
+      {
+        context: {
+          active_model: "account.move",
+          active_ids: [opts.invoiceId],
+          active_id: opts.invoiceId,
+        },
+      },
+    ]);
+
+    // 2. action_create_payments crea el payment, lo postea y reconcilia con la factura
+    await jsonRpc("object", "execute_kw", [
+      ODOO_DB, uid, ODOO_API_KEY,
+      "account.payment.register", "action_create_payments",
+      [[wizardId]],
+      {},
+    ]);
+
+    // 3. Releer la factura para verificar el resultado
+    const after = (await read("account.move", [opts.invoiceId], ["payment_state", "matched_payment_ids"]))[0];
+    const paymentState = after?.payment_state || "unknown";
+    const paymentIds = after?.matched_payment_ids || [];
+    const lastPaymentId = Array.isArray(paymentIds) && paymentIds.length > 0
+      ? paymentIds[paymentIds.length - 1]
+      : null;
+
+    let paymentName: string | undefined;
+    let paymentSelfState: string | undefined;
+    if (lastPaymentId) {
+      const pmt = (await read("account.payment", [lastPaymentId], ["name", "state"]))[0];
+      paymentName = pmt?.name;
+      paymentSelfState = pmt?.state;
+    }
+
+    const reconciled = paymentState === "paid" || paymentState === "in_payment";
+
+    if (!reconciled) {
+      errors.push(`Factura tras crear payment: payment_state="${paymentState}". Esperabamos paid o in_payment.`);
+    }
+
+    return {
+      ok: reconciled,
+      payment_id: lastPaymentId || undefined,
+      payment_name: paymentName,
+      payment_state: paymentSelfState,
+      invoice_payment_state_after: paymentState,
+      reconciled,
+      errors: errors.length > 0 ? errors : undefined,
+    };
+  } catch (err) {
+    errors.push(err instanceof Error ? err.message : String(err));
+    return {
+      ok: false,
+      reconciled: false,
+      errors,
+    };
+  }
+}
