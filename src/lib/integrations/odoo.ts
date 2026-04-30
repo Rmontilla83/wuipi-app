@@ -1669,3 +1669,371 @@ export async function getExpensesSummary(
     bcv_rate_current: round2(currentRate),
   };
 }
+
+// ============================================================
+// PAYMENT SYNC (Fase 5) — Postear factura draft USD → posted VES
+// ============================================================
+//
+// Cuando un webhook de Mercantil llega aprobado, este modulo:
+//   1. Busca la factura draft del partner pagador
+//   2. Convierte la moneda USD -> VED a la tasa BCV del dia
+//   3. Recalcula price_unit de cada linea (USD * rate)
+//   4. action_post la factura -> queda posted en VES
+//
+// CRITICO: incluye 3 capas de seguridad antes de tocar Odoo:
+//   1. ODOO_SYNC_ENABLED env var (master kill switch)
+//   2. ODOO_SYNC_PARTNER_WHITELIST (lista de partner_ids permitidos)
+//   3. Validacion de monto VES esperado vs monto del pago real (tolerancia 10%)
+
+// ── Helpers genericos write / action_post ─────────────────────
+
+/**
+ * Genera un `write()` en Odoo: actualiza campos de un record.
+ * Devuelve true si fue exitoso. Lanza si falla.
+ */
+export async function odooWrite(
+  model: string,
+  ids: number[],
+  vals: Record<string, unknown>
+): Promise<boolean> {
+  const uid = await authenticate();
+  return jsonRpc("object", "execute_kw", [
+    ODOO_DB, uid, ODOO_API_KEY,
+    model, "write",
+    [ids, vals],
+    {},
+  ]);
+}
+
+/**
+ * Llama un metodo arbitrario sobre uno o mas records (ej. action_post).
+ * Devuelve lo que el metodo devuelva (varia por metodo).
+ */
+export async function odooCallMethod(
+  model: string,
+  ids: number[],
+  method: string,
+  args: unknown[] = [],
+  kwargs: Record<string, unknown> = {}
+): Promise<any> {
+  const uid = await authenticate();
+  return jsonRpc("object", "execute_kw", [
+    ODOO_DB, uid, ODOO_API_KEY,
+    model, method,
+    [ids, ...args],
+    kwargs,
+  ]);
+}
+
+// ── Tipos ─────────────────────────────────────────────────────
+
+export interface UsdRate {
+  rate: number;          // res.currency.rate (ej. 0.0020567857991281)
+  bsPerUsd: number;      // 1 / rate (ej. 486.1955)
+  date: string;          // ISO date (today)
+}
+
+export interface DraftInvoiceForSync {
+  id: number;
+  name: string | false;
+  partner_id: [number, string];
+  partner_name: string;
+  state: "draft" | "posted" | "cancel";
+  currency_id: [number, string];
+  amount_total: number;
+  amount_untaxed: number;
+  amount_tax: number;
+  amount_residual: number;
+  invoice_date_due: string | false;
+  invoice_origin: string | false;
+}
+
+export interface InvoiceLineForSync {
+  id: number;
+  name: string;
+  product_id: [number, string] | false;
+  quantity: number;
+  price_unit: number;
+  price_subtotal: number;
+  price_total: number;
+  currency_id: [number, string];
+  tax_ids: number[];
+  account_id: [number, string];
+}
+
+export interface PreviewResult {
+  ok: boolean;
+  invoice: DraftInvoiceForSync;
+  lines: InvoiceLineForSync[];
+  rate: UsdRate;
+  conversion: {
+    line_id: number;
+    product: string;
+    price_unit_usd: number;
+    price_unit_ves: number;
+    price_subtotal_usd: number;
+    price_subtotal_ves: number;
+  }[];
+  totals: {
+    untaxed_usd: number;
+    untaxed_ves: number;
+    tax_usd: number;
+    tax_ves: number;
+    total_usd: number;
+    total_ves: number;
+  };
+  validations: {
+    invoice_exists: boolean;
+    invoice_is_draft: boolean;
+    rate_is_valid: boolean;
+    has_lines: boolean;
+  };
+  warnings: string[];
+}
+
+export interface PostResult {
+  ok: boolean;
+  invoice_id: number;
+  invoice_name: string | false;          // numero asignado tras posting
+  partner_id: number;
+  amount_ves: number;
+  bcv_rate: number;
+  errors?: string[];
+}
+
+// ── Funciones de lectura para sync ────────────────────────────
+
+/**
+ * Lee la tasa USD live desde res.currency. Esta es la tasa que Odoo aplica
+ * cuando algo se postea hoy. Equivale a 1 / (Bs por USD).
+ *
+ * Ejemplo: si rate=0.0020567 → 1 USD = 486.19 Bs.
+ */
+export async function getLatestUsdRate(): Promise<UsdRate> {
+  const usdList = await searchRead("res.currency",
+    [["name", "=", "USD"]],
+    { fields: ["id", "name", "rate", "active"], limit: 1 }
+  );
+  const usd = usdList[0];
+  if (!usd) throw new Error("[OdooSync] No se encontro la moneda USD");
+  if (!usd.active) throw new Error("[OdooSync] La moneda USD esta desactivada en Odoo");
+  if (typeof usd.rate !== "number" || usd.rate <= 0) {
+    throw new Error(`[OdooSync] Rate USD invalida: ${usd.rate}`);
+  }
+  return {
+    rate: usd.rate,
+    bsPerUsd: 1 / usd.rate,
+    date: new Date().toISOString().split("T")[0],
+  };
+}
+
+/**
+ * Lee una factura por ID con todos los campos relevantes para el sync.
+ */
+export async function getInvoiceById(invoiceId: number): Promise<DraftInvoiceForSync | null> {
+  const list = await searchRead("account.move",
+    [["id", "=", invoiceId]],
+    {
+      fields: [
+        "id", "name", "partner_id", "state", "currency_id",
+        "amount_total", "amount_untaxed", "amount_tax", "amount_residual",
+        "invoice_date_due", "invoice_origin",
+      ],
+      limit: 1,
+    }
+  );
+  if (!list[0]) return null;
+  const inv = list[0];
+  return {
+    id: inv.id,
+    name: inv.name,
+    partner_id: inv.partner_id,
+    partner_name: inv.partner_id?.[1] || "",
+    state: inv.state,
+    currency_id: inv.currency_id,
+    amount_total: inv.amount_total,
+    amount_untaxed: inv.amount_untaxed,
+    amount_tax: inv.amount_tax,
+    amount_residual: inv.amount_residual,
+    invoice_date_due: inv.invoice_date_due,
+    invoice_origin: inv.invoice_origin,
+  };
+}
+
+/**
+ * Lee las lineas de producto de una factura. Solo display_type='product'
+ * (excluye lineas de seccion/nota).
+ */
+export async function getInvoiceLines(invoiceId: number): Promise<InvoiceLineForSync[]> {
+  return searchRead("account.move.line",
+    [["move_id", "=", invoiceId], ["display_type", "=", "product"]],
+    {
+      fields: [
+        "id", "name", "product_id", "quantity", "price_unit",
+        "price_subtotal", "price_total", "currency_id", "tax_ids", "account_id",
+      ],
+      limit: 100,
+    }
+  );
+}
+
+/**
+ * Genera el preview de un posting: lee factura, lineas y tasa, calcula la
+ * conversion completa, y devuelve un objeto con todo. NO toca Odoo.
+ *
+ * Esto es el dry-run que se usa para validar antes de hacer el posting real.
+ */
+export async function previewInvoicePosting(invoiceId: number): Promise<PreviewResult> {
+  const invoice = await getInvoiceById(invoiceId);
+  const warnings: string[] = [];
+  const validations = {
+    invoice_exists: !!invoice,
+    invoice_is_draft: invoice?.state === "draft",
+    rate_is_valid: false,
+    has_lines: false,
+  };
+
+  if (!invoice) {
+    return {
+      ok: false,
+      invoice: {} as DraftInvoiceForSync,
+      lines: [],
+      rate: {} as UsdRate,
+      conversion: [],
+      totals: {} as PreviewResult["totals"],
+      validations,
+      warnings: ["Factura no encontrada"],
+    };
+  }
+
+  if (invoice.state !== "draft") {
+    warnings.push(`La factura esta en estado "${invoice.state}", no draft. No se puede postear.`);
+  }
+
+  if (invoice.currency_id?.[1] !== "USD") {
+    warnings.push(`La factura esta en ${invoice.currency_id?.[1]}, no USD. Sync espera draft USD.`);
+  }
+
+  const lines = await getInvoiceLines(invoiceId);
+  validations.has_lines = lines.length > 0;
+  if (lines.length === 0) warnings.push("La factura no tiene lineas de producto");
+
+  const rate = await getLatestUsdRate();
+  validations.rate_is_valid = rate.bsPerUsd > 0;
+
+  // Calcular conversion linea por linea
+  const conversion = lines.map(line => ({
+    line_id: line.id,
+    product: Array.isArray(line.product_id) ? line.product_id[1] : line.name,
+    price_unit_usd: line.price_unit,
+    price_unit_ves: round4(line.price_unit * rate.bsPerUsd),
+    price_subtotal_usd: line.price_subtotal,
+    price_subtotal_ves: round2(line.price_subtotal * rate.bsPerUsd),
+  }));
+
+  const totals = {
+    untaxed_usd: invoice.amount_untaxed,
+    untaxed_ves: round2(invoice.amount_untaxed * rate.bsPerUsd),
+    tax_usd: invoice.amount_tax,
+    tax_ves: round2(invoice.amount_tax * rate.bsPerUsd),
+    total_usd: invoice.amount_total,
+    total_ves: round2(invoice.amount_total * rate.bsPerUsd),
+  };
+
+  const ok = validations.invoice_exists && validations.invoice_is_draft &&
+             validations.rate_is_valid && validations.has_lines && warnings.length === 0;
+
+  return { ok, invoice, lines, rate, conversion, totals, validations, warnings };
+}
+
+/**
+ * POSTING REAL — modifica Odoo. Usar solo tras validar dry-run.
+ *
+ * Flujo:
+ *   1. Validar preview ok (factura existe, esta draft, etc)
+ *   2. Buscar el ID de la moneda VED
+ *   3. write account.move: currency_id = VED.id
+ *   4. write cada line: price_unit = price_unit * bsPerUsd
+ *   5. action_post sobre la factura
+ *   6. Releer la factura para obtener el nuevo `name` (numero asignado)
+ *
+ * NO valida whitelist ni kill switch — eso es responsabilidad del caller
+ * (endpoint /api/admin/odoo/post-invoice).
+ */
+export async function postInvoiceInVes(invoiceId: number): Promise<PostResult> {
+  const errors: string[] = [];
+  const preview = await previewInvoicePosting(invoiceId);
+  if (!preview.ok) {
+    return {
+      ok: false,
+      invoice_id: invoiceId,
+      invoice_name: false,
+      partner_id: 0,
+      amount_ves: 0,
+      bcv_rate: 0,
+      errors: ["Preview no valido: " + preview.warnings.join("; ")],
+    };
+  }
+
+  // 1. Buscar el ID de VED en Odoo
+  const vedList = await searchRead("res.currency",
+    [["name", "=", "VED"]], { fields: ["id"], limit: 1 }
+  );
+  if (!vedList[0]) {
+    return {
+      ok: false,
+      invoice_id: invoiceId,
+      invoice_name: false,
+      partner_id: preview.invoice.partner_id?.[0] || 0,
+      amount_ves: 0,
+      bcv_rate: preview.rate.bsPerUsd,
+      errors: ["No se encontro la moneda VED en Odoo"],
+    };
+  }
+  const vedId = vedList[0].id;
+
+  try {
+    // 2. Cambiar currency_id de la factura a VED
+    await odooWrite("account.move", [invoiceId], { currency_id: vedId });
+
+    // 3. Recalcular price_unit de cada linea
+    for (const line of preview.lines) {
+      const newPriceUnit = round4(line.price_unit * preview.rate.bsPerUsd);
+      await odooWrite("account.move.line", [line.id], { price_unit: newPriceUnit });
+    }
+
+    // 4. action_post
+    await odooCallMethod("account.move", [invoiceId], "action_post");
+
+    // 5. Releer para obtener nuevo nombre
+    const posted = await getInvoiceById(invoiceId);
+
+    return {
+      ok: true,
+      invoice_id: invoiceId,
+      invoice_name: posted?.name || false,
+      partner_id: preview.invoice.partner_id?.[0] || 0,
+      amount_ves: posted?.amount_total || preview.totals.total_ves,
+      bcv_rate: preview.rate.bsPerUsd,
+    };
+  } catch (err) {
+    errors.push(err instanceof Error ? err.message : String(err));
+    return {
+      ok: false,
+      invoice_id: invoiceId,
+      invoice_name: false,
+      partner_id: preview.invoice.partner_id?.[0] || 0,
+      amount_ves: 0,
+      bcv_rate: preview.rate.bsPerUsd,
+      errors,
+    };
+  }
+}
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+function round4(n: number): number {
+  return Math.round(n * 10000) / 10000;
+}
