@@ -23,6 +23,8 @@ import {
 } from "@/lib/integrations/odoo";
 
 export const dynamic = "force-dynamic";
+// action_post de Odoo puede ser pesado (5-30s). Aumentamos el limite.
+export const maxDuration = 90;
 
 export async function POST(request: NextRequest) {
   const sb = createAdminSupabase();

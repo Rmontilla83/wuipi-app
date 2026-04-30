@@ -27,6 +27,10 @@ import {
 } from "@/lib/integrations/odoo";
 
 export const dynamic = "force-dynamic";
+// El wizard account.payment.register + action_create_payments es operacion
+// pesada en Odoo (10-30s tipicamente). Aumentamos el limite de Vercel a 90s
+// para cubrir worst case + buffer de logging.
+export const maxDuration = 90;
 
 export async function POST(request: NextRequest) {
   const sb = createAdminSupabase();

@@ -11,6 +11,7 @@ const ODOO_USER = process.env.ODOO_USER || "";
 const ODOO_API_KEY = process.env.ODOO_API_KEY || "";
 
 const TIMEOUT_MS = 15_000;
+const TIMEOUT_MS_LONG = 60_000;  // operaciones pesadas: action_post, action_create_payments, etc.
 
 // Cached uid — revalidated every hour
 let cachedUid: number | null = null;
@@ -53,9 +54,9 @@ interface JsonRpcResponse {
   error?: { code: number; message: string; data: { message: string } };
 }
 
-async function jsonRpc(service: "common" | "object", method: string, args: any[]): Promise<any> {
+async function jsonRpc(service: "common" | "object", method: string, args: any[], timeoutMs: number = TIMEOUT_MS): Promise<any> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     const res = await fetch(`${ODOO_URL}/jsonrpc`, {
@@ -1708,6 +1709,9 @@ export async function odooWrite(
 /**
  * Llama un metodo arbitrario sobre uno o mas records (ej. action_post).
  * Devuelve lo que el metodo devuelva (varia por metodo).
+ *
+ * Para metodos pesados (action_post, action_create_payments, etc.) se usa
+ * timeout largo (60s) automaticamente. El default es 15s.
  */
 export async function odooCallMethod(
   model: string,
@@ -1717,12 +1721,14 @@ export async function odooCallMethod(
   kwargs: Record<string, unknown> = {}
 ): Promise<any> {
   const uid = await authenticate();
+  // Heuristica: metodos action_* suelen ser operaciones pesadas
+  const timeout = method.startsWith("action_") ? TIMEOUT_MS_LONG : TIMEOUT_MS;
   return jsonRpc("object", "execute_kw", [
     ODOO_DB, uid, ODOO_API_KEY,
     model, method,
     [ids, ...args],
     kwargs,
-  ]);
+  ], timeout);
 }
 
 // ── Tipos ─────────────────────────────────────────────────────
@@ -2377,15 +2383,16 @@ export async function registerPaymentForInvoice(opts: {
           active_id: opts.invoiceId,
         },
       },
-    ]);
+    ], TIMEOUT_MS_LONG);
 
     // 2. action_create_payments crea el payment, lo postea y reconcilia con la factura
+    // Operacion pesada -> usar timeout largo (60s).
     await jsonRpc("object", "execute_kw", [
       ODOO_DB, uid, ODOO_API_KEY,
       "account.payment.register", "action_create_payments",
       [[wizardId]],
       {},
-    ]);
+    ], TIMEOUT_MS_LONG);
 
     // 3. Releer la factura para verificar el resultado
     const after = (await read("account.move", [opts.invoiceId], ["payment_state", "matched_payment_ids"]))[0];
