@@ -1707,6 +1707,22 @@ export async function odooWrite(
 }
 
 /**
+ * Crea un nuevo record en Odoo. Devuelve el id.
+ */
+export async function odooCreate(
+  model: string,
+  vals: Record<string, unknown>
+): Promise<number> {
+  const uid = await authenticate();
+  return jsonRpc("object", "execute_kw", [
+    ODOO_DB, uid, ODOO_API_KEY,
+    model, "create",
+    [vals],
+    {},
+  ]);
+}
+
+/**
  * Llama un metodo arbitrario sobre uno o mas records (ej. action_post).
  * Devuelve lo que el metodo devuelva (varia por metodo).
  *
@@ -2340,9 +2356,19 @@ export async function previewRegisterPayment(opts: {
 }
 
 /**
- * REGISTER REAL — crea el account.payment y lo reconcilia con la factura.
- * Usar via wizard `account.payment.register` que es la forma oficial (lo que
- * hace la UI cuando hace clic en "Registrar pago" en una factura).
+ * REGISTER REAL — crea el account.payment, lo postea y lo reconcilia con la
+ * factura. Approach manual paso a paso (en vez del wizard) porque el wizard
+ * action_create_payments en Odoo 18 falla con "Solo puede conciliar los
+ * asientos publicados" al hacer reconcile antes de que el move del payment
+ * quede posted.
+ *
+ * Flujo:
+ *   1. Crear account.payment (state=draft)
+ *   2. action_post sobre el payment → genera move + state=in_process
+ *   3. Buscar la linea del move del payment con account=destination (receivable)
+ *   4. Buscar la linea del move de la factura con account=destination (receivable)
+ *   5. Reconciliar las dos lineas via account.move.line.reconcile()
+ *   6. Releer factura para verificar payment_state cambio a paid/in_payment
  */
 export async function registerPaymentForInvoice(opts: {
   invoiceId: number;
@@ -2361,66 +2387,91 @@ export async function registerPaymentForInvoice(opts: {
     };
   }
 
-  const uid = await authenticate();
-
   try {
-    // 1. Crear el wizard account.payment.register desde la factura
-    const wizardId = await jsonRpc("object", "execute_kw", [
-      ODOO_DB, uid, ODOO_API_KEY,
-      "account.payment.register", "create",
-      [{
-        payment_date: preview.payment_date,
-        amount: preview.amount,
-        journal_id: preview.mapping.journalId,
-        payment_method_line_id: preview.mapping.paymentMethodLineId,
-        currency_id: preview.mapping.currencyId,
-        communication: preview.memo,
-      }],
-      {
-        context: {
-          active_model: "account.move",
-          active_ids: [opts.invoiceId],
-          active_id: opts.invoiceId,
-        },
-      },
-    ], TIMEOUT_MS_LONG);
+    // 1. Crear el account.payment directamente (state inicial = draft)
+    const paymentId = await odooCreate("account.payment", {
+      payment_type: "inbound",
+      partner_type: "customer",
+      partner_id: preview.partner_id,
+      journal_id: preview.mapping.journalId,
+      payment_method_line_id: preview.mapping.paymentMethodLineId,
+      amount: preview.amount,
+      currency_id: preview.mapping.currencyId,
+      date: preview.payment_date,
+      memo: preview.memo,
+    });
 
-    // 2. action_create_payments crea el payment, lo postea y reconcilia con la factura
-    // Operacion pesada -> usar timeout largo (60s).
-    await jsonRpc("object", "execute_kw", [
-      ODOO_DB, uid, ODOO_API_KEY,
-      "account.payment.register", "action_create_payments",
-      [[wizardId]],
-      {},
-    ], TIMEOUT_MS_LONG);
+    // 2. action_post sobre el payment → genera move y lineas, state=in_process
+    await odooCallMethod("account.payment", [paymentId], "action_post");
 
-    // 3. Releer la factura para verificar el resultado
-    const after = (await read("account.move", [opts.invoiceId], ["payment_state", "matched_payment_ids"]))[0];
-    const paymentState = after?.payment_state || "unknown";
-    const paymentIds = after?.matched_payment_ids || [];
-    const lastPaymentId = Array.isArray(paymentIds) && paymentIds.length > 0
-      ? paymentIds[paymentIds.length - 1]
-      : null;
-
-    let paymentName: string | undefined;
-    let paymentSelfState: string | undefined;
-    if (lastPaymentId) {
-      const pmt = (await read("account.payment", [lastPaymentId], ["name", "state"]))[0];
-      paymentName = pmt?.name;
-      paymentSelfState = pmt?.state;
+    // 3. Releer el payment para obtener move_id, destination_account_id, state
+    const pmt = (await read("account.payment", [paymentId],
+      ["name", "state", "move_id", "destination_account_id"]))[0];
+    if (!pmt) {
+      throw new Error(`No se pudo releer el payment ${paymentId} tras action_post`);
+    }
+    const paymentMoveId = pmt.move_id?.[0];
+    const destAccountId = pmt.destination_account_id?.[0];
+    if (!paymentMoveId || !destAccountId) {
+      throw new Error(`Payment ${paymentId} sin move_id o destination_account_id tras action_post`);
     }
 
+    // Verificar que el move quedo posted (sino la reconciliacion fallara)
+    const paymentMove = (await read("account.move", [paymentMoveId], ["state"]))[0];
+    if (paymentMove?.state !== "posted") {
+      throw new Error(`Move del payment ${paymentMoveId} quedo en state="${paymentMove?.state}", esperabamos posted`);
+    }
+
+    // 4. Buscar las 2 lineas a reconciliar:
+    //    a) Del move del payment: la linea de la cuenta receivable (destination)
+    //    b) Del move de la factura: la linea de la cuenta receivable (display_type=payment_term)
+    const uid = await authenticate();
+    const paymentLines = await jsonRpc("object", "execute_kw", [
+      ODOO_DB, uid, ODOO_API_KEY,
+      "account.move.line", "search_read",
+      [[
+        ["move_id", "=", paymentMoveId],
+        ["account_id", "=", destAccountId],
+      ]],
+      { fields: ["id", "account_id", "debit", "credit"] },
+    ]);
+    const invoiceLines = await jsonRpc("object", "execute_kw", [
+      ODOO_DB, uid, ODOO_API_KEY,
+      "account.move.line", "search_read",
+      [[
+        ["move_id", "=", opts.invoiceId],
+        ["account_id", "=", destAccountId],
+        ["display_type", "=", "payment_term"],
+      ]],
+      { fields: ["id", "account_id", "debit", "credit", "reconciled"] },
+    ]);
+
+    if (!paymentLines[0] || !invoiceLines[0]) {
+      throw new Error(`No se encontraron lineas para reconciliar (payment_lines=${paymentLines.length}, invoice_lines=${invoiceLines.length})`);
+    }
+
+    // 5. Reconciliar las dos lineas
+    await odooCallMethod(
+      "account.move.line",
+      [paymentLines[0].id, invoiceLines[0].id],
+      "reconcile"
+    );
+
+    // 6. Releer factura para verificar payment_state
+    const after = (await read("account.move", [opts.invoiceId],
+      ["payment_state", "matched_payment_ids", "amount_residual"]))[0];
+    const paymentState = after?.payment_state || "unknown";
     const reconciled = paymentState === "paid" || paymentState === "in_payment";
 
     if (!reconciled) {
-      errors.push(`Factura tras crear payment: payment_state="${paymentState}". Esperabamos paid o in_payment.`);
+      errors.push(`Tras reconcile: invoice.payment_state="${paymentState}", residual=${after?.amount_residual}. Esperabamos paid o in_payment.`);
     }
 
     return {
       ok: reconciled,
-      payment_id: lastPaymentId || undefined,
-      payment_name: paymentName,
-      payment_state: paymentSelfState,
+      payment_id: paymentId,
+      payment_name: pmt.name,
+      payment_state: pmt.state,
       invoice_payment_state_after: paymentState,
       reconciled,
       errors: errors.length > 0 ? errors : undefined,
