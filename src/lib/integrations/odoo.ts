@@ -2422,6 +2422,23 @@ export async function registerPaymentForInvoice(opts: {
       throw new Error(`Move del payment ${paymentMoveId} quedo en state="${paymentMove?.state}", esperabamos posted`);
     }
 
+    // En Odoo 18, action_post sobre el payment a veces hace auto-reconciliacion
+    // con facturas pendientes del partner. Si ya esta reconciliado, saltarse el
+    // reconcile manual (sino tira "asientos ya conciliados").
+    const checkInvoice = (await read("account.move", [opts.invoiceId],
+      ["payment_state", "amount_residual"]))[0];
+    if (checkInvoice?.payment_state === "paid" || checkInvoice?.payment_state === "in_payment") {
+      // Ya quedo reconciliada via action_post auto-match — devolver success.
+      return {
+        ok: true,
+        payment_id: paymentId,
+        payment_name: pmt.name,
+        payment_state: pmt.state,
+        invoice_payment_state_after: checkInvoice.payment_state,
+        reconciled: true,
+      };
+    }
+
     // 4. Buscar las 2 lineas a reconciliar:
     //    a) Del move del payment: la linea de la cuenta receivable (destination)
     //    b) Del move de la factura: la linea de la cuenta receivable (display_type=payment_term)
