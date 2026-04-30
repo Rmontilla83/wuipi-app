@@ -1815,17 +1815,19 @@ export interface PostResult {
  * Lee una suscripcion (sale.order) por su `name` (ej. "S20548").
  * Usado para encontrar la suscripcion origen de una factura draft via
  * `account.move.invoice_origin`.
+ *
+ * NOTA: subscription_plan_id NO existe en sale.order — esta solo en
+ * sale.order.line. Por eso pedimos solo los campos que si existen.
  */
 export async function getSubscriptionByName(name: string): Promise<{
   id: number;
   name: string;
   next_invoice_date: string | false;
-  subscription_plan: string;
 } | null> {
   const list = await searchRead("sale.order",
     [["name", "=", name]],
     {
-      fields: ["id", "name", "next_invoice_date", "subscription_plan_id", "is_subscription"],
+      fields: ["id", "name", "next_invoice_date", "is_subscription"],
       limit: 1,
     }
   );
@@ -1835,7 +1837,6 @@ export async function getSubscriptionByName(name: string): Promise<{
     id: so.id,
     name: so.name,
     next_invoice_date: so.next_invoice_date,
-    subscription_plan: so.subscription_plan_id?.[1] || "",
   };
 }
 
