@@ -29,13 +29,6 @@ export async function GET(
       return apiError("Enlace de pago no encontrado o expirado", 404);
     }
 
-    // DIAGNOSTIC LOG (temp)
-    console.log(`[cobranzas/${params.token.slice(0, 12)}] item leido: id=${item.id} status=${item.status} paid_at=${item.paid_at} method=${item.payment_method} updated_at=${(item as any).updated_at}`);
-    const _debugRawStatus = item.status;
-    const _debugRawPaidAt = item.paid_at;
-    const _debugItemId = item.id;
-    const _debugUpdatedAt = (item as any).updated_at;
-
     // Enforce expiration
     if (item.expires_at && new Date(item.expires_at) < new Date()) {
       return apiError("Este enlace de pago ha expirado", 410);
@@ -78,11 +71,6 @@ export async function GET(
       payment_method: item.payment_method,
       payment_reference: item.payment_reference,
       paid_at: item.paid_at,
-      _debug_raw_status: _debugRawStatus,
-      _debug_raw_paid_at: _debugRawPaidAt,
-      _debug_item_id: _debugItemId,
-      _debug_updated_at: _debugUpdatedAt,
-      _debug_now: new Date().toISOString(),
       ...(odooInvoices ? { odoo_invoices: odooInvoices, currency: item.metadata?.currency } : {}),
     });
   } catch (error) {
