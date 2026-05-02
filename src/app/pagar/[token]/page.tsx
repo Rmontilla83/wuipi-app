@@ -1141,9 +1141,25 @@ function PaidConfirmation({ data, autoVerifiedMsg }: { data: PaymentData; autoVe
         )}
       </div>
 
-      <p className="text-gray-600 text-xs">
+      <p className="text-gray-600 text-xs mb-6">
         Recibirás una confirmación por WhatsApp y email
       </p>
+
+      {/* Acciones tras el pago — el cliente decide a donde volver */}
+      <div className="flex flex-col gap-2 max-w-xs mx-auto">
+        <a
+          href="https://wuipi.net"
+          className="w-full py-3 rounded-xl bg-gradient-to-r from-[#03318C] to-[#060633] text-white font-semibold text-sm hover:opacity-90 transition-opacity"
+        >
+          Volver a wuipi.net
+        </a>
+        <a
+          href="https://api.wuipi.net/portal/inicio"
+          className="w-full py-3 rounded-xl border border-white/10 text-gray-300 text-sm font-medium hover:bg-white/[0.02] transition-colors"
+        >
+          Ir a mi portal
+        </a>
+      </div>
     </div>
   );
 }

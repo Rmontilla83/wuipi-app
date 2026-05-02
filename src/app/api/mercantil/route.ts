@@ -22,6 +22,8 @@ import { configFromEnv, getAllSecretKeys } from "@/lib/mercantil/core/config";
 import { markItemPaid, getItemByMercantilInvoiceId } from "@/lib/dal/collection-campaigns";
 import { getClientIP } from "@/lib/utils/rate-limit";
 import { triggerOdooSyncOrEnqueue } from "@/lib/integrations/odoo-sync-trigger";
+import { sendPaymentConfirmationWhatsApp } from "@/lib/notifications/whatsapp";
+import { sendPaymentConfirmationEmail } from "@/lib/notifications/email";
 
 export const dynamic = "force-dynamic";
 
@@ -339,6 +341,33 @@ export async function POST(request: NextRequest) {
             });
             console.log("[Mercantil Alias] Item " + item.id + " marcado como paid");
             processed = true;
+
+            // Notificar al cliente (WhatsApp + Email). Fire-and-forget — si falla
+            // alguno NO bloquea el resto del flujo.
+            const amountMsg = normalized.amount
+              ? `Bs ${normalized.amount.toLocaleString("es-VE", { minimumFractionDigits: 2 })}`
+              : `$${Number(item.amount_usd).toFixed(2)} USD`;
+            const concept = item.concept || "Servicio WUIPI";
+            const reference = normalized.reference_number || "";
+
+            if (item.customer_phone) {
+              sendPaymentConfirmationWhatsApp({
+                phone: item.customer_phone,
+                customerName: item.customer_name,
+                reference,
+                amount: amountMsg,
+                concept,
+              }).catch((err: unknown) => console.error("[Mercantil Alias] WA error:", err));
+            }
+            if (item.customer_email) {
+              sendPaymentConfirmationEmail({
+                email: item.customer_email,
+                customerName: item.customer_name,
+                reference,
+                amount: amountMsg,
+                concept,
+              }).catch((err: unknown) => console.error("[Mercantil Alias] Email error:", err));
+            }
 
             // CRITICAL: marcar processed=true en payment_webhook_logs INMEDIATAMENTE
             // tras markItemPaid. Mercantil envia el webhook 2-3 veces y la idempotencia
