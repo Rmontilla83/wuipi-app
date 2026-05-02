@@ -148,6 +148,23 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    // Sprint 4 — sync Odoo solo cuando el pago esta REAL paid (auto-verified).
+    try {
+      const { triggerOdooSyncOrEnqueue } = await import("@/lib/integrations/odoo-sync-trigger");
+      await triggerOdooSyncOrEnqueue({
+        collectionItemId: item.id,
+        paymentToken: item.payment_token,
+        customerCedulaRif: item.customer_cedula_rif,
+        customerEmail: item.customer_email,
+        paymentMethod: "transferencia",
+        paymentReference: reference,
+        amountUsd: Number(item.amount_usd),
+        amountVes: typeof item.amount_bss === "number" ? item.amount_bss : null,
+      });
+    } catch (err) {
+      console.error("[PayConfirm] Sync Odoo fallo (no bloqueante):", err);
+    }
+
     // Notifications (fire-and-forget) — only on real confirmation
     const amount = `$${Number(item.amount_usd).toFixed(2)} USD`;
     const concept = item.concept || "Servicio WUIPI";

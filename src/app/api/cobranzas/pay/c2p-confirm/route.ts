@@ -88,6 +88,23 @@ export async function POST(request: NextRequest) {
       bcv_rate: bcv.usd_to_bs,
     });
 
+    // Sprint 4 — sync Odoo (best-effort, fallback a cola). No bloquea la respuesta.
+    try {
+      const { triggerOdooSyncOrEnqueue } = await import("@/lib/integrations/odoo-sync-trigger");
+      await triggerOdooSyncOrEnqueue({
+        collectionItemId: item.id,
+        paymentToken: item.payment_token,
+        customerCedulaRif: item.customer_cedula_rif,
+        customerEmail: item.customer_email,
+        paymentMethod: "c2p",
+        paymentReference: reference,
+        amountUsd: Number(item.amount_usd),
+        amountVes: amountBss,
+      });
+    } catch (err) {
+      console.error("[C2P Confirm] Sync Odoo fallo (no bloqueante):", err);
+    }
+
     // Notifications (fire-and-forget) — el pago ya esta confirmado por Mercantil
     const amount = `$${Number(item.amount_usd).toFixed(2)} USD`;
     const concept = item.concept || "Servicio WUIPI";

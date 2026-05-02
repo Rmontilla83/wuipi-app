@@ -61,6 +61,26 @@ export async function POST(request: NextRequest) {
           payment_reference: session.payment_intent as string || session.id,
         });
 
+        // Sprint 4 — sync Odoo (factura queda en USD, no se convierte).
+        if (item) {
+          try {
+            const ref = (session.payment_intent as string) || session.id;
+            const { triggerOdooSyncOrEnqueue } = await import("@/lib/integrations/odoo-sync-trigger");
+            await triggerOdooSyncOrEnqueue({
+              collectionItemId: item.id,
+              paymentToken: item.payment_token,
+              customerCedulaRif: item.customer_cedula_rif,
+              customerEmail: item.customer_email,
+              paymentMethod: "stripe",
+              paymentReference: ref,
+              amountUsd: Number(item.amount_usd),
+              amountVes: null,
+            });
+          } catch (err) {
+            console.error("[Stripe Webhook] Sync Odoo fallo (no bloqueante):", err);
+          }
+        }
+
         // Send payment confirmation notifications
         if (item) {
           const reference = (session.payment_intent as string) || session.id;

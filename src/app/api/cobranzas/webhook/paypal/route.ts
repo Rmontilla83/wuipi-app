@@ -88,6 +88,23 @@ export async function GET(request: NextRequest) {
           // Payment was captured by PayPal — redirect success anyway; reconcile manually.
         }
 
+        // Sprint 4 — sync Odoo (factura queda en USD).
+        try {
+          const { triggerOdooSyncOrEnqueue } = await import("@/lib/integrations/odoo-sync-trigger");
+          await triggerOdooSyncOrEnqueue({
+            collectionItemId: item.id,
+            paymentToken: item.payment_token,
+            customerCedulaRif: item.customer_cedula_rif,
+            customerEmail: item.customer_email,
+            paymentMethod: "paypal",
+            paymentReference: capture.captureId,
+            amountUsd: Number(item.amount_usd),
+            amountVes: null,
+          });
+        } catch (err) {
+          console.error("[PayPal Return] Sync Odoo fallo (no bloqueante):", err);
+        }
+
         // Non-blocking confirmations
         const amount = `$${capture.amount} USD`;
         const concept = item.concept || "Servicio WUIPI";

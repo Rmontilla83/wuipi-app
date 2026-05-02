@@ -20,12 +20,7 @@ import { decrypt } from "@/lib/mercantil/core/crypto";
 import { configFromEnv, getAllSecretKeys } from "@/lib/mercantil/core/config";
 import { markItemPaid, getItemByMercantilInvoiceId } from "@/lib/dal/collection-campaigns";
 import { getClientIP } from "@/lib/utils/rate-limit";
-import {
-  syncOdooForCollectionItem,
-  findOdooPartnerByIdentifiers,
-  findLatestDraftInvoiceForPartner,
-} from "@/lib/integrations/odoo";
-import { enqueueOdooSync } from "@/lib/dal/odoo-sync-queue";
+import { triggerOdooSyncOrEnqueue } from "@/lib/integrations/odoo-sync-trigger";
 
 export const dynamic = "force-dynamic";
 
@@ -344,14 +339,17 @@ export async function POST(request: NextRequest) {
             console.log("[Mercantil Alias] Item " + item.id + " marcado como paid");
             processed = true;
 
-            // ---- Sprint 4: sync con Odoo (best-effort sincronico, fallback a cola) ----
-            // Solo si ODOO_SYNC_ENABLED y partner en whitelist (si activa).
-            // Cualquier fallo NO bloquea el response del webhook a Mercantil.
+            // Sprint 4 — sync Odoo (best-effort sincronico, fallback a cola).
             try {
-              await trySyncOdooOrEnqueue({
-                collectionItem: item,
+              await triggerOdooSyncOrEnqueue({
+                collectionItemId: item.id,
+                paymentToken: item.payment_token,
+                customerCedulaRif: item.customer_cedula_rif,
+                customerEmail: item.customer_email,
+                paymentMethod: "debito_inmediato",
                 paymentReference: normalized.reference_number || "",
-                amountVes: normalized.amount,
+                amountUsd: Number(item.amount_usd),
+                amountVes: normalized.amount ?? null,
               });
             } catch (err) {
               console.error("[Mercantil Alias] Sync Odoo fallo (no bloqueante):", err);
@@ -442,129 +440,4 @@ export async function POST(request: NextRequest) {
     },
     { status: 200 }
   );
-}
-
-// ============================================================
-// Sprint 4 — Sync automatico a Odoo tras webhook aprobado
-// ============================================================
-
-/**
- * Tras markItemPaid exitoso, intenta sync sincronico con Odoo. Si falla por
- * cualquier razon (Odoo caido, kill switch off, partner no encontrado, etc.),
- * encola en odoo_sync_queue para que el cron lo reintente.
- *
- * NUNCA lanza — todos los errores se manejan internamente. El webhook a
- * Mercantil siempre debe responder 200.
- */
-async function trySyncOdooOrEnqueue(opts: {
-  collectionItem: { id: string; payment_token: string; customer_cedula_rif: string; customer_email: string | null; amount_usd: number };
-  paymentReference: string;
-  amountVes: number | undefined;
-}): Promise<void> {
-  const { collectionItem: item, paymentReference, amountVes } = opts;
-
-  const enabled = process.env.ODOO_SYNC_ENABLED === "true";
-  if (!enabled) {
-    console.log(`[Mercantil Alias] Sync Odoo skip: ODOO_SYNC_ENABLED=false`);
-    return;
-  }
-
-  // Lookup partner en Odoo
-  let odooPartnerId: number | null = null;
-  try {
-    odooPartnerId = await findOdooPartnerByIdentifiers({
-      vat: item.customer_cedula_rif,
-      email: item.customer_email,
-    });
-  } catch (err) {
-    console.warn("[Mercantil Alias] Lookup partner fallo:", err);
-  }
-  if (!odooPartnerId) {
-    await enqueueOdooSync({
-      collection_item_id: item.id,
-      odoo_partner_id: null,
-      odoo_invoice_id: null,
-      payment_method: "debito_inmediato",
-      payment_reference: paymentReference,
-      payment_token: item.payment_token,
-      amount_usd: item.amount_usd,
-      amount_ves: amountVes ?? null,
-      initial_error: `Lookup partner fallo (cedula=${item.customer_cedula_rif} email=${item.customer_email})`,
-    });
-    console.log(`[Mercantil Alias] Item ${item.id} encolado (partner no encontrado)`);
-    return;
-  }
-
-  // Whitelist
-  const whitelist = (process.env.ODOO_SYNC_PARTNER_WHITELIST || "")
-    .split(",").map(s => s.trim()).filter(Boolean).map(Number);
-  const whitelistActive = whitelist.length > 0;
-  if (whitelistActive && !whitelist.includes(odooPartnerId)) {
-    console.log(`[Mercantil Alias] Partner ${odooPartnerId} no en whitelist — skip`);
-    return;
-  }
-
-  // Lookup factura draft
-  let odooInvoiceId: number | null = null;
-  try {
-    odooInvoiceId = await findLatestDraftInvoiceForPartner(odooPartnerId);
-  } catch (err) {
-    console.warn("[Mercantil Alias] Lookup invoice fallo:", err);
-  }
-  if (!odooInvoiceId) {
-    await enqueueOdooSync({
-      collection_item_id: item.id,
-      odoo_partner_id: odooPartnerId,
-      odoo_invoice_id: null,
-      payment_method: "debito_inmediato",
-      payment_reference: paymentReference,
-      payment_token: item.payment_token,
-      amount_usd: item.amount_usd,
-      amount_ves: amountVes ?? null,
-      initial_error: `Sin factura draft para partner ${odooPartnerId}`,
-    });
-    console.log(`[Mercantil Alias] Item ${item.id} encolado (sin factura draft)`);
-    return;
-  }
-
-  // Intento sincronico
-  try {
-    const result = await syncOdooForCollectionItem({
-      invoiceId: odooInvoiceId,
-      paymentMethod: "debito_inmediato",
-      paymentReference,
-      paymentToken: item.payment_token,
-    });
-
-    if (result.ok) {
-      console.log(`[Mercantil Alias] ✅ Sync Odoo OK invoice=${odooInvoiceId} payment_state=${result.invoice_payment_state}`);
-      return;
-    }
-
-    await enqueueOdooSync({
-      collection_item_id: item.id,
-      odoo_partner_id: odooPartnerId,
-      odoo_invoice_id: odooInvoiceId,
-      payment_method: "debito_inmediato",
-      payment_reference: paymentReference,
-      payment_token: item.payment_token,
-      amount_usd: item.amount_usd,
-      amount_ves: amountVes ?? null,
-      initial_error: result.error || "sync fallo",
-    });
-    console.warn(`[Mercantil Alias] Sync Odoo fallo, encolado: ${result.error}`);
-  } catch (err) {
-    await enqueueOdooSync({
-      collection_item_id: item.id,
-      odoo_partner_id: odooPartnerId,
-      odoo_invoice_id: odooInvoiceId,
-      payment_method: "debito_inmediato",
-      payment_reference: paymentReference,
-      payment_token: item.payment_token,
-      amount_usd: item.amount_usd,
-      amount_ves: amountVes ?? null,
-      initial_error: `exception: ${err instanceof Error ? err.message : String(err)}`,
-    });
-    console.error(`[Mercantil Alias] Sync Odoo exception, encolado:`, err);
-  }
 }
