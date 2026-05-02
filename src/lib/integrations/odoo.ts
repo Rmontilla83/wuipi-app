@@ -1788,9 +1788,11 @@ export interface PreviewResult {
   invoice: DraftInvoiceForSync;
   lines: InvoiceLineForSync[];
   rate: UsdRate;
-  /** "convert": factura en USD, hay que convertir lineas a VES.
-   *  "skip-conversion": factura ya en VED, solo postear (caso reentrada). */
-  scenario: "convert" | "skip-conversion";
+  /** "convert": factura draft USD -> postear en VES (multiplica precios por bsPerUsd).
+   *  "skip-conversion": factura ya en VED draft, solo postear (caso reentrada).
+   *  "usd-no-convert": pago entra en USD (Stripe/PayPal/Cash USD), factura
+   *    se postea en USD sin tocar moneda ni precios. */
+  scenario: "convert" | "skip-conversion" | "usd-no-convert";
   conversion: {
     line_id: number;
     product: string;
@@ -1976,13 +1978,22 @@ export async function getInvoiceLines(invoiceId: number): Promise<InvoiceLineFor
  * Genera el preview de un posting: lee factura, lineas, tasa, suscripcion
  * origen y calcula todo lo que se va a hacer. NO toca Odoo.
  *
- * Maneja 2 escenarios:
- *  - "convert": factura draft en USD -> hay que convertir a VES y postear
+ * Maneja 3 escenarios:
+ *  - "convert" (default si paymentMethod no se pasa): factura draft USD ->
+ *    convertir a VES y postear
  *  - "skip-conversion": factura ya en VED (reentrada despues de revertir
- *    desde posted) -> solo llenar month_billed y postear, NO multiplicar
- *    precios otra vez (sino seria 243 * 486 = 118k erroneo).
+ *    desde posted) -> solo llenar month_billed y postear
+ *  - "usd-no-convert": paymentMethod cuyo mapping.currencyId === 1 (USD)
+ *    -> postear factura en USD sin conversion (Stripe/PayPal/Cash USD)
+ *
+ * @param paymentMethod opcional. Si se pasa y el mapping tiene currencyId=USD,
+ *                      no se convierte la factura. Sin paymentMethod default
+ *                      a convert (compat con llamadas Sprint 1).
  */
-export async function previewInvoicePosting(invoiceId: number): Promise<PreviewResult> {
+export async function previewInvoicePosting(
+  invoiceId: number,
+  paymentMethod?: string,
+): Promise<PreviewResult> {
   const invoice = await getInvoiceById(invoiceId);
   const warnings: string[] = [];
   const validations = {
@@ -2013,13 +2024,28 @@ export async function previewInvoicePosting(invoiceId: number): Promise<PreviewR
     warnings.push(`La factura esta en estado "${invoice.state}", no draft. No se puede postear.`);
   }
 
-  // Detectar escenario por moneda actual
+  // Detectar escenario:
+  //  1. Si paymentMethod indica pago en USD -> "usd-no-convert" (factura debe quedar en USD)
+  //  2. Si la factura ya esta en VED -> "skip-conversion" (reentrada)
+  //  3. Si la factura esta en USD y el pago es en VES -> "convert"
   const currentCurrencyName = invoice.currency_id?.[1];
-  const scenario: "convert" | "skip-conversion" =
-    currentCurrencyName === "VED" ? "skip-conversion" : "convert";
+  const mappingForMethod = paymentMethod ? PAYMENT_METHOD_MAPPING[paymentMethod] : undefined;
+  const targetCurrencyId = mappingForMethod?.currencyId;
+  const wantsUsdTarget = targetCurrencyId === 1;
 
-  if (scenario === "convert" && currentCurrencyName !== "USD") {
-    warnings.push(`La factura esta en ${currentCurrencyName}, esperamos USD o VED. Aborta.`);
+  let scenario: "convert" | "skip-conversion" | "usd-no-convert";
+  if (wantsUsdTarget) {
+    scenario = "usd-no-convert";
+    if (currentCurrencyName !== "USD") {
+      warnings.push(`Pago en USD (${paymentMethod}) pero factura esta en ${currentCurrencyName}. La factura debe permanecer en USD para este metodo. Aborta.`);
+    }
+  } else if (currentCurrencyName === "VED") {
+    scenario = "skip-conversion";
+  } else {
+    scenario = "convert";
+    if (currentCurrencyName !== "USD") {
+      warnings.push(`La factura esta en ${currentCurrencyName}, esperamos USD o VED. Aborta.`);
+    }
   }
 
   const lines = await getInvoiceLines(invoiceId);
@@ -2029,15 +2055,29 @@ export async function previewInvoicePosting(invoiceId: number): Promise<PreviewR
   const rate = await getLatestUsdRate();
   validations.rate_is_valid = rate.bsPerUsd > 0;
 
-  // Calcular conversion linea por linea
-  // - scenario=convert: precio actual es USD, multiplicamos por bsPerUsd
-  // - scenario=skip-conversion: precio actual ya es VES (no multiplicar)
+  // Calcular conversion linea por linea segun scenario:
+  // - convert: precio actual es USD -> multiplicar por bsPerUsd para mostrar VES
+  // - skip-conversion: precio actual ya es VES -> deducir USD via division
+  // - usd-no-convert: precio actual es USD, va a quedar en USD (mostrar conversion VES solo informativo)
   const conversion = lines.map(line => {
-    const isAlreadyVes = scenario === "skip-conversion";
-    const price_unit_usd = isAlreadyVes ? round4(line.price_unit / rate.bsPerUsd) : line.price_unit;
-    const price_unit_ves = isAlreadyVes ? line.price_unit : round4(line.price_unit * rate.bsPerUsd);
-    const price_subtotal_usd = isAlreadyVes ? round2(line.price_subtotal / rate.bsPerUsd) : line.price_subtotal;
-    const price_subtotal_ves = isAlreadyVes ? line.price_subtotal : round2(line.price_subtotal * rate.bsPerUsd);
+    let price_unit_usd: number;
+    let price_unit_ves: number;
+    let price_subtotal_usd: number;
+    let price_subtotal_ves: number;
+
+    if (scenario === "skip-conversion") {
+      price_unit_usd = round4(line.price_unit / rate.bsPerUsd);
+      price_unit_ves = line.price_unit;
+      price_subtotal_usd = round2(line.price_subtotal / rate.bsPerUsd);
+      price_subtotal_ves = line.price_subtotal;
+    } else {
+      // convert o usd-no-convert: precio actual es USD
+      price_unit_usd = line.price_unit;
+      price_unit_ves = round4(line.price_unit * rate.bsPerUsd);
+      price_subtotal_usd = line.price_subtotal;
+      price_subtotal_ves = round2(line.price_subtotal * rate.bsPerUsd);
+    }
+
     return {
       line_id: line.id,
       product: Array.isArray(line.product_id) ? line.product_id[1] : line.name,
@@ -2048,8 +2088,7 @@ export async function previewInvoicePosting(invoiceId: number): Promise<PreviewR
     };
   });
 
-  const isAlreadyVes = scenario === "skip-conversion";
-  const totals = isAlreadyVes ? {
+  const totals = scenario === "skip-conversion" ? {
     untaxed_usd: round2(invoice.amount_untaxed / rate.bsPerUsd),
     untaxed_ves: invoice.amount_untaxed,
     tax_usd: round2(invoice.amount_tax / rate.bsPerUsd),
@@ -2092,19 +2131,19 @@ export async function previewInvoicePosting(invoiceId: number): Promise<PreviewR
 /**
  * POSTING REAL — modifica Odoo. Usar solo tras validar dry-run.
  *
- * Flujo:
- *   1. Validar preview ok
- *   2. Si scenario="convert": cambiar currency a VED + recalcular precios
- *      Si scenario="skip-conversion": NO tocar moneda ni precios (ya estan en VES)
- *   3. Escribir month_billed (CRITICO — sin esto action_post se queda en draft silente)
- *   4. action_post
- *   5. Releer state — si NO esta posted, fallar explicitamente (no fallar silente)
+ * Flujo segun scenario (lo decide previewInvoicePosting basado en paymentMethod):
+ *   - convert: cambiar currency a VED + recalcular precios + month_billed + action_post
+ *   - skip-conversion: solo month_billed + action_post (factura ya en VED)
+ *   - usd-no-convert: solo month_billed + action_post (factura queda en USD)
  *
- * NO valida whitelist ni kill switch — eso es responsabilidad del caller.
+ * @param paymentMethod opcional. Si presente y mapping.currencyId=USD, no convierte.
  */
-export async function postInvoiceInVes(invoiceId: number): Promise<PostResult> {
+export async function postInvoiceInVes(
+  invoiceId: number,
+  paymentMethod?: string,
+): Promise<PostResult> {
   const errors: string[] = [];
-  const preview = await previewInvoicePosting(invoiceId);
+  const preview = await previewInvoicePosting(invoiceId, paymentMethod);
   if (!preview.ok) {
     return {
       ok: false,
@@ -2120,9 +2159,8 @@ export async function postInvoiceInVes(invoiceId: number): Promise<PostResult> {
   const partnerId = preview.invoice.partner_id?.[0] || 0;
 
   try {
-    // 1. Solo si scenario=convert: cambiar moneda y precios
+    // 1. Solo si scenario=convert: cambiar moneda USD->VED y recalcular precios
     if (preview.scenario === "convert") {
-      // Buscar el ID de VED en Odoo
       const vedList = await searchRead("res.currency",
         [["name", "=", "VED"]], { fields: ["id"], limit: 1 }
       );
@@ -2141,8 +2179,9 @@ export async function postInvoiceInVes(invoiceId: number): Promise<PostResult> {
         await odooWrite("account.move.line", [line.id], { price_unit: newPriceUnit });
       }
     }
-    // Si scenario=skip-conversion: NO tocar moneda ni precios (ya estan en VES por
-    // posting previo que se revirtio a draft).
+    // skip-conversion: factura ya en VED por posting previo revertido. NO tocar.
+    // usd-no-convert: pago en USD (Stripe/PayPal/Cash USD). Factura queda en USD,
+    //                 no se toca moneda ni precios.
 
     // 2. Escribir month_billed (CRITICO)
     if (!preview.month_billed) {
@@ -2230,8 +2269,11 @@ export interface PaymentMethodMapping {
  * Mapeo de metodo de pago de collection_items -> journal/payment_method_line
  * en Odoo. IDs verificados directamente en Odoo prod (2026-04-30).
  *
- * Sprint 1: solo debito_inmediato + Mercantil Bs (BNK1).
- * Sprint 3: agregar c2p, transferencia, cash, stripe, paypal.
+ * IMPORTANTE — multimoneda:
+ *  - currencyId=166 (VED): la factura draft USD se convierte a VES al postear
+ *    (logica de postInvoiceInVes con scenario "convert")
+ *  - currencyId=1 (USD): la factura se postea en USD sin conversion
+ *    (scenario "usd-no-convert")
  */
 export const PAYMENT_METHOD_MAPPING: Record<string, PaymentMethodMapping> = {
   debito_inmediato: {
@@ -2239,6 +2281,48 @@ export const PAYMENT_METHOD_MAPPING: Record<string, PaymentMethodMapping> = {
     paymentMethodLineId: 47,        // "Pago manual" del journal Bank
     currencyId: 166,                // VED
     description: "Mercantil Bs (cuenta 3031)",
+  },
+  c2p: {
+    journalId: 29,                  // mismo journal Mercantil Bs
+    paymentMethodLineId: 47,
+    currencyId: 166,
+    description: "Mercantil Bs (cuenta 3031) — Pago Movil C2P",
+  },
+  transferencia: {
+    journalId: 29,                  // default Mercantil Bs (todas las transferencias entran ahi)
+    paymentMethodLineId: 47,
+    currencyId: 166,
+    description: "Mercantil Bs (cuenta 3031) — Transferencia",
+  },
+  cash: {                            // Cash en VES (efectivo en Bs)
+    journalId: 38,                  // CSH2 "Efectivo Bs"
+    paymentMethodLineId: 69,
+    currencyId: 166,                // VED
+    description: "Efectivo Bs",
+  },
+  cash_ves: {                        // alias explicito
+    journalId: 38,
+    paymentMethodLineId: 69,
+    currencyId: 166,
+    description: "Efectivo Bs",
+  },
+  cash_usd: {                        // Cash en USD (oficina PLC/Lecheria)
+    journalId: 30,                  // CSH1 "Cash" (USD)
+    paymentMethodLineId: 72,
+    currencyId: 1,                  // USD
+    description: "Cash USD",
+  },
+  stripe: {
+    journalId: 41,                  // BNK6 "Banco Mercantil 9021" (USD)
+    paymentMethodLineId: 119,       // "Stripe"
+    currencyId: 1,                  // USD
+    description: "Stripe -> Mercantil USD 9021",
+  },
+  paypal: {
+    journalId: 41,                  // mismo Mercantil USD 9021
+    paymentMethodLineId: 86,        // "PayPal"
+    currencyId: 1,                  // USD
+    description: "PayPal -> Mercantil USD 9021",
   },
 };
 
@@ -2540,7 +2624,8 @@ export async function syncOdooForCollectionItem(opts: {
 
   if (!result.post_invoice_done) {
     try {
-      const postRes = await postInvoiceInVes(opts.invoiceId);
+      // Pasamos paymentMethod para que decida si convertir o no (Stripe/PayPal/CashUSD no convierten)
+      const postRes = await postInvoiceInVes(opts.invoiceId, opts.paymentMethod);
       result.post_invoice_result = postRes;
       if (!postRes.ok) {
         result.error = `post_invoice failed: ${postRes.errors?.join("; ") || "unknown"}`;
@@ -2578,4 +2663,63 @@ export async function syncOdooForCollectionItem(opts: {
 
   result.ok = result.post_invoice_done && result.register_payment_done;
   return result;
+}
+
+// ============================================================
+// Helpers de lookup (Sprint 4) — para integracion automatica con webhook
+// ============================================================
+
+/**
+ * Busca un partner en Odoo por cedula/RIF (vat) o email, en ese orden.
+ * Devuelve el partner_id o null si no encuentra match.
+ */
+export async function findOdooPartnerByIdentifiers(opts: {
+  vat?: string | null;
+  email?: string | null;
+}): Promise<number | null> {
+  if (opts.vat) {
+    // Limpia el VAT: quita guiones, espacios, prefijos "V-" etc.
+    const vatClean = opts.vat.replace(/[^A-Za-z0-9]/g, "");
+    // Probar variantes comunes (con y sin prefijo V/J/E)
+    const variants = [
+      vatClean,
+      vatClean.toUpperCase(),
+      // Si empieza con V/J/E, probar sin la letra
+      /^[VJEPGvjepg]/.test(vatClean) ? vatClean.slice(1) : null,
+    ].filter(Boolean) as string[];
+    for (const v of variants) {
+      const found = await searchRead("res.partner",
+        [["vat", "=", v]],
+        { fields: ["id"], limit: 1 }
+      );
+      if (found[0]) return found[0].id;
+    }
+  }
+  if (opts.email) {
+    const found = await searchRead("res.partner",
+      [["email", "=", opts.email.toLowerCase()]],
+      { fields: ["id"], limit: 1 }
+    );
+    if (found[0]) return found[0].id;
+  }
+  return null;
+}
+
+/**
+ * Devuelve la factura draft de salida (out_invoice) mas reciente del partner,
+ * o null si no hay. Usada para encontrar a que factura aplicar un pago cuando
+ * el webhook llega.
+ *
+ * Si hay varias drafts (caso raro), devuelve la mas reciente por create_date.
+ */
+export async function findLatestDraftInvoiceForPartner(partnerId: number): Promise<number | null> {
+  const list = await searchRead("account.move",
+    [
+      ["partner_id", "=", partnerId],
+      ["state", "=", "draft"],
+      ["move_type", "=", "out_invoice"],
+    ],
+    { fields: ["id"], limit: 1, order: "create_date desc" }
+  );
+  return list[0]?.id || null;
 }
