@@ -88,21 +88,29 @@ export async function POST(request: NextRequest) {
       bcv_rate: bcv.usd_to_bs,
     });
 
-    // Sprint 4 — sync Odoo (best-effort, fallback a cola). No bloquea la respuesta.
+    // Sprint 4 — sync Odoo via waitUntil. No bloquea la respuesta al cliente.
     try {
+      const { waitUntil } = await import("@vercel/functions");
       const { triggerOdooSyncOrEnqueue } = await import("@/lib/integrations/odoo-sync-trigger");
-      await triggerOdooSyncOrEnqueue({
-        collectionItemId: item.id,
-        paymentToken: item.payment_token,
-        customerCedulaRif: item.customer_cedula_rif,
-        customerEmail: item.customer_email,
-        paymentMethod: "c2p",
-        paymentReference: reference,
-        amountUsd: Number(item.amount_usd),
-        amountVes: amountBss,
-      });
+      const itemMeta = (item.metadata as Record<string, unknown> | null) || null;
+      const odooInvoiceIds = Array.isArray(itemMeta?.odoo_invoice_ids)
+        ? (itemMeta!.odoo_invoice_ids as unknown[]).map(Number).filter(n => Number.isInteger(n) && n > 0)
+        : null;
+      waitUntil(
+        triggerOdooSyncOrEnqueue({
+          collectionItemId: item.id,
+          paymentToken: item.payment_token,
+          customerCedulaRif: item.customer_cedula_rif,
+          customerEmail: item.customer_email,
+          paymentMethod: "c2p",
+          paymentReference: reference,
+          amountUsd: Number(item.amount_usd),
+          amountVes: amountBss,
+          odooInvoiceIds,
+        }).catch((err) => console.error("[C2P Confirm] Sync Odoo fallo:", err))
+      );
     } catch (err) {
-      console.error("[C2P Confirm] Sync Odoo fallo (no bloqueante):", err);
+      console.error("[C2P Confirm] Sync Odoo setup fallo:", err);
     }
 
     // Notifications (fire-and-forget) — el pago ya esta confirmado por Mercantil

@@ -116,23 +116,29 @@ export async function POST(request: NextRequest) {
       .eq("id", item_id);
     if (updateErr) return apiError(`Error al actualizar: ${updateErr.message}`, 500);
 
-    // Sprint 4 — sync Odoo. Para cash diferenciamos por moneda: VES -> "cash"
-    // (journal Efectivo Bs), USD -> "cash_usd" (journal Cash USD, factura
-    // queda en USD sin conversion).
+    // Sprint 4 — sync Odoo via waitUntil (no bloquea respuesta admin).
     try {
+      const { waitUntil } = await import("@vercel/functions");
       const { triggerOdooSyncOrEnqueue } = await import("@/lib/integrations/odoo-sync-trigger");
-      await triggerOdooSyncOrEnqueue({
-        collectionItemId: item.id,
-        paymentToken: item.payment_token,
-        customerCedulaRif: item.customer_cedula_rif,
-        customerEmail: item.customer_email,
-        paymentMethod: paid_currency === "USD" ? "cash_usd" : "cash",
-        paymentReference,
-        amountUsd: Number(item.amount_usd),
-        amountVes: paid_currency === "VES" ? paid_amount : null,
-      });
+      const itemMeta = (item.metadata as Record<string, unknown> | null) || null;
+      const odooInvoiceIds = Array.isArray(itemMeta?.odoo_invoice_ids)
+        ? (itemMeta!.odoo_invoice_ids as unknown[]).map(Number).filter(n => Number.isInteger(n) && n > 0)
+        : null;
+      waitUntil(
+        triggerOdooSyncOrEnqueue({
+          collectionItemId: item.id,
+          paymentToken: item.payment_token,
+          customerCedulaRif: item.customer_cedula_rif,
+          customerEmail: item.customer_email,
+          paymentMethod: paid_currency === "USD" ? "cash_usd" : "cash",
+          paymentReference,
+          amountUsd: Number(item.amount_usd),
+          amountVes: paid_currency === "VES" ? paid_amount : null,
+          odooInvoiceIds,
+        }).catch((err) => console.error("[mark-cash] Sync Odoo fallo:", err))
+      );
     } catch (err) {
-      console.error("[mark-cash] Sync Odoo fallo (no bloqueante):", err);
+      console.error("[mark-cash] Sync Odoo setup fallo:", err);
     }
 
     // Update campaign totals (async, non-blocking if it fails)

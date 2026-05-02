@@ -15,6 +15,7 @@
 // Es publica en middleware (exact match `/api/mercantil`) — no expone subrutas admin.
 
 import { NextRequest, NextResponse } from "next/server";
+import { waitUntil } from "@vercel/functions";
 import { createAdminSupabase } from "@/lib/supabase/server";
 import { decrypt } from "@/lib/mercantil/core/crypto";
 import { configFromEnv, getAllSecretKeys } from "@/lib/mercantil/core/config";
@@ -339,28 +340,50 @@ export async function POST(request: NextRequest) {
             console.log("[Mercantil Alias] Item " + item.id + " marcado como paid");
             processed = true;
 
-            // Sprint 4 — sync Odoo (best-effort sincronico, fallback a cola).
-            // Si el item tiene metadata.odoo_invoice_ids (pago parcial), pasarlo
-            // al sync para que postee solo esas facturas (no la draft mas reciente).
-            try {
-              const itemMeta = (item.metadata as Record<string, unknown> | null) || null;
-              const odooInvoiceIds = Array.isArray(itemMeta?.odoo_invoice_ids)
-                ? (itemMeta!.odoo_invoice_ids as unknown[]).map(Number).filter(n => Number.isInteger(n) && n > 0)
-                : null;
-              await triggerOdooSyncOrEnqueue({
-                collectionItemId: item.id,
-                paymentToken: item.payment_token,
-                customerCedulaRif: item.customer_cedula_rif,
-                customerEmail: item.customer_email,
+            // CRITICAL: marcar processed=true en payment_webhook_logs INMEDIATAMENTE
+            // tras markItemPaid. Mercantil envia el webhook 2-3 veces y la idempotencia
+            // depende de este flag. Si esperamos al final del handler (post-sync),
+            // los retries del webhook entran antes de que se marque processed y
+            // reprocesan todo (causando "factura ya posted" del segundo intento).
+            if (logId) {
+              await supabase
+                .from("payment_webhook_logs")
+                .update({
+                  invoice_number: normalized.invoice_number || null,
+                  status: normalized.raw_status || null,
+                  payment_method: normalized.payment_method || null,
+                  reference_number: normalized.reference_number || null,
+                  amount: normalized.amount || null,
+                  processed: true,
+                })
+                .eq("id", logId);
+            }
+
+            // Sprint 4 — sync Odoo via waitUntil. NO bloquea el response del
+            // webhook (Mercantil ve 200 inmediato, no reintenta por timeout) y
+            // NO bloquea al cliente (polling /api/cobranzas/[token] ya ve paid).
+            // Si el sync sincronico falla, el helper encola para que el cron
+            // reintente con backoff.
+            const itemMeta = (item.metadata as Record<string, unknown> | null) || null;
+            const odooInvoiceIds = Array.isArray(itemMeta?.odoo_invoice_ids)
+              ? (itemMeta!.odoo_invoice_ids as unknown[]).map(Number).filter(n => Number.isInteger(n) && n > 0)
+              : null;
+            const itemForSync = item;
+            waitUntil(
+              triggerOdooSyncOrEnqueue({
+                collectionItemId: itemForSync.id,
+                paymentToken: itemForSync.payment_token,
+                customerCedulaRif: itemForSync.customer_cedula_rif,
+                customerEmail: itemForSync.customer_email,
                 paymentMethod: "debito_inmediato",
                 paymentReference: normalized.reference_number || "",
-                amountUsd: Number(item.amount_usd),
+                amountUsd: Number(itemForSync.amount_usd),
                 amountVes: normalized.amount ?? null,
                 odooInvoiceIds,
-              });
-            } catch (err) {
-              console.error("[Mercantil Alias] Sync Odoo fallo (no bloqueante):", err);
-            }
+              }).catch((err) => {
+                console.error("[Mercantil Alias] Sync Odoo waitUntil fallo:", err);
+              })
+            );
           } else {
             processingError = "No se encontro item para invoice " + normalized.invoice_number;
             console.warn("[Mercantil Alias] " + processingError);

@@ -88,21 +88,29 @@ export async function GET(request: NextRequest) {
           // Payment was captured by PayPal — redirect success anyway; reconcile manually.
         }
 
-        // Sprint 4 — sync Odoo (factura queda en USD).
+        // Sprint 4 — sync Odoo via waitUntil (factura queda en USD).
         try {
+          const { waitUntil } = await import("@vercel/functions");
           const { triggerOdooSyncOrEnqueue } = await import("@/lib/integrations/odoo-sync-trigger");
-          await triggerOdooSyncOrEnqueue({
-            collectionItemId: item.id,
-            paymentToken: item.payment_token,
-            customerCedulaRif: item.customer_cedula_rif,
-            customerEmail: item.customer_email,
-            paymentMethod: "paypal",
-            paymentReference: capture.captureId,
-            amountUsd: Number(item.amount_usd),
-            amountVes: null,
-          });
+          const itemMeta = (item.metadata as Record<string, unknown> | null) || null;
+          const odooInvoiceIds = Array.isArray(itemMeta?.odoo_invoice_ids)
+            ? (itemMeta!.odoo_invoice_ids as unknown[]).map(Number).filter(n => Number.isInteger(n) && n > 0)
+            : null;
+          waitUntil(
+            triggerOdooSyncOrEnqueue({
+              collectionItemId: item.id,
+              paymentToken: item.payment_token,
+              customerCedulaRif: item.customer_cedula_rif,
+              customerEmail: item.customer_email,
+              paymentMethod: "paypal",
+              paymentReference: capture.captureId,
+              amountUsd: Number(item.amount_usd),
+              amountVes: null,
+              odooInvoiceIds,
+            }).catch((err) => console.error("[PayPal Return] Sync Odoo fallo:", err))
+          );
         } catch (err) {
-          console.error("[PayPal Return] Sync Odoo fallo (no bloqueante):", err);
+          console.error("[PayPal Return] Sync Odoo setup fallo:", err);
         }
 
         // Non-blocking confirmations

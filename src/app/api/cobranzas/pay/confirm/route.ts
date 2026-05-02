@@ -148,21 +148,29 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Sprint 4 — sync Odoo solo cuando el pago esta REAL paid (auto-verified).
+    // Sprint 4 — sync Odoo via waitUntil (no bloquea respuesta).
     try {
+      const { waitUntil } = await import("@vercel/functions");
       const { triggerOdooSyncOrEnqueue } = await import("@/lib/integrations/odoo-sync-trigger");
-      await triggerOdooSyncOrEnqueue({
-        collectionItemId: item.id,
-        paymentToken: item.payment_token,
-        customerCedulaRif: item.customer_cedula_rif,
-        customerEmail: item.customer_email,
-        paymentMethod: "transferencia",
-        paymentReference: reference,
-        amountUsd: Number(item.amount_usd),
-        amountVes: typeof item.amount_bss === "number" ? item.amount_bss : null,
-      });
+      const itemMeta = (item.metadata as Record<string, unknown> | null) || null;
+      const odooInvoiceIds = Array.isArray(itemMeta?.odoo_invoice_ids)
+        ? (itemMeta!.odoo_invoice_ids as unknown[]).map(Number).filter(n => Number.isInteger(n) && n > 0)
+        : null;
+      waitUntil(
+        triggerOdooSyncOrEnqueue({
+          collectionItemId: item.id,
+          paymentToken: item.payment_token,
+          customerCedulaRif: item.customer_cedula_rif,
+          customerEmail: item.customer_email,
+          paymentMethod: "transferencia",
+          paymentReference: reference,
+          amountUsd: Number(item.amount_usd),
+          amountVes: typeof item.amount_bss === "number" ? item.amount_bss : null,
+          odooInvoiceIds,
+        }).catch((err) => console.error("[PayConfirm] Sync Odoo fallo:", err))
+      );
     } catch (err) {
-      console.error("[PayConfirm] Sync Odoo fallo (no bloqueante):", err);
+      console.error("[PayConfirm] Sync Odoo setup fallo:", err);
     }
 
     // Notifications (fire-and-forget) — only on real confirmation
