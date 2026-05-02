@@ -29,6 +29,9 @@ export async function GET(
       return apiError("Enlace de pago no encontrado o expirado", 404);
     }
 
+    // DIAGNOSTIC LOG (temp) — investigar bug de polling que ve "viewed" mientras DB tiene "paid"
+    console.log(`[cobranzas/${params.token.slice(0, 12)}] item leido: status=${item.status} paid_at=${item.paid_at} method=${item.payment_method}`);
+
     // Enforce expiration
     if (item.expires_at && new Date(item.expires_at) < new Date()) {
       return apiError("Este enlace de pago ha expirado", 410);
