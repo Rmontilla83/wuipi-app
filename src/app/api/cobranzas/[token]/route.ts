@@ -29,8 +29,10 @@ export async function GET(
       return apiError("Enlace de pago no encontrado o expirado", 404);
     }
 
-    // DIAGNOSTIC LOG (temp) — investigar bug de polling que ve "viewed" mientras DB tiene "paid"
+    // DIAGNOSTIC LOG (temp)
     console.log(`[cobranzas/${params.token.slice(0, 12)}] item leido: status=${item.status} paid_at=${item.paid_at} method=${item.payment_method}`);
+    const _debugRawStatus = item.status;
+    const _debugRawPaidAt = item.paid_at;
 
     // Enforce expiration
     if (item.expires_at && new Date(item.expires_at) < new Date()) {
@@ -74,6 +76,8 @@ export async function GET(
       payment_method: item.payment_method,
       payment_reference: item.payment_reference,
       paid_at: item.paid_at,
+      _debug_raw_status: _debugRawStatus,
+      _debug_raw_paid_at: _debugRawPaidAt,
       ...(odooInvoices ? { odoo_invoices: odooInvoices, currency: item.metadata?.currency } : {}),
     });
   } catch (error) {
