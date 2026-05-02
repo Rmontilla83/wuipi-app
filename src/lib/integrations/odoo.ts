@@ -2502,3 +2502,80 @@ export async function registerPaymentForInvoice(opts: {
     };
   }
 }
+
+// ============================================================
+// ORQUESTACION (Sprint 2) — sync completo idempotente
+// ============================================================
+
+export interface SyncOdooResult {
+  ok: boolean;
+  post_invoice_done: boolean;
+  register_payment_done: boolean;
+  post_invoice_result?: PostResult;
+  payment_result?: PaymentRegisterResult;
+  error?: string;
+  invoice_payment_state?: string;
+}
+
+/**
+ * Ejecuta el sync completo de un item a Odoo (postear factura + registrar
+ * payment + reconciliar) con idempotencia paso a paso. Si postInvoiceDone
+ * es true, salta el primer paso. Si registerPaymentDone es true, salta el
+ * segundo. El cron de la cola usa esto para no repetir trabajo en reintentos.
+ */
+export async function syncOdooForCollectionItem(opts: {
+  invoiceId: number;
+  paymentMethod: string;
+  paymentReference: string;
+  paymentToken: string;
+  paymentDate?: string;
+  postInvoiceDone?: boolean;
+  registerPaymentDone?: boolean;
+}): Promise<SyncOdooResult> {
+  const result: SyncOdooResult = {
+    ok: false,
+    post_invoice_done: opts.postInvoiceDone || false,
+    register_payment_done: opts.registerPaymentDone || false,
+  };
+
+  if (!result.post_invoice_done) {
+    try {
+      const postRes = await postInvoiceInVes(opts.invoiceId);
+      result.post_invoice_result = postRes;
+      if (!postRes.ok) {
+        result.error = `post_invoice failed: ${postRes.errors?.join("; ") || "unknown"}`;
+        return result;
+      }
+      result.post_invoice_done = true;
+    } catch (err) {
+      result.error = `post_invoice exception: ${err instanceof Error ? err.message : String(err)}`;
+      return result;
+    }
+  }
+
+  if (!result.register_payment_done) {
+    try {
+      const payRes = await registerPaymentForInvoice({
+        invoiceId: opts.invoiceId,
+        paymentMethod: opts.paymentMethod,
+        paymentReference: opts.paymentReference,
+        paymentToken: opts.paymentToken,
+        paymentDate: opts.paymentDate,
+      });
+      result.payment_result = payRes;
+      if (!payRes.ok) {
+        result.error = `register_payment failed: ${payRes.errors?.join("; ") || "unknown"}`;
+        result.invoice_payment_state = payRes.invoice_payment_state_after;
+        return result;
+      }
+      result.register_payment_done = true;
+      result.invoice_payment_state = payRes.invoice_payment_state_after;
+    } catch (err) {
+      result.error = `register_payment exception: ${err instanceof Error ? err.message : String(err)}`;
+      return result;
+    }
+  }
+
+  result.ok = result.post_invoice_done && result.register_payment_done;
+  return result;
+}

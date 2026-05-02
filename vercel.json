@@ -35,6 +35,10 @@
     {
       "path": "/api/bequant/cron/dpi-purge",
       "schedule": "0 4 1 * *"
+    },
+    {
+      "path": "/api/cron/odoo-sync",
+      "schedule": "*/10 * * * *"
     }
   ]
 }
