@@ -340,7 +340,13 @@ export async function POST(request: NextRequest) {
             processed = true;
 
             // Sprint 4 — sync Odoo (best-effort sincronico, fallback a cola).
+            // Si el item tiene metadata.odoo_invoice_ids (pago parcial), pasarlo
+            // al sync para que postee solo esas facturas (no la draft mas reciente).
             try {
+              const itemMeta = (item.metadata as Record<string, unknown> | null) || null;
+              const odooInvoiceIds = Array.isArray(itemMeta?.odoo_invoice_ids)
+                ? (itemMeta!.odoo_invoice_ids as unknown[]).map(Number).filter(n => Number.isInteger(n) && n > 0)
+                : null;
               await triggerOdooSyncOrEnqueue({
                 collectionItemId: item.id,
                 paymentToken: item.payment_token,
@@ -350,6 +356,7 @@ export async function POST(request: NextRequest) {
                 paymentReference: normalized.reference_number || "",
                 amountUsd: Number(item.amount_usd),
                 amountVes: normalized.amount ?? null,
+                odooInvoiceIds,
               });
             } catch (err) {
               console.error("[Mercantil Alias] Sync Odoo fallo (no bloqueante):", err);

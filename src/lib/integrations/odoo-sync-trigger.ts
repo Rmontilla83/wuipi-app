@@ -49,6 +49,9 @@ export interface SyncTriggerInput {
   amountVes?: number | null;
   /** Fecha del pago (YYYY-MM-DD), default hoy */
   paymentDate?: string;
+  /** IDs de facturas Odoo a postear (de metadata.odoo_invoice_ids).
+   *  Si se pasa, el sync postea CADA una. Si no, busca la draft mas reciente. */
+  odooInvoiceIds?: number[] | null;
 }
 
 export async function triggerOdooSyncOrEnqueue(input: SyncTriggerInput): Promise<void> {
@@ -104,14 +107,22 @@ export async function triggerOdooSyncOrEnqueue(input: SyncTriggerInput): Promise
     return;
   }
 
-  // 5. Lookup factura draft
-  let odooInvoiceId: number | null = null;
-  try {
-    odooInvoiceId = await findLatestDraftInvoiceForPartner(odooPartnerId);
-  } catch (err) {
-    console.warn("[OdooSyncTrigger] Lookup invoice fallo:", err);
+  // 5. Determinar invoiceIds a procesar
+  // Prioridad: si el caller paso odooInvoiceIds (pago parcial), usar esos.
+  // Sino, buscar la draft mas reciente del partner.
+  let invoiceIds: number[] = [];
+  if (Array.isArray(input.odooInvoiceIds) && input.odooInvoiceIds.length > 0) {
+    invoiceIds = input.odooInvoiceIds.map(Number).filter(n => Number.isInteger(n) && n > 0);
+  } else {
+    try {
+      const single = await findLatestDraftInvoiceForPartner(odooPartnerId);
+      if (single) invoiceIds = [single];
+    } catch (err) {
+      console.warn("[OdooSyncTrigger] Lookup invoice fallo:", err);
+    }
   }
-  if (!odooInvoiceId) {
+
+  if (invoiceIds.length === 0) {
     await safeEnqueue({
       collectionItemId, paymentToken, paymentMethod, paymentReference,
       amountUsd, amountVes, paymentDate,
@@ -121,36 +132,43 @@ export async function triggerOdooSyncOrEnqueue(input: SyncTriggerInput): Promise
     return;
   }
 
-  // 6. Intento sincronico
-  try {
-    const result = await syncOdooForCollectionItem({
-      invoiceId: odooInvoiceId,
-      paymentMethod,
-      paymentReference: paymentReference || "",
-      paymentToken,
-      paymentDate,
-    });
+  // 6. Sync sincronico — iterar cada factura. Cada una se postea + tiene
+  // su propio account.payment + reconcile. Si una falla, encolamos solo esa.
+  const failures: Array<{ invoiceId: number; error: string }> = [];
+  for (const invoiceId of invoiceIds) {
+    try {
+      const result = await syncOdooForCollectionItem({
+        invoiceId,
+        paymentMethod,
+        paymentReference: paymentReference || "",
+        paymentToken,
+        paymentDate,
+      });
 
-    if (result.ok) {
-      console.log(`[OdooSyncTrigger] ✅ ${collectionItemId} sync OK invoice=${odooInvoiceId} state=${result.invoice_payment_state}`);
-      return;
+      if (result.ok) {
+        console.log(`[OdooSyncTrigger] ✅ ${collectionItemId} invoice=${invoiceId} sync OK state=${result.invoice_payment_state}`);
+      } else {
+        failures.push({ invoiceId, error: result.error || "sync fallo" });
+        console.warn(`[OdooSyncTrigger] invoice=${invoiceId} fallo: ${result.error}`);
+      }
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      failures.push({ invoiceId, error: `exception: ${errMsg}` });
+      console.error(`[OdooSyncTrigger] invoice=${invoiceId} exception:`, err);
     }
+  }
 
+  // Si hubo cualquier falla, encolar para reintentos. La cola tiene UNIQUE
+  // en collection_item_id, asi que solo encolamos UNA fila con la primera
+  // factura fallida — el cron va a reintentar y la idempotencia parcial
+  // (post_invoice_done/register_payment_done) maneja las que ya OK.
+  if (failures.length > 0) {
     await safeEnqueue({
       collectionItemId, paymentToken, paymentMethod, paymentReference,
       amountUsd, amountVes, paymentDate,
-      odooPartnerId, odooInvoiceId,
-      error: result.error || "sync fallo",
+      odooPartnerId, odooInvoiceId: failures[0].invoiceId,
+      error: `${failures.length}/${invoiceIds.length} fallaron: ${failures.map(f => `inv${f.invoiceId}=${f.error}`).join("; ").slice(0, 1500)}`,
     });
-    console.warn(`[OdooSyncTrigger] Sync fallo, encolado: ${result.error}`);
-  } catch (err) {
-    await safeEnqueue({
-      collectionItemId, paymentToken, paymentMethod, paymentReference,
-      amountUsd, amountVes, paymentDate,
-      odooPartnerId, odooInvoiceId,
-      error: `exception: ${err instanceof Error ? err.message : String(err)}`,
-    });
-    console.error(`[OdooSyncTrigger] Sync exception, encolado:`, err);
   }
 }
 

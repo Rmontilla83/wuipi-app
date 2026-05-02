@@ -38,6 +38,32 @@ export default function ClientPaymentPage() {
   const [error, setError] = useState("");
   const [expandedInvoice, setExpandedInvoice] = useState<number | null>(null);
   const [initiating, setInitiating] = useState(false);
+  const [initiatingInvoice, setInitiatingInvoice] = useState<number | null>(null);
+
+  // Lanza el flujo de pago. Si invoiceIds se pasa -> pago parcial.
+  // Sin invoiceIds -> pago completo (comportamiento actual).
+  const startPayment = async (invoiceIds: number[] | null) => {
+    if (invoiceIds && invoiceIds.length === 1) setInitiatingInvoice(invoiceIds[0]);
+    else setInitiating(true);
+    try {
+      const res = await fetch("/api/pagar/cliente/iniciar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token, ...(invoiceIds ? { invoice_ids: invoiceIds } : {}) }),
+      });
+      const result = await res.json();
+      if (result.payment_token) {
+        window.location.href = `/pagar/${result.payment_token}`;
+      } else {
+        alert(result.error || "Error al iniciar el pago");
+      }
+    } catch {
+      alert("Error de conexion");
+    } finally {
+      setInitiating(false);
+      setInitiatingInvoice(null);
+    }
+  };
 
   useEffect(() => {
     fetch(`/api/pagar/cliente?token=${token}`)
@@ -149,39 +175,39 @@ export default function ClientPaymentPage() {
                       ))}
                     </div>
                   )}
+                  {/* Boton "Pagar solo esta factura" — solo si hay 2+ facturas */}
+                  {data.invoices.length > 1 && (
+                    <div className="border-t border-[#1e293b] px-4 py-2 bg-[#0a0f1a]">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          startPayment([inv.id]);
+                        }}
+                        disabled={initiating || initiatingInvoice !== null}
+                        className="w-full py-2 px-3 bg-[#1e293b] hover:bg-[#2a3849] rounded-lg text-emerald-300 text-xs font-medium transition-colors flex items-center justify-center gap-1.5 disabled:opacity-40"
+                      >
+                        {initiatingInvoice === inv.id ? (
+                          <><RefreshCw size={12} className="animate-spin" /> Preparando…</>
+                        ) : (
+                          <><CreditCard size={12} /> Pagar solo esta factura ({fmtUsd(inv.total)})</>
+                        )}
+                      </button>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
 
-            {/* Pay button */}
+            {/* Pay all button */}
             <button
-              onClick={async () => {
-                setInitiating(true);
-                try {
-                  const res = await fetch("/api/pagar/cliente/iniciar", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ token }),
-                  });
-                  const result = await res.json();
-                  if (result.payment_token) {
-                    window.location.href = `/pagar/${result.payment_token}`;
-                  } else {
-                    alert(result.error || "Error al iniciar el pago");
-                  }
-                } catch {
-                  alert("Error de conexion");
-                } finally {
-                  setInitiating(false);
-                }
-              }}
-              disabled={initiating}
+              onClick={() => startPayment(null)}
+              disabled={initiating || initiatingInvoice !== null}
               className="w-full py-4 bg-gradient-to-r from-emerald-500 to-cyan-500 rounded-xl text-white font-bold text-base flex items-center justify-center gap-2 hover:opacity-90 transition-opacity disabled:opacity-50"
             >
               {initiating ? (
                 <><RefreshCw size={18} className="animate-spin" /> Preparando pago...</>
               ) : (
-                <><CreditCard size={20} /> Pagar {fmtUsd(data.net_due)}</>
+                <><CreditCard size={20} /> {data.invoices.length > 1 ? `Pagar todo (${fmtUsd(data.net_due)})` : `Pagar ${fmtUsd(data.net_due)}`}</>
               )}
             </button>
             <p className="text-center text-gray-600 text-[10px]">Pago seguro — Debito inmediato, transferencia o tarjeta</p>
