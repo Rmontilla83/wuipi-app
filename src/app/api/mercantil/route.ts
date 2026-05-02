@@ -334,39 +334,49 @@ export async function POST(request: NextRequest) {
           }
 
           if (item) {
-            await markItemPaid(item.payment_token, {
+            const paidResult = await markItemPaid(item.payment_token, {
               payment_method: "debito_inmediato",
               payment_reference: normalized.reference_number || "",
               amount_bss: normalized.amount,
             });
-            console.log("[Mercantil Alias] Item " + item.id + " marcado como paid");
+            const wasAlreadyPaid = (paidResult as { wasAlreadyPaid?: boolean }).wasAlreadyPaid === true;
+            if (wasAlreadyPaid) {
+              console.log("[Mercantil Alias] Item " + item.id + " ya estaba paid — skip notificaciones y sync (otro webhook lo proceso primero)");
+            } else {
+              console.log("[Mercantil Alias] Item " + item.id + " marcado como paid (primer webhook gano la race)");
+            }
             processed = true;
 
-            // Notificar al cliente (WhatsApp + Email). Fire-and-forget — si falla
-            // alguno NO bloquea el resto del flujo.
-            const amountMsg = normalized.amount
-              ? `Bs ${normalized.amount.toLocaleString("es-VE", { minimumFractionDigits: 2 })}`
-              : `$${Number(item.amount_usd).toFixed(2)} USD`;
-            const concept = item.concept || "Servicio WUIPI";
-            const reference = normalized.reference_number || "";
+            // Solo notificar y sync si fuimos los primeros en marcarlo paid.
+            // Sino, otro webhook concurrente ya hizo todo eso.
+            if (!wasAlreadyPaid) {
+              // El template de WhatsApp Meta tiene "$" hardcoded despues de {{amount}}.
+              // Pasamos el monto USD directo (formato "$X.XX USD") asi el simbolo $
+              // del template queda como sufijo redundante pero correcto, en lugar de
+              // recibir "Bs 68,20 $" que es ambiguo. El monto en Bs lo ve el cliente
+              // en su extracto bancario y en el comprobante de Mercantil.
+              const amountMsg = `$${Number(item.amount_usd).toFixed(2)} USD`;
+              const concept = item.concept || "Servicio WUIPI";
+              const reference = normalized.reference_number || "";
 
-            if (item.customer_phone) {
-              sendPaymentConfirmationWhatsApp({
-                phone: item.customer_phone,
-                customerName: item.customer_name,
-                reference,
-                amount: amountMsg,
-                concept,
-              }).catch((err: unknown) => console.error("[Mercantil Alias] WA error:", err));
-            }
-            if (item.customer_email) {
-              sendPaymentConfirmationEmail({
-                email: item.customer_email,
-                customerName: item.customer_name,
-                reference,
-                amount: amountMsg,
-                concept,
-              }).catch((err: unknown) => console.error("[Mercantil Alias] Email error:", err));
+              if (item.customer_phone) {
+                sendPaymentConfirmationWhatsApp({
+                  phone: item.customer_phone,
+                  customerName: item.customer_name,
+                  reference,
+                  amount: amountMsg,
+                  concept,
+                }).catch((err: unknown) => console.error("[Mercantil Alias] WA error:", err));
+              }
+              if (item.customer_email) {
+                sendPaymentConfirmationEmail({
+                  email: item.customer_email,
+                  customerName: item.customer_name,
+                  reference,
+                  amount: amountMsg,
+                  concept,
+                }).catch((err: unknown) => console.error("[Mercantil Alias] Email error:", err));
+              }
             }
 
             // CRITICAL: marcar processed=true en payment_webhook_logs INMEDIATAMENTE
@@ -393,6 +403,9 @@ export async function POST(request: NextRequest) {
             // NO bloquea al cliente (polling /api/cobranzas/[token] ya ve paid).
             // Si el sync sincronico falla, el helper encola para que el cron
             // reintente con backoff.
+            // Solo si fuimos los primeros (wasAlreadyPaid=false) — sino otro
+            // webhook concurrente ya disparo el sync.
+            if (!wasAlreadyPaid) {
             const itemMeta = (item.metadata as Record<string, unknown> | null) || null;
             const odooInvoiceIds = Array.isArray(itemMeta?.odoo_invoice_ids)
               ? (itemMeta!.odoo_invoice_ids as unknown[]).map(Number).filter(n => Number.isInteger(n) && n > 0)
@@ -413,6 +426,7 @@ export async function POST(request: NextRequest) {
                 console.error("[Mercantil Alias] Sync Odoo waitUntil fallo:", err);
               })
             );
+            } // end if (!wasAlreadyPaid) — guarda contra sync duplicado de webhooks concurrentes
           } else {
             processingError = "No se encontro item para invoice " + normalized.invoice_number;
             console.warn("[Mercantil Alias] " + processingError);

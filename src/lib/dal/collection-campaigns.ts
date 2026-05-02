@@ -290,6 +290,14 @@ export async function updateItem(
   return data;
 }
 
+/**
+ * Marca un item como paid. Atomico — si el item ya estaba paid, devuelve null
+ * (sin lanzar error). Si transito de no-paid a paid, devuelve el item actualizado.
+ *
+ * El flag `wasAlreadyPaid` permite al caller decidir si enviar notificaciones
+ * (solo enviarlas si fue la PRIMERA marca paid, evitando doble envio cuando
+ * Mercantil reintenta el webhook 2-3 veces seguidas).
+ */
 export async function markItemPaid(
   token: string,
   payment: {
@@ -298,8 +306,11 @@ export async function markItemPaid(
     amount_bss?: number;
     bcv_rate?: number;
   }
-): Promise<CollectionItem> {
+): Promise<CollectionItem & { wasAlreadyPaid?: boolean }> {
   const sb = createAdminSupabase();
+
+  // UPDATE atomico con guard: solo cambia si NO esta paid ya. Si dos webhooks
+  // entran en paralelo, solo uno hace el UPDATE; el segundo recibe data=null.
   const { data, error } = await sb
     .from("collection_items")
     .update({
@@ -312,9 +323,23 @@ export async function markItemPaid(
       payment_date: new Date().toISOString(),
     })
     .eq("payment_token", token)
+    .neq("status", "paid")
     .select()
-    .single();
+    .maybeSingle();
   if (error) throw error;
+
+  if (!data) {
+    // El item ya estaba paid (otro webhook lo marco antes). Devolvemos el
+    // item actual con flag wasAlreadyPaid=true para que el caller skipee
+    // notificaciones/sync duplicado.
+    const { data: existing, error: readErr } = await sb
+      .from("collection_items")
+      .select("*")
+      .eq("payment_token", token)
+      .single();
+    if (readErr) throw readErr;
+    return { ...existing, wasAlreadyPaid: true } as CollectionItem & { wasAlreadyPaid: boolean };
+  }
 
   // Update campaign totals
   if (data?.campaign_id) {
