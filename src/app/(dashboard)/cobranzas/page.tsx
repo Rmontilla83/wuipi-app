@@ -8,8 +8,9 @@ import CarteraTab from "@/components/crm-cobranzas/cartera-tab";
 import PaymentsReceivedTab from "@/components/crm-cobranzas/payments-received-tab";
 import GatewayLogsTab from "@/components/crm-cobranzas/gateway-logs-tab";
 import SyncOdooTab from "@/components/crm-cobranzas/sync-odoo-tab";
+import WAOutboxTab from "@/components/crm-cobranzas/wa-outbox-tab";
 
-type Tab = "cartera" | "campanas" | "casos" | "pagos" | "logs" | "sync";
+type Tab = "cartera" | "campanas" | "casos" | "pagos" | "logs" | "sync" | "wa";
 
 export default function CobranzasPage() {
   const [tab, setTab] = useState<Tab>("cartera");
@@ -21,6 +22,7 @@ export default function CobranzasPage() {
     { id: "pagos",    label: "Pagos Recibidos" },
     { id: "logs",     label: "Logs Pasarelas" },
     { id: "sync",     label: "Sync Odoo" },
+    { id: "wa",       label: "WA Outbox" },
   ];
 
   return (
@@ -52,6 +54,7 @@ export default function CobranzasPage() {
         {tab === "pagos" && <PaymentsReceivedTab />}
         {tab === "logs" && <GatewayLogsTab />}
         {tab === "sync" && <SyncOdooTab />}
+        {tab === "wa" && <WAOutboxTab />}
       </div>
     </>
   );
