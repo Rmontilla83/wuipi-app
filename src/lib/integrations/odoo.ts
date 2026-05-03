@@ -2599,6 +2599,10 @@ export interface SyncOdooResult {
   payment_result?: PaymentRegisterResult;
   error?: string;
   invoice_payment_state?: string;
+  /** True si el pre-check encontro la factura ya posted+pagada+reconciliada
+   *  y skipeo todo el flujo. Usado por el cron para distinguir "estaba ya OK"
+   *  de "se sincronizo en este intento". */
+  already_synced?: boolean;
 }
 
 /**
@@ -2606,6 +2610,12 @@ export interface SyncOdooResult {
  * payment + reconciliar) con idempotencia paso a paso. Si postInvoiceDone
  * es true, salta el primer paso. Si registerPaymentDone es true, salta el
  * segundo. El cron de la cola usa esto para no repetir trabajo en reintentos.
+ *
+ * Pre-check de idempotencia (a partir de 2026-05-03): antes de ejecutar nada
+ * lee el estado actual de la factura. Si esta posted con amount_residual=0 y
+ * payment_state in_payment/paid, devuelve ok=true sin tocar nada — el caso
+ * tipico de race condition entre 2 webhooks paralelos donde uno gana y el
+ * otro encuentra la factura ya finalizada.
  */
 export async function syncOdooForCollectionItem(opts: {
   invoiceId: number;
@@ -2621,6 +2631,37 @@ export async function syncOdooForCollectionItem(opts: {
     post_invoice_done: opts.postInvoiceDone || false,
     register_payment_done: opts.registerPaymentDone || false,
   };
+
+  // Pre-check de idempotencia: si la factura ya esta en estado final,
+  // no hay nada que hacer. Cubre el caso de webhooks paralelos donde uno
+  // gano la carrera y dejo la factura posted+payment+reconciliada antes
+  // de que llegue el segundo intento.
+  if (!result.post_invoice_done || !result.register_payment_done) {
+    try {
+      const current = await read("account.move", [opts.invoiceId],
+        ["state", "payment_state", "amount_residual"]);
+      const inv = current[0];
+      if (inv && inv.state === "posted") {
+        const fullyPaid = Number(inv.amount_residual) === 0
+          && (inv.payment_state === "paid" || inv.payment_state === "in_payment");
+        if (fullyPaid) {
+          // Caso ideal: factura posted + reconciliada. No hacer nada.
+          return {
+            ok: true,
+            post_invoice_done: true,
+            register_payment_done: true,
+            invoice_payment_state: inv.payment_state,
+            already_synced: true,
+          };
+        }
+        // Posted pero NO pagada: skip post pero permitir register_payment
+        result.post_invoice_done = true;
+      }
+    } catch (err) {
+      // Si el pre-check falla, seguimos al flujo normal — no es bloqueante
+      console.warn(`[syncOdoo] Pre-check fallo para invoice ${opts.invoiceId}:`, err);
+    }
+  }
 
   if (!result.post_invoice_done) {
     try {
