@@ -291,15 +291,18 @@ async function getCobranzasSnapshot() {
   if (error) throw new Error(error.message);
   const all = data || [];
 
-  const active = all.filter(c => !["recuperado", "retirado_definitivo"].includes(c.stage));
-  const recovered = all.filter(c => c.stage === "recuperado");
+  // Stages "cerradas" (no se muestran como activas): resuelto y ultima_oportunidad
+  const CLOSED_STAGES = ["resuelto", "ultima_oportunidad"];
+  const active = all.filter(c => !CLOSED_STAGES.includes(c.stage));
+  const recovered = all.filter(c => c.stage === "resuelto");
+  const total_closed = all.filter(c => CLOSED_STAGES.includes(c.stage)).length;
   return {
     total: all.length,
     active: active.length,
     recovered: recovered.length,
     active_amount: Math.round(active.reduce((s, c) => s + (c.amount_owed || 0), 0) * 100) / 100,
-    recovery_rate: (recovered.length + all.filter(c => c.stage === "retirado_definitivo").length) > 0
-      ? Math.round((recovered.length / (recovered.length + all.filter(c => c.stage === "retirado_definitivo").length)) * 100)
+    recovery_rate: total_closed > 0
+      ? Math.round((recovered.length / total_closed) * 100)
       : 0,
   };
 }

@@ -2,7 +2,7 @@
 // CRM Cobranzas - Data Access Layer
 // ============================================
 import { createAdminSupabase } from "@/lib/supabase/server";
-import { updateClient, nextSequence } from "./facturacion";
+import { nextSequence } from "./facturacion";
 
 const supabase = () => createAdminSupabase();
 
@@ -11,15 +11,12 @@ function escSearch(s: string): string {
 }
 
 // ============================================
-// STAGES CONFIG
+// STAGES CONFIG — re-export desde la fuente unica
 // ============================================
-export const COLLECTION_STAGES = [
-  "leads_entrantes", "contacto_inicial", "info_enviada", "no_clasificado",
-  "gestion_suspendidos", "gestion_pre_retiro", "gestion_cobranza",
-  "recuperado", "retirado_definitivo",
-] as const;
-
-export type CollectionStage = typeof COLLECTION_STAGES[number];
+// Las stages viven en src/lib/cobranzas/stages.ts. Se re-exportan aqui con
+// los nombres viejos por compatibilidad con imports existentes.
+export { COBRANZAS_STAGE_KEYS as COLLECTION_STAGES } from "@/lib/cobranzas/stages";
+export type { CobranzasStageKey as CollectionStage } from "@/lib/cobranzas/stages";
 
 // ============================================
 // COLLECTIONS
@@ -129,11 +126,13 @@ export async function moveCollection(id: string, newStage: string, userName?: st
     stage_changed_at: new Date().toISOString(),
   };
 
-  if (newStage === "recuperado") {
+  if (newStage === "resuelto") {
     updateData.recovered_at = new Date().toISOString();
+    updateData.closed_at = new Date().toISOString();
   }
-  if (newStage === "retirado_definitivo") {
-    updateData.retired_at = new Date().toISOString();
+  if (newStage === "ultima_oportunidad") {
+    // Escalacion senior — no cierra automaticamente, agente debe resolver.
+    // closed_at se llena solo cuando llega a 'resuelto'.
   }
 
   // Update stage
@@ -154,27 +153,11 @@ export async function moveCollection(id: string, newStage: string, userName?: st
     created_by: userName || "Sistema",
   });
 
-  // Client status changes on terminal stages
-  if (newStage === "recuperado" && collection.client_id) {
-    await updateClient(collection.client_id, { service_status: "active" });
-    await createActivity({
-      collection_id: id,
-      type: "system",
-      description: "Cliente reactivado automáticamente",
-      created_by: "Sistema",
-    });
-  }
-
-  if (newStage === "retirado_definitivo" && collection.client_id) {
-    await updateClient(collection.client_id, { service_status: "cancelled" });
-    await createActivity({
-      collection_id: id,
-      type: "system",
-      description: "Cliente marcado como cancelado",
-      created_by: "Sistema",
-    });
-  }
-
+  // NOTA: el viejo modelo cambiaba `clients.service_status` en stages
+  // terminales. Con el repurpose (Stream A4), Odoo es la fuente de verdad
+  // del estado del servicio: cuando el cliente paga, Odoo reactiva via su
+  // propio cron y notifica via webhook (futuro Stream B1). El kanban no
+  // debe duplicar esa logica.
   return updated;
 }
 
@@ -311,10 +294,11 @@ export async function getQuotaProgress(month: string) {
   const endOfMonth = new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 0, 23, 59, 59).toISOString();
 
   // Get recovered collections per collector in this month
+  // 'resuelto' es la nueva stage equivalente al viejo 'recuperado'
   const { data: recoveredCases } = await supabase()
     .from("crm_collections")
     .select("collector_id, amount_paid")
-    .eq("stage", "recuperado")
+    .eq("stage", "resuelto")
     .eq("is_deleted", false)
     .gte("recovered_at", startOfMonth)
     .lte("recovered_at", endOfMonth);

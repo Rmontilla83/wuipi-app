@@ -170,21 +170,29 @@ export const crmQuotaSchema = z.object({
 // CRM COBRANZAS SCHEMAS
 // ============================================
 
+// Stages del kanban Cobranzas — fuente unica en src/lib/cobranzas/stages.ts.
+// Aqui solo se duplica para el zod enum (zod no acepta arrays readonly externos).
+// Si cambian las stages alla, sincronizar aqui.
 const CRM_COLLECTION_STAGES = [
-  "leads_entrantes", "contacto_inicial", "info_enviada", "no_clasificado",
-  "gestion_suspendidos", "gestion_pre_retiro", "gestion_cobranza",
-  "recuperado", "retirado_definitivo",
+  "falla_pasarela",
+  "requiere_primer_contacto",
+  "en_conversacion",
+  "negociando_plan",
+  "compromiso_pago",
+  "verificando_pago",
+  "resuelto",
+  "ultima_oportunidad",
 ] as const;
 
-const CRM_COLLECTION_SOURCES = ["internal", "system", "kommo"] as const;
+const CRM_COLLECTION_SOURCES = ["internal", "system", "kommo", "payment_failure", "auto_inbox"] as const;
 const CRM_COLLECTION_ACTIVITY_TYPES = ["note", "call", "visit", "stage_change", "payment_promise", "payment_received", "assignment", "system"] as const;
 
 export const crmCollectionCreateSchema = z.object({
-  client_id: z.string().uuid("Cliente inválido"),
+  client_id: z.string().uuid("Cliente inválido").optional().nullable(),
   client_name: z.string().min(2, "El nombre del cliente es requerido").max(255),
   client_phone: z.string().max(30).optional().nullable(),
   client_email: z.string().email("Email inválido").optional().nullable().or(z.literal("")),
-  stage: z.enum(CRM_COLLECTION_STAGES).default("leads_entrantes"),
+  stage: z.enum(CRM_COLLECTION_STAGES).default("requiere_primer_contacto"),
   collector_id: z.string().uuid("Cobrador inválido").optional().nullable(),
   amount_due: z.number().min(0, "El monto no puede ser negativo").default(0),
   amount_paid: z.number().min(0, "El monto no puede ser negativo").default(0),

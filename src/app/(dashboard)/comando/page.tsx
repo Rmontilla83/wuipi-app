@@ -362,15 +362,26 @@ function BankDistribution() {
   );
 }
 
+// Stages del kanban Cobranzas (Stream A4) — labels y colores para el grafico
 const COBRANZA_STAGE_NAMES: Record<string, string> = {
-  leads_entrantes: "Entrantes", contacto_inicial: "Contacto inicial", info_enviada: "Info enviada",
-  no_clasificado: "Sin clasificar", gestion_suspendidos: "Suspendidos", gestion_pre_retiro: "Pre-retiro",
-  gestion_cobranza: "Cobranza activa", recuperado: "Recuperados", retirado_definitivo: "Retirados",
+  falla_pasarela: "Falla pasarela",
+  requiere_primer_contacto: "Primer contacto",
+  en_conversacion: "En conversacion",
+  negociando_plan: "Negociando",
+  compromiso_pago: "Compromiso",
+  verificando_pago: "Verificando",
+  resuelto: "Resueltos",
+  ultima_oportunidad: "Ultima opp.",
 };
 const COBRANZA_STAGE_COLORS: Record<string, string> = {
-  leads_entrantes: "bg-blue-500", contacto_inicial: "bg-cyan-500", info_enviada: "bg-violet-500",
-  no_clasificado: "bg-gray-500", gestion_suspendidos: "bg-amber-500", gestion_pre_retiro: "bg-orange-500",
-  gestion_cobranza: "bg-red-500", recuperado: "bg-emerald-500", retirado_definitivo: "bg-gray-600",
+  falla_pasarela: "bg-red-500",
+  requiere_primer_contacto: "bg-orange-500",
+  en_conversacion: "bg-orange-400",
+  negociando_plan: "bg-amber-500",
+  compromiso_pago: "bg-yellow-500",
+  verificando_pago: "bg-lime-500",
+  resuelto: "bg-emerald-500",
+  ultima_oportunidad: "bg-violet-500",
 };
 
 function FinanzasTab({ stats, cobranzas, nodes }: { stats: FinanceStats | null; cobranzas: CobranzasStats | null; nodes: MikrotikNode[] }) {
@@ -400,7 +411,7 @@ function FinanzasTab({ stats, cobranzas, nodes }: { stats: FinanceStats | null; 
   // Cobranzas pipeline
   const cobranzaStages = cobranzas ? Object.entries(cobranzas.by_stage)
     .filter(([, v]) => v.count > 0)
-    .filter(([k]) => !["recuperado", "retirado_definitivo"].includes(k))
+    .filter(([k]) => !["resuelto", "ultima_oportunidad"].includes(k))
     .map(([stage, data]) => ({
       stage, label: COBRANZA_STAGE_NAMES[stage] || stage,
       color: COBRANZA_STAGE_COLORS[stage] || "bg-gray-500", ...data,

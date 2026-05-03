@@ -199,9 +199,13 @@ async function fetchCobranzasStats() {
     byStage[c.stage].amount += c.amount_owed || 0;
   }
 
-  const active = all.filter(c => !["recuperado", "retirado_definitivo"].includes(c.stage));
-  const recovered = all.filter(c => c.stage === "recuperado");
-  const retired = all.filter(c => c.stage === "retirado_definitivo");
+  // Stages cerradas (Stream A4): resuelto + ultima_oportunidad. El campo
+  // 'retired' se conserva por compatibilidad con la UI vieja, ahora cuenta
+  // los casos de ultima_oportunidad (escalacion senior que no recupero).
+  const CLOSED_STAGES = ["resuelto", "ultima_oportunidad"];
+  const active = all.filter(c => !CLOSED_STAGES.includes(c.stage));
+  const recovered = all.filter(c => c.stage === "resuelto");
+  const retired = all.filter(c => c.stage === "ultima_oportunidad");
   const totalClosed = recovered.length + retired.length;
 
   return {

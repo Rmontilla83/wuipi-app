@@ -143,10 +143,10 @@ export default function CRMCobranzasTab() {
   };
   const onDragEnd = () => { setDraggingId(null); setDragOverCol(null); };
 
-  // Stats
-  const activeStages = ["leads_entrantes", "contacto_inicial", "info_enviada", "gestion_suspendidos", "gestion_pre_retiro", "gestion_cobranza"];
-  const activeCases = collections.filter(c => activeStages.includes(c.stage));
-  const recoveredCases = collections.filter(c => c.stage === "recuperado");
+  // Stats — stages activas vs cerradas (Stream A4)
+  const CLOSED_STAGES = ["resuelto", "ultima_oportunidad"];
+  const activeCases = collections.filter(c => !CLOSED_STAGES.includes(c.stage));
+  const recoveredCases = collections.filter(c => c.stage === "resuelto");
   const totalDebt = activeCases.reduce((s, c) => s + (c.amount_due || 0), 0);
   const recoveredAmount = recoveredCases.reduce((s, c) => s + (c.amount_paid || 0), 0);
   const recoveryRate = total > 0 ? Math.round((recoveredCases.length / total) * 100) : 0;
