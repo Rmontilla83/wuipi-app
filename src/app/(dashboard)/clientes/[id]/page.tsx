@@ -9,6 +9,7 @@ import {
   ChevronLeft, RefreshCw, Mail, Phone, MapPin, Building2,
   CreditCard, FileText, Receipt, Clock, Tag, Globe,
   AlertTriangle, CheckCircle2, Pause, Ban, Eye, Radio,
+  Send, X, MessageSquare,
 } from "lucide-react";
 import Link from "next/link";
 import type { OdooClientDetail, OdooSubscription, OdooInvoiceDetail, OdooPayment, MikrotikService } from "@/types/odoo";
@@ -59,6 +60,7 @@ export default function ClienteDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [tab, setTab] = useState<Tab>("suscripciones");
+  const [showSendModal, setShowSendModal] = useState(false);
 
   const fetchDetail = useCallback(async () => {
     setLoading(true);
@@ -164,6 +166,13 @@ export default function ClienteDetailPage() {
             >
               <CreditCard size={14} /> Link de pago
             </button>
+            <button
+              onClick={() => setShowSendModal(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 text-amber-400 text-xs font-medium hover:bg-amber-500/20 transition-colors"
+              title="Envía el link de pago por WhatsApp al teléfono del cliente"
+            >
+              <Send size={14} /> Enviar por WA
+            </button>
             <button onClick={fetchDetail} className="p-2 rounded-lg border border-wuipi-border text-gray-400 hover:text-white">
               <RefreshCw size={16} />
             </button>
@@ -216,7 +225,158 @@ export default function ClienteDetailPage() {
         {tab === "informacion" && <InformacionTab data={data} />}
         {tab === "soporte" && <SoporteTab vat={data.vat} name={data.name} />}
       </div>
+
+      {showSendModal && (
+        <SendWAModal
+          partnerId={data.id}
+          customerName={data.name}
+          phone={data.mobile || data.phone}
+          totalDue={data.total_due}
+          onClose={() => setShowSendModal(false)}
+        />
+      )}
     </>
+  );
+}
+
+// ── Modal: Enviar link de pago via WhatsApp ────────────
+
+function SendWAModal({
+  partnerId, customerName, phone, totalDue, onClose,
+}: {
+  partnerId: number;
+  customerName: string;
+  phone: string;
+  totalDue: number;
+  onClose: () => void;
+}) {
+  const TEMPLATE_OPTIONS = [
+    { key: "d3_recordatorio_suave", label: "Recordatorio suave (default)" },
+    { key: "d27_aviso_factura_generada", label: "Aviso de factura nueva (D27)" },
+    { key: "d1_recordatorio_inicio_mes", label: "Inicio de mes (D1)" },
+    { key: "d5_recordatorio_firme", label: "Recordatorio firme (D5)" },
+  ];
+
+  const [template, setTemplate] = useState(TEMPLATE_OPTIONS[0].key);
+  const [overridePhone, setOverridePhone] = useState(phone || "");
+  const [sending, setSending] = useState(false);
+  const [result, setResult] = useState<{ ok: boolean; message: string; dryRun?: boolean } | null>(null);
+
+  const handleSend = async () => {
+    if (!overridePhone || overridePhone.replace(/\D/g, "").length < 10) {
+      setResult({ ok: false, message: "Teléfono inválido" });
+      return;
+    }
+    setSending(true);
+    setResult(null);
+    try {
+      const res = await fetch(`/api/clientes/${partnerId}/send-payment-link`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ template, phone: overridePhone }),
+      });
+      const json = await res.json();
+      const r = json.data || json;
+      if (!res.ok) throw new Error(json.error || "Error enviando");
+      setResult({
+        ok: r.ok,
+        dryRun: r.dry_run,
+        message: r.dry_run
+          ? `Registrado en outbox como dry-run (${r.outbox_id?.slice(0, 8)}...). El cliente NO lo recibió porque COBRANZAS_WA_DRY_RUN está activo.`
+          : r.status === "sent"
+            ? `Enviado a Meta — message_id: ${r.meta_message_id?.slice(-12) || "?"}`
+            : `Status: ${r.status} — ${r.error || ""}`,
+      });
+    } catch (err) {
+      setResult({ ok: false, message: err instanceof Error ? err.message : "Error desconocido" });
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()}
+        className="bg-wuipi-card border border-wuipi-border rounded-2xl w-full max-w-lg overflow-hidden">
+        <div className="border-b border-wuipi-border p-4 flex items-center justify-between">
+          <div>
+            <h2 className="text-base font-bold text-white flex items-center gap-2">
+              <MessageSquare size={16} /> Enviar link de pago
+            </h2>
+            <p className="text-xs text-gray-500 mt-0.5">A {customerName}</p>
+          </div>
+          <button onClick={onClose} className="text-gray-500 hover:text-white"><X size={20} /></button>
+        </div>
+
+        <div className="p-4 space-y-3 text-xs">
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="text-gray-500 block mb-1">Teléfono destino</label>
+              <input
+                value={overridePhone}
+                onChange={(e) => setOverridePhone(e.target.value)}
+                placeholder="04XXXXXXXXX"
+                className="w-full px-3 py-2 rounded-lg bg-wuipi-bg border border-wuipi-border text-white focus:outline-none"
+              />
+              <p className="text-[10px] text-gray-600 mt-1">
+                Por defecto el de Odoo. Podés sobreescribir.
+              </p>
+            </div>
+            <div>
+              <label className="text-gray-500 block mb-1">Deuda actual</label>
+              <div className="px-3 py-2 rounded-lg bg-wuipi-bg border border-wuipi-border text-white">
+                {totalDue > 0
+                  ? `Bs ${totalDue.toLocaleString("es-VE", { minimumFractionDigits: 2 })}`
+                  : <span className="text-emerald-400">Sin deuda</span>}
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <label className="text-gray-500 block mb-1">Template</label>
+            <select
+              value={template}
+              onChange={(e) => setTemplate(e.target.value)}
+              className="w-full px-3 py-2 rounded-lg bg-wuipi-bg border border-wuipi-border text-gray-300 focus:outline-none"
+            >
+              {TEMPLATE_OPTIONS.map(t => (
+                <option key={t.key} value={t.key}>{t.label}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="rounded-lg p-2 border border-violet-500/30 bg-violet-500/5 text-violet-300 text-[11px]">
+            ℹ️ El link permanente se genera automáticamente. El cliente verá todas
+            sus facturas pendientes en Odoo y podrá pagar con cualquier método
+            (Mercantil, C2P, Stripe, PayPal, transferencia).
+          </div>
+
+          {result && (
+            <div className={`rounded-lg p-3 border ${result.ok ? "border-emerald-500/30 bg-emerald-500/5 text-emerald-300" : "border-red-500/30 bg-red-500/5 text-red-300"}`}>
+              <p className="font-semibold">{result.ok ? "Éxito" : "Error"}</p>
+              <p className="mt-1">{result.message}</p>
+            </div>
+          )}
+        </div>
+
+        <div className="border-t border-wuipi-border p-3 flex justify-end gap-2">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 rounded-lg border border-wuipi-border text-gray-400 text-xs hover:text-white"
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={handleSend}
+            disabled={sending || !overridePhone}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-amber-500 text-white text-xs font-medium hover:bg-amber-500/90 disabled:opacity-50"
+          >
+            <Send size={14} />
+            {sending ? "Enviando..." : "Enviar"}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
