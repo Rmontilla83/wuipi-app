@@ -25,6 +25,7 @@ import { markItemPaid } from "@/lib/dal/collection-campaigns";
 import { triggerOdooSyncOrEnqueue } from "@/lib/integrations/odoo-sync-trigger";
 import { sendPaymentConfirmationWhatsApp } from "@/lib/notifications/whatsapp";
 import { sendPaymentConfirmationEmail } from "@/lib/notifications/email";
+import { logGatewayEvent } from "@/lib/dal/payment-gateway-logs";
 
 export const dynamic = "force-dynamic";
 
@@ -103,6 +104,26 @@ export async function POST(
       error: `Fallo al marcar paid: ${err instanceof Error ? err.message : String(err)}`,
     }, { status: 500 });
   }
+
+  // Log: admin promovio manualmente (cuando transfer-search no auto-verifico)
+  // El gateway depende del payment_method que el admin selecciono.
+  const promoteGateway: "transferencia" | "mercantil" | "c2p" =
+    body.payment_method === "transferencia" ? "transferencia" :
+    body.payment_method === "c2p" ? "c2p" : "mercantil";
+  logGatewayEvent({
+    collectionItemId: item.id, paymentToken: item.payment_token,
+    gateway: promoteGateway, gatewayProduct: "manual_promote",
+    eventType: "success", outcome: "success",
+    request: {
+      reference_number: body.payment_reference,
+      verified_by_user_id: caller.id,
+    },
+    response: { matched: true, ok: true },
+    customerCedulaRif: item.customer_cedula_rif,
+    customerName: item.customer_name,
+    amountUsd: Number(item.amount_usd),
+    amountVes: typeof body.amount_bss === "number" ? body.amount_bss : null,
+  }).catch(() => {});
 
   // Audit en metadata para trazabilidad de quien promovio
   try {

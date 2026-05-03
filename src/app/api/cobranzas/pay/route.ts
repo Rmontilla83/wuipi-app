@@ -10,6 +10,7 @@ import { MercantilSDK } from "@/lib/mercantil";
 import { checkRateLimit, getClientIP } from "@/lib/utils/rate-limit";
 import Stripe from "stripe";
 import { isPayPalConfigured, createPayPalOrder } from "@/lib/integrations/paypal";
+import { logGatewayEvent, classifyError } from "@/lib/dal/payment-gateway-logs";
 
 const FALLBACK_URL = "https://api.wuipi.net";
 
@@ -39,6 +40,32 @@ export async function POST(request: NextRequest) {
     if (item.status === "paid") return apiError("Este cobro ya fue pagado", 400);
     if (item.expires_at && new Date(item.expires_at) < new Date()) {
       return apiError("Este enlace de pago ha expirado", 410);
+    }
+
+    // Mapeo del method del request → gateway+product para el log
+    const gatewayMap: Record<string, { gateway: "mercantil" | "c2p" | "stripe" | "paypal" | "transferencia"; product: string }> = {
+      debito_inmediato: { gateway: "mercantil", product: "web_button" },
+      c2p:              { gateway: "c2p",       product: "c2p_otp_request" },
+      stripe:           { gateway: "stripe",    product: "checkout_session" },
+      paypal:           { gateway: "paypal",    product: "order_create" },
+      transferencia:    { gateway: "transferencia", product: "info_show" },
+    };
+    const gw = gatewayMap[method];
+
+    // Log: cliente inicio el flujo de pago
+    if (gw) {
+      logGatewayEvent({
+        collectionItemId: item.id,
+        paymentToken: item.payment_token,
+        gateway: gw.gateway,
+        gatewayProduct: gw.product,
+        eventType: "initiated",
+        ip,
+        userAgent: request.headers.get("user-agent"),
+        customerCedulaRif: item.customer_cedula_rif,
+        customerName: item.customer_name,
+        amountUsd: Number(item.amount_usd),
+      }).catch(() => {/* swallow — log es best-effort */});
     }
 
     const bcv = await fetchBCVRate();
@@ -76,23 +103,41 @@ export async function POST(request: NextRequest) {
         );
       }
 
+      const t0 = Date.now();
       try {
         const sdk = new MercantilSDK();
         const today = new Date().toISOString().split("T")[0];
         const dueDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
 
-        const result = sdk.createPayment({
+        const sdkPayload = {
           amount: amountBss,
           customerName: item.customer_name,
           returnUrl: `${getAppUrl()}/pagar/${token}?status=callback`,
-          currency: "ves",
+          currency: "ves" as const,
           invoiceNumber: {
             number: mercantilInvoiceId,
             invoiceCreationDate: today,
             invoiceCancelledDate: dueDate,
           },
-          paymentConcepts: ["b2b", "c2p", "tdd"],
-        });
+          paymentConcepts: ["b2b", "c2p", "tdd"] as ("b2b" | "c2p" | "tdd")[],
+        };
+        logGatewayEvent({
+          collectionItemId: item.id, paymentToken: item.payment_token,
+          gateway: "mercantil", gatewayProduct: "web_button",
+          eventType: "request_sent",
+          request: { ...sdkPayload, invoiceNumber: sdkPayload.invoiceNumber.number },
+          amountVes: amountBss,
+        }).catch(() => {});
+
+        const result = sdk.createPayment(sdkPayload);
+
+        logGatewayEvent({
+          collectionItemId: item.id, paymentToken: item.payment_token,
+          gateway: "mercantil", gatewayProduct: "web_button",
+          eventType: "response_received", outcome: "pending",
+          response: { redirectUrl: result.redirectUrl ? "[present]" : "[missing]" },
+          durationMs: Date.now() - t0,
+        }).catch(() => {});
 
         return apiSuccess({
           method: "debito_inmediato",
@@ -109,6 +154,14 @@ export async function POST(request: NextRequest) {
           itemId: item.id,
           mercantilInvoiceId,
         });
+        logGatewayEvent({
+          collectionItemId: item.id, paymentToken: item.payment_token,
+          gateway: "mercantil", gatewayProduct: "web_button",
+          eventType: "error", outcome: "error",
+          responseMessage: e.message || "unknown",
+          errorCategory: classifyError("mercantil", null, e.message),
+          durationMs: Date.now() - t0,
+        }).catch(() => {});
         return apiError(
           `Error al generar enlace de Mercantil: ${e.message || "desconocido"}. Intente con otro metodo.`,
           500
@@ -123,12 +176,18 @@ export async function POST(request: NextRequest) {
         return apiError("Pago con tarjeta internacional no disponible en este momento", 503);
       }
 
+      const t0 = Date.now();
       try {
         const amountCents = Math.round(Number(item.amount_usd) * 100);
         const successUrl = `${getAppUrl()}/pagar/${token}?status=success`;
         const cancelUrl = `${getAppUrl()}/pagar/${token}?status=cancelled`;
 
-        // Stripe session creation
+        logGatewayEvent({
+          collectionItemId: item.id, paymentToken: item.payment_token,
+          gateway: "stripe", gatewayProduct: "checkout_session",
+          eventType: "request_sent",
+          request: { amount: Number(item.amount_usd), currency: "usd", invoice_id: item.invoice_number, mode: "payment" },
+        }).catch(() => {});
 
         const stripe = new Stripe(stripeKey, { apiVersion: "2025-04-30.basil" as Stripe.LatestApiVersion });
         const session = await stripe.checkout.sessions.create({
@@ -160,6 +219,14 @@ export async function POST(request: NextRequest) {
         // Save stripe session on item
         await updateItem(item.id, { stripe_session_id: session.id });
 
+        logGatewayEvent({
+          collectionItemId: item.id, paymentToken: item.payment_token,
+          gateway: "stripe", gatewayProduct: "checkout_session",
+          eventType: "response_received", outcome: "pending",
+          response: { session_id: session.id, status: session.status || "open" },
+          durationMs: Date.now() - t0,
+        }).catch(() => {});
+
         return apiSuccess({
           method: "stripe",
           redirect_url: session.url,
@@ -174,6 +241,15 @@ export async function POST(request: NextRequest) {
           code: stripeErr.code,
           statusCode: stripeErr.statusCode,
         });
+        logGatewayEvent({
+          collectionItemId: item.id, paymentToken: item.payment_token,
+          gateway: "stripe", gatewayProduct: "checkout_session",
+          eventType: "error", outcome: "error",
+          responseCode: stripeErr.code || (stripeErr.statusCode ? String(stripeErr.statusCode) : null),
+          responseMessage: stripeErr.message || "unknown",
+          errorCategory: classifyError("stripe", String(stripeErr.statusCode || ""), stripeErr.message),
+          durationMs: Date.now() - t0,
+        }).catch(() => {});
         const userMsg = stripeErr.code === "api_key_expired"
           ? "La configuración de pagos con tarjeta necesita actualización. Contacte soporte."
           : `Error al procesar pago con tarjeta: ${stripeErr.message || "Intente nuevamente."}`;
@@ -192,24 +268,53 @@ export async function POST(request: NextRequest) {
       const returnUrl = `${getAppUrl()}/api/cobranzas/webhook/paypal?collection_token=${token}`;
       const cancelUrl = `${getAppUrl()}/pagar/${token}?status=cancelled`;
 
-      const order = await createPayPalOrder({
-        amountUsd: Number(item.amount_usd),
-        description: item.concept || "Servicio WUIPI",
-        returnUrl,
-        cancelUrl,
-        customId: token,
-      });
+      const t0 = Date.now();
+      logGatewayEvent({
+        collectionItemId: item.id, paymentToken: item.payment_token,
+        gateway: "paypal", gatewayProduct: "order_create",
+        eventType: "request_sent",
+        request: { amount: Number(item.amount_usd), currency: "USD", intent: "CAPTURE" },
+      }).catch(() => {});
 
-      await updateItem(item.id, {
-        metadata: { ...((item.metadata as Record<string, unknown>) || {}), paypal_order_id: order.orderId },
-      });
+      try {
+        const order = await createPayPalOrder({
+          amountUsd: Number(item.amount_usd),
+          description: item.concept || "Servicio WUIPI",
+          returnUrl,
+          cancelUrl,
+          customId: token,
+        });
 
-      return apiSuccess({
-        method: "paypal",
-        redirect_url: order.approveUrl,
-        order_id: order.orderId,
-        amount_usd: Number(item.amount_usd),
-      });
+        await updateItem(item.id, {
+          metadata: { ...((item.metadata as Record<string, unknown>) || {}), paypal_order_id: order.orderId },
+        });
+
+        logGatewayEvent({
+          collectionItemId: item.id, paymentToken: item.payment_token,
+          gateway: "paypal", gatewayProduct: "order_create",
+          eventType: "response_received", outcome: "pending",
+          response: { order_id: order.orderId, status: "CREATED" },
+          durationMs: Date.now() - t0,
+        }).catch(() => {});
+
+        return apiSuccess({
+          method: "paypal",
+          redirect_url: order.approveUrl,
+          order_id: order.orderId,
+          amount_usd: Number(item.amount_usd),
+        });
+      } catch (err: unknown) {
+        const e = err as { message?: string };
+        logGatewayEvent({
+          collectionItemId: item.id, paymentToken: item.payment_token,
+          gateway: "paypal", gatewayProduct: "order_create",
+          eventType: "error", outcome: "error",
+          responseMessage: e.message || "unknown",
+          errorCategory: classifyError("paypal", null, e.message),
+          durationMs: Date.now() - t0,
+        }).catch(() => {});
+        throw err;
+      }
     }
 
     // ---- C2P Pago Movil (Paso 1: solicitar OTP) ----
@@ -220,16 +325,25 @@ export async function POST(request: NextRequest) {
         return apiError("Faltan datos de C2P (cedula, telefono, banco)", 400);
       }
       const { cedula, phone, bankCode } = parsed.data.c2p;
+      const t0 = Date.now();
+      logGatewayEvent({
+        collectionItemId: item.id, paymentToken: item.payment_token,
+        gateway: "c2p", gatewayProduct: "c2p_otp_request",
+        eventType: "request_sent",
+        request: { amount: amountBss, bankCode, invoiceNumber: item.invoice_number },
+        amountVes: amountBss,
+        customerCedulaRif: cedula,
+      }).catch(() => {});
       try {
         const sdk = new MercantilSDK();
-        const ip = getClientIP(request.headers) || "0.0.0.0";
+        const ip2 = getClientIP(request.headers) || "0.0.0.0";
         const ua = request.headers.get("user-agent") || "WUIPI-Portal";
         const result = await sdk.requestC2PKey(
           {
             destinationId: cedula,
             destinationMobile: phone,
           },
-          { ipaddress: ip, browser_agent: ua }
+          { ipaddress: ip2, browser_agent: ua }
         );
         // Persist what we'll need at confirm-time so the client only sends the OTP.
         await updateItem(item.id, {
@@ -238,6 +352,13 @@ export async function POST(request: NextRequest) {
             c2p: { cedula, phone, bankCode, key_reference: result.key_reference || null, requested_at: new Date().toISOString() },
           },
         });
+        logGatewayEvent({
+          collectionItemId: item.id, paymentToken: item.payment_token,
+          gateway: "c2p", gatewayProduct: "c2p_otp_request",
+          eventType: "response_received", outcome: "pending",
+          response: { transactionId: result.key_reference || null, status: "OTP_SENT" },
+          durationMs: Date.now() - t0,
+        }).catch(() => {});
         return apiSuccess({
           method: "c2p",
           step: "otp_requested",
@@ -248,6 +369,14 @@ export async function POST(request: NextRequest) {
       } catch (err: unknown) {
         const e = err as { message?: string; details?: Record<string, unknown> };
         console.error("[Pay] C2P key request error:", e.message, e.details || {});
+        logGatewayEvent({
+          collectionItemId: item.id, paymentToken: item.payment_token,
+          gateway: "c2p", gatewayProduct: "c2p_otp_request",
+          eventType: "error", outcome: "error",
+          responseMessage: e.message || "unknown",
+          errorCategory: classifyError("c2p", null, e.message),
+          durationMs: Date.now() - t0,
+        }).catch(() => {});
         return apiError(
           e.message || "No se pudo solicitar la clave de pago movil. Verifica los datos.",
           502

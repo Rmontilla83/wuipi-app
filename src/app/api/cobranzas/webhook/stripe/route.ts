@@ -5,6 +5,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { markItemPaid, getItemsByToken } from "@/lib/dal/collection-campaigns";
 import { sendPaymentConfirmationWhatsApp } from "@/lib/notifications/whatsapp";
 import { sendPaymentConfirmationEmail } from "@/lib/notifications/email";
+import { logGatewayEvent } from "@/lib/dal/payment-gateway-logs";
 import Stripe from "stripe";
 
 export async function POST(request: NextRequest) {
@@ -30,6 +31,12 @@ export async function POST(request: NextRequest) {
     event = stripe.webhooks.constructEvent(body, sig, webhookSecret);
   } catch (err) {
     console.error("[Stripe Webhook] Signature verification failed:", err instanceof Error ? err.message : err);
+    logGatewayEvent({
+      gateway: "stripe", gatewayProduct: "webhook",
+      eventType: "error", outcome: "error",
+      responseMessage: "Invalid signature: " + (err instanceof Error ? err.message : "unknown"),
+      errorCategory: "invalid_credentials",
+    }).catch(() => {});
     return NextResponse.json({ error: "Invalid signature" }, { status: 400 });
   }
 
@@ -60,6 +67,23 @@ export async function POST(request: NextRequest) {
           payment_method: "stripe",
           payment_reference: session.payment_intent as string || session.id,
         });
+
+        // Log: pago Stripe completado
+        if (item) {
+          logGatewayEvent({
+            collectionItemId: item.id, paymentToken: item.payment_token,
+            gateway: "stripe", gatewayProduct: "checkout_session",
+            eventType: "webhook_received", outcome: "success",
+            response: {
+              session_id: session.id,
+              payment_intent_id: (session.payment_intent as string) || null,
+              status: session.payment_status || null,
+            },
+            customerCedulaRif: item.customer_cedula_rif,
+            customerName: item.customer_name,
+            amountUsd: Number(item.amount_usd),
+          }).catch(() => {});
+        }
 
         // Sprint 4 — sync Odoo via waitUntil (factura queda en USD).
         if (item) {

@@ -12,6 +12,7 @@ import { updateCampaignTotals } from "@/lib/dal/collection-campaigns";
 import { fetchBCVRate } from "@/lib/integrations/bcv";
 import { sendPaymentConfirmationWhatsApp } from "@/lib/notifications/whatsapp";
 import { sendPaymentConfirmationEmail } from "@/lib/notifications/email";
+import { logGatewayEvent } from "@/lib/dal/payment-gateway-logs";
 
 // Allowed tolerance between what the item asks vs what the client paid,
 // evaluated on the USD-equivalent. ±5% covers BCV rate fluctuations and
@@ -115,6 +116,19 @@ export async function POST(request: NextRequest) {
       })
       .eq("id", item_id);
     if (updateErr) return apiError(`Error al actualizar: ${updateErr.message}`, 500);
+
+    // Log: cobro en oficina exitoso (no hay gateway externo en este flujo)
+    logGatewayEvent({
+      collectionItemId: item.id, paymentToken: item.payment_token,
+      gateway: "cash", gatewayProduct: "office_collect",
+      eventType: "success", outcome: "success",
+      request: { amount: paid_amount, currency: paid_currency, collected_by_user_id: caller.id, office: location },
+      response: { ok: true },
+      customerCedulaRif: item.customer_cedula_rif,
+      customerName: item.customer_name,
+      amountUsd: Number(item.amount_usd),
+      amountVes: paid_currency === "VES" ? paid_amount : null,
+    }).catch(() => {});
 
     // Sprint 4 — sync Odoo via waitUntil (no bloquea respuesta admin).
     try {

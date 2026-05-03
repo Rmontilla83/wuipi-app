@@ -9,6 +9,7 @@ import { markItemPaid, getItemsByToken } from "@/lib/dal/collection-campaigns";
 import { capturePayPalOrder, verifyPayPalWebhook } from "@/lib/integrations/paypal";
 import { sendPaymentConfirmationWhatsApp } from "@/lib/notifications/whatsapp";
 import { sendPaymentConfirmationEmail } from "@/lib/notifications/email";
+import { logGatewayEvent } from "@/lib/dal/payment-gateway-logs";
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://api.wuipi.net";
 const WPY_TOKEN_RE = /^wpy_[A-Za-z0-9_-]{8,64}$/;
@@ -83,8 +84,28 @@ export async function GET(request: NextRequest) {
             payment_method: "paypal",
             payment_reference: capture.captureId,
           });
+          // Log: pago PayPal capturado exitosamente
+          logGatewayEvent({
+            collectionItemId: item.id, paymentToken: item.payment_token,
+            gateway: "paypal", gatewayProduct: "order_capture",
+            eventType: "webhook_received", outcome: "success",
+            response: {
+              order_id: paypalOrderId,
+              status: capture.status,
+              capture_id: capture.captureId,
+            },
+            customerCedulaRif: item.customer_cedula_rif,
+            customerName: item.customer_name,
+            amountUsd: Number(item.amount_usd),
+          }).catch(() => {});
         } catch (dbErr) {
           console.error("[PayPal Return] DB update error:", serializeError(dbErr));
+          logGatewayEvent({
+            collectionItemId: item.id, paymentToken: item.payment_token,
+            gateway: "paypal", gatewayProduct: "order_capture",
+            eventType: "error", outcome: "error",
+            responseMessage: "DB update failed: " + (dbErr instanceof Error ? dbErr.message : "unknown"),
+          }).catch(() => {});
           // Payment was captured by PayPal — redirect success anyway; reconcile manually.
         }
 
@@ -142,9 +163,23 @@ export async function GET(request: NextRequest) {
     }
 
     console.error("[PayPal Return] Capture not COMPLETED:", capture.status);
+    logGatewayEvent({
+      paymentToken: wpy_token,
+      gateway: "paypal", gatewayProduct: "order_capture",
+      eventType: "webhook_received", outcome: "error",
+      response: { order_id: paypalOrderId, status: capture.status },
+      responseCode: capture.status,
+      errorCategory: "unknown",
+    }).catch(() => {});
     return safeRedirect(`/pagar/${wpy_token}?status=failed`);
   } catch (err) {
     console.error("[PayPal Return] EXCEPTION:", serializeError(err));
+    logGatewayEvent({
+      paymentToken: collectionToken,
+      gateway: "paypal", gatewayProduct: "order_capture",
+      eventType: "error", outcome: "error",
+      responseMessage: err instanceof Error ? err.message : "unknown exception",
+    }).catch(() => {});
     return safeRedirect(`/pagar/${collectionToken || "error"}?status=failed`);
   }
 }

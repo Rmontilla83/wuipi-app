@@ -12,6 +12,7 @@ import { MercantilSDK } from "@/lib/mercantil";
 import { checkRateLimit, getClientIP } from "@/lib/utils/rate-limit";
 import { sendPaymentConfirmationWhatsApp } from "@/lib/notifications/whatsapp";
 import { sendPaymentConfirmationEmail } from "@/lib/notifications/email";
+import { logGatewayEvent, classifyError } from "@/lib/dal/payment-gateway-logs";
 
 export async function POST(request: NextRequest) {
   try {
@@ -46,6 +47,15 @@ export async function POST(request: NextRequest) {
     const mercantilInvoiceId = await ensureMercantilInvoiceId(item.id, item.payment_token);
 
     let reference: string;
+    const t0 = Date.now();
+    logGatewayEvent({
+      collectionItemId: item.id, paymentToken: item.payment_token,
+      gateway: "c2p", gatewayProduct: "c2p_payment",
+      eventType: "request_sent",
+      request: { amount: amountBss, bankCode, invoiceNumber: mercantilInvoiceId },
+      amountVes: amountBss, customerCedulaRif: cedula,
+      ip, userAgent: ua,
+    }).catch(() => {});
     try {
       const result = await sdk.createC2PPayment(
         {
@@ -66,12 +76,37 @@ export async function POST(request: NextRequest) {
       const status = String(result.status || "").trim();
       const approved = status === "00" || status === "0000" || status.toLowerCase() === "approved";
       if (!approved) {
+        logGatewayEvent({
+          collectionItemId: item.id, paymentToken: item.payment_token,
+          gateway: "c2p", gatewayProduct: "c2p_payment",
+          eventType: "response_received", outcome: "error",
+          response: { status, errorMessage: result.message || null },
+          responseCode: status, responseMessage: result.message || null,
+          errorCategory: classifyError("c2p", status, result.message),
+          durationMs: Date.now() - t0,
+        }).catch(() => {});
         return apiError(result.message || `Pago rechazado por el banco (codigo ${status || "desconocido"})`, 402);
       }
       reference = result.reference_number || result.bank_transaction_id || `c2p_${Date.now()}`;
+      logGatewayEvent({
+        collectionItemId: item.id, paymentToken: item.payment_token,
+        gateway: "c2p", gatewayProduct: "c2p_payment",
+        eventType: "success", outcome: "success",
+        response: { status, transactionId: result.bank_transaction_id || null, reference: result.reference_number || null },
+        responseCode: status,
+        durationMs: Date.now() - t0,
+      }).catch(() => {});
     } catch (err: unknown) {
       const e = err as { message?: string; details?: Record<string, unknown> };
       console.error("[C2P Confirm] Mercantil error:", e.message, e.details || {});
+      logGatewayEvent({
+        collectionItemId: item.id, paymentToken: item.payment_token,
+        gateway: "c2p", gatewayProduct: "c2p_payment",
+        eventType: "error", outcome: "error",
+        responseMessage: e.message || "unknown",
+        errorCategory: classifyError("c2p", null, e.message),
+        durationMs: Date.now() - t0,
+      }).catch(() => {});
       const msg = (e.message || "").toLowerCase();
       const userMsg = msg.includes("invalid") || msg.includes("incorrect") || msg.includes("clave")
         ? "Clave incorrecta o vencida. Solicita una nueva."

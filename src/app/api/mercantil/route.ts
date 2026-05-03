@@ -24,6 +24,7 @@ import { getClientIP } from "@/lib/utils/rate-limit";
 import { triggerOdooSyncOrEnqueue } from "@/lib/integrations/odoo-sync-trigger";
 import { sendPaymentConfirmationWhatsApp } from "@/lib/notifications/whatsapp";
 import { sendPaymentConfirmationEmail } from "@/lib/notifications/email";
+import { logGatewayEvent, classifyError } from "@/lib/dal/payment-gateway-logs";
 
 export const dynamic = "force-dynamic";
 
@@ -340,6 +341,27 @@ export async function POST(request: NextRequest) {
               amount_bss: normalized.amount,
             });
             const wasAlreadyPaid = (paidResult as { wasAlreadyPaid?: boolean }).wasAlreadyPaid === true;
+
+            // Log webhook approved (success) — solo si fuimos los primeros en
+            // ganar la race (sino el primer webhook ya logeo este evento)
+            if (!wasAlreadyPaid) {
+              logGatewayEvent({
+                collectionItemId: item.id, paymentToken: item.payment_token,
+                gateway: "mercantil", gatewayProduct: "web_button",
+                eventType: "webhook_received", outcome: "success",
+                response: {
+                  status: normalized.raw_status,
+                  errorCode: normalized.error_code || null,
+                  transactionId: normalized.reference_number || null,
+                },
+                responseCode: normalized.raw_status || null,
+                ip,
+                amountVes: normalized.amount ?? null,
+                customerCedulaRif: item.customer_cedula_rif,
+                customerName: item.customer_name,
+                amountUsd: Number(item.amount_usd),
+              }).catch(() => {});
+            }
             if (wasAlreadyPaid) {
               console.log("[Mercantil Alias] Item " + item.id + " ya estaba paid — skip notificaciones y sync (otro webhook lo proceso primero)");
             } else {
@@ -461,6 +483,25 @@ export async function POST(request: NextRequest) {
               "[Mercantil Alias] Item " + item.id + " marcado como failed (codigo=" +
               normalized.raw_status + " mensaje=" + (normalized.message || "") + ")"
             );
+            // Log webhook rejected (error) — datos clave para forensics
+            logGatewayEvent({
+              collectionItemId: item.id, paymentToken: item.payment_token,
+              gateway: "mercantil", gatewayProduct: "web_button",
+              eventType: "webhook_received", outcome: "error",
+              response: {
+                status: normalized.raw_status,
+                errorCode: normalized.error_code || null,
+                errorMessage: normalized.message || null,
+              },
+              responseCode: normalized.error_code || normalized.raw_status || null,
+              responseMessage: normalized.message || null,
+              errorCategory: classifyError("mercantil", normalized.error_code, normalized.message),
+              ip,
+              customerCedulaRif: item.customer_cedula_rif,
+              customerName: item.customer_name,
+              amountUsd: Number(item.amount_usd),
+              amountVes: normalized.amount ?? null,
+            }).catch(() => {});
           } else if (item && item.status === "paid") {
             console.log(
               "[Mercantil Alias] Item " + item.id + " ya esta paid — ignorando decline tardio"

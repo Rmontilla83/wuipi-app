@@ -13,6 +13,7 @@ import { sendPaymentConfirmationEmail } from "@/lib/notifications/email";
 import { checkRateLimit, getClientIP } from "@/lib/utils/rate-limit";
 import { MercantilSDK } from "@/lib/mercantil";
 import { fetchBCVRate, convertUsdToBs } from "@/lib/integrations/bcv";
+import { logGatewayEvent, classifyError, maskAccountLast4 } from "@/lib/dal/payment-gateway-logs";
 
 // Wuipi bank account at Mercantil (destination of all transfers to us).
 // Full 20-digit number; Mercantil transfer-search expects the account number.
@@ -74,6 +75,20 @@ export async function POST(request: NextRequest) {
       sdk.isProductConfigured("transfer_search");
 
     if (canVerify) {
+      const t0 = Date.now();
+      logGatewayEvent({
+        collectionItemId: item.id, paymentToken: item.payment_token,
+        gateway: "transferencia", gatewayProduct: "transfer_search",
+        eventType: "request_sent",
+        request: {
+          amount: amountBss,
+          reference_number: reference,
+          account_last4: maskAccountLast4(WUIPI_ACCOUNT),
+          bank_code: bankCode,
+          date: new Date().toISOString().split("T")[0],
+        },
+        amountVes: amountBss, customerCedulaRif: item.customer_cedula_rif,
+      }).catch(() => {});
       try {
         // Strip any prefix from the cedula (V/J/E/G) — Mercantil expects digits only.
         const cedulaDigits = String(item.customer_cedula_rif).replace(/^[VJEGP]-?/i, "").replace(/\D/g, "");
@@ -105,10 +120,24 @@ export async function POST(request: NextRequest) {
           console.log(
             `[PayConfirm] auto-verified ref=${reference} item=${item.id} via Mercantil`
           );
+          logGatewayEvent({
+            collectionItemId: item.id, paymentToken: item.payment_token,
+            gateway: "transferencia", gatewayProduct: "transfer_search",
+            eventType: "response_received", outcome: "success",
+            response: { matched: true },
+            durationMs: Date.now() - t0,
+          }).catch(() => {});
         } else {
           console.log(
             `[PayConfirm] no match on Mercantil — ref=${reference} cedula=${cedulaDigits} bank=${bankCode} amount=${amountBss} results=${results.length} → conciliating`
           );
+          logGatewayEvent({
+            collectionItemId: item.id, paymentToken: item.payment_token,
+            gateway: "transferencia", gatewayProduct: "transfer_search",
+            eventType: "response_received", outcome: "pending",
+            response: { matched: false },
+            durationMs: Date.now() - t0,
+          }).catch(() => {});
         }
       } catch (err) {
         const e = err as { message?: string; status?: number; details?: unknown };
@@ -119,6 +148,15 @@ export async function POST(request: NextRequest) {
           `[PayConfirm] transfer-search failed: status=${e.status || "?"} ` +
           `message=${autoVerifyError} details=${JSON.stringify(e.details || {})}`
         );
+        logGatewayEvent({
+          collectionItemId: item.id, paymentToken: item.payment_token,
+          gateway: "transferencia", gatewayProduct: "transfer_search",
+          eventType: "error", outcome: "error",
+          responseCode: e.status ? String(e.status) : null,
+          responseMessage: autoVerifyError,
+          errorCategory: classifyError("mercantil", e.status ? String(e.status) : null, autoVerifyError),
+          durationMs: Date.now() - t0,
+        }).catch(() => {});
         // Fall through to conciliating — don't block the client on Mercantil hiccups.
       }
     }
