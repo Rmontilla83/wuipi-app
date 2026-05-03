@@ -35,7 +35,7 @@ export interface CollectionItem {
   amount_usd: number;
   amount_bss: number | null;
   bcv_rate: number | null;
-  payment_method: "debito_inmediato" | "transferencia" | "stripe" | "paypal" | "c2p" | "cash" | "pending" | null;
+  payment_method: "debito_inmediato" | "transferencia" | "stripe" | "paypal" | "c2p" | "cash" | "external_odoo" | "pending" | null;
   payment_reference: string | null;
   payment_date: string | null;
   status: "pending" | "sent" | "viewed" | "paid" | "failed" | "expired" | "conciliating";
