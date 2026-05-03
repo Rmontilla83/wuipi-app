@@ -1,7 +1,10 @@
 "use client";
 
+// Tab "Sync Odoo" — items pendientes de sincronizacion con Odoo
+// (odoo_sync_queue). Reemplaza el page standalone /cobranzas/odoo-pendientes.
+
 import { useEffect, useState, useCallback } from "react";
-import { TopBar } from "@/components/layout/topbar";
+import { Card } from "@/components/ui/card";
 import { RefreshCw, RotateCw, CheckCircle2, XCircle, AlertCircle, Clock, Loader2 } from "lucide-react";
 
 interface QueueItem {
@@ -27,21 +30,21 @@ interface QueueItem {
 }
 
 const STATUS_LABELS: Record<string, { label: string; color: string; icon: React.ElementType }> = {
-  pending: { label: "Pendiente", color: "text-blue-400 bg-blue-500/10 border-blue-500/30", icon: Clock },
-  retrying: { label: "Reintentando", color: "text-yellow-400 bg-yellow-500/10 border-yellow-500/30", icon: RotateCw },
-  manual_review: { label: "Review manual", color: "text-red-400 bg-red-500/10 border-red-500/30", icon: AlertCircle },
-  done: { label: "Done", color: "text-emerald-400 bg-emerald-500/10 border-emerald-500/30", icon: CheckCircle2 },
-  cancelled: { label: "Cancelado", color: "text-gray-400 bg-gray-500/10 border-gray-500/30", icon: XCircle },
+  pending:       { label: "Pendiente",     color: "text-blue-400 bg-blue-500/10 border-blue-500/30",       icon: Clock },
+  retrying:      { label: "Reintentando",  color: "text-yellow-400 bg-yellow-500/10 border-yellow-500/30", icon: RotateCw },
+  manual_review: { label: "Review manual", color: "text-red-400 bg-red-500/10 border-red-500/30",         icon: AlertCircle },
+  done:          { label: "Done",          color: "text-emerald-400 bg-emerald-500/10 border-emerald-500/30", icon: CheckCircle2 },
+  cancelled:     { label: "Cancelado",     color: "text-gray-400 bg-gray-500/10 border-gray-500/30",       icon: XCircle },
 };
 
 const STATUS_FILTERS: { id: string; label: string; statuses: string }[] = [
-  { id: "active", label: "Activos", statuses: "pending,retrying,manual_review" },
-  { id: "manual", label: "Review manual", statuses: "manual_review" },
-  { id: "all", label: "Todos", statuses: "" },
-  { id: "done", label: "Resueltos", statuses: "done,cancelled" },
+  { id: "active", label: "Activos",        statuses: "pending,retrying,manual_review" },
+  { id: "manual", label: "Review manual",  statuses: "manual_review" },
+  { id: "all",    label: "Todos",          statuses: "" },
+  { id: "done",   label: "Resueltos",      statuses: "done,cancelled" },
 ];
 
-export default function OdooPendientesPage() {
+export default function SyncOdooTab() {
   const [filter, setFilter] = useState("active");
   const [items, setItems] = useState<QueueItem[]>([]);
   const [total, setTotal] = useState(0);
@@ -91,7 +94,7 @@ export default function OdooPendientesPage() {
         ? "Notas (opcional) — describe cómo resolviste el item manualmente:"
         : "Notas (opcional) — razón de la cancelación:"
     );
-    if (notes === null) return;  // user cancelled prompt
+    if (notes === null) return;
     setActionLoading(id + "-resolve");
     try {
       const res = await fetch(`/api/admin/odoo/queue/${id}/resolve`, {
@@ -112,47 +115,51 @@ export default function OdooPendientesPage() {
   };
 
   return (
-    <>
-      <TopBar title="Cola Sync Odoo" subtitle="Items pendientes de sincronización con Odoo" />
-      <div className="flex-1 overflow-auto p-4 md:p-6 space-y-4">
-        {/* Filtros */}
-        <div className="flex items-center gap-2 flex-wrap">
-          {STATUS_FILTERS.map((f) => (
-            <button
-              key={f.id}
-              onClick={() => setFilter(f.id)}
-              className={`px-3 py-1.5 rounded-lg text-sm border transition-colors ${
-                filter === f.id
-                  ? "border-[#F46800] bg-[#F46800]/10 text-[#F46800]"
-                  : "border-wuipi-border text-gray-400 hover:text-gray-200"
-              }`}
-            >
-              {f.label}
-            </button>
-          ))}
+    <div className="space-y-4">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-lg font-semibold text-white">Cola Sync Odoo</h3>
+          <p className="text-sm text-gray-500">Items pendientes de sincronización con Odoo</p>
+        </div>
+        <button
+          onClick={load}
+          disabled={loading}
+          className="p-2 rounded-lg border border-wuipi-border text-gray-400 hover:text-white transition-colors"
+        >
+          <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
+        </button>
+      </div>
+
+      {/* Filtros */}
+      <div className="flex items-center gap-2 flex-wrap">
+        {STATUS_FILTERS.map((f) => (
           <button
-            onClick={load}
-            className="ml-auto inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm border border-wuipi-border text-gray-300 hover:bg-white/5"
-            disabled={loading}
+            key={f.id}
+            onClick={() => setFilter(f.id)}
+            className={`px-3 py-1.5 rounded-lg text-sm border transition-colors ${
+              filter === f.id
+                ? "border-[#F46800] bg-[#F46800]/10 text-[#F46800]"
+                : "border-wuipi-border text-gray-400 hover:text-gray-200"
+            }`}
           >
-            <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
-            Refrescar
+            {f.label}
           </button>
+        ))}
+        <span className="ml-auto text-sm text-gray-500">
+          {loading ? "Cargando…" : `${items.length} mostrados (de ${total} totales)`}
+        </span>
+      </div>
+
+      {error && (
+        <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-sm">
+          {error}
         </div>
+      )}
 
-        {/* Stats */}
-        <div className="text-sm text-gray-500">
-          {loading ? "Cargando…" : `${items.length} items mostrados (de ${total} totales)`}
-        </div>
-
-        {error && (
-          <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-sm">
-            {error}
-          </div>
-        )}
-
-        {/* Tabla */}
-        <div className="overflow-x-auto bg-white/[0.02] border border-wuipi-border rounded-xl">
+      {/* Tabla */}
+      <Card className="!p-0 overflow-hidden">
+        <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="text-left text-xs text-gray-500 border-b border-wuipi-border">
               <tr>
@@ -179,7 +186,7 @@ export default function OdooPendientesPage() {
                 const Icon = statusInfo.icon;
                 const isProcessing = actionLoading?.startsWith(item.id);
                 return (
-                  <tr key={item.id} className="border-b border-wuipi-border/50 last:border-0 hover:bg-white/[0.02]">
+                  <tr key={item.id} className="border-b border-wuipi-border/50 last:border-0 hover:bg-wuipi-card-hover">
                     <td className="px-3 py-2.5">
                       <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] border ${statusInfo.color}`}>
                         <Icon className="w-3 h-3" />
@@ -238,7 +245,7 @@ export default function OdooPendientesPage() {
             </tbody>
           </table>
         </div>
-      </div>
-    </>
+      </Card>
+    </div>
   );
 }
