@@ -6,6 +6,7 @@ import { markItemPaid, getItemsByToken } from "@/lib/dal/collection-campaigns";
 import { sendPaymentConfirmationWhatsApp } from "@/lib/notifications/whatsapp";
 import { sendPaymentConfirmationEmail } from "@/lib/notifications/email";
 import { logGatewayEvent } from "@/lib/dal/payment-gateway-logs";
+import { createPaymentFailureCase, closeOpenCasesForPaidItem } from "@/lib/cobranzas/payment-failure-case";
 import Stripe from "stripe";
 
 export async function POST(request: NextRequest) {
@@ -59,6 +60,16 @@ export async function POST(request: NextRequest) {
           const expectedCents = Math.round(Number(item.amount_usd) * 100);
           if (Math.abs(session.amount_total - expectedCents) > 1) {
             console.error("[Stripe Webhook] AMOUNT MISMATCH detected — payment NOT marked as paid");
+            // Auto-ticket en kanban: monto no coincide
+            createPaymentFailureCase({
+              collectionItemId: item.id,
+              gateway: "stripe",
+              gatewayProduct: "checkout_session",
+              failureType: "amount_mismatch",
+              errorMessage: `Expected $${expectedCents/100}, got $${session.amount_total/100}`,
+            }).catch(err =>
+              console.error("[Stripe Webhook] createPaymentFailureCase fallo:", err)
+            );
             return NextResponse.json({ received: true }); // Acknowledge but don't mark paid
           }
         }
@@ -83,6 +94,12 @@ export async function POST(request: NextRequest) {
             customerName: item.customer_name,
             amountUsd: Number(item.amount_usd),
           }).catch(() => {});
+
+          // Cerrar casos abiertos en kanban (cliente pago via tarjeta tras
+          // intentos previos fallidos)
+          closeOpenCasesForPaidItem(item.id).catch(err =>
+            console.error("[Stripe Webhook] closeOpenCasesForPaidItem fallo:", err)
+          );
         }
 
         // Sprint 4 — sync Odoo via waitUntil (factura queda en USD).

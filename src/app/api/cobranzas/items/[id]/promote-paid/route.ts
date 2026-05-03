@@ -26,6 +26,7 @@ import { triggerOdooSyncOrEnqueue } from "@/lib/integrations/odoo-sync-trigger";
 import { sendPaymentConfirmationWhatsApp } from "@/lib/notifications/whatsapp";
 import { sendPaymentConfirmationEmail } from "@/lib/notifications/email";
 import { logGatewayEvent } from "@/lib/dal/payment-gateway-logs";
+import { closeOpenCasesForPaidItem } from "@/lib/cobranzas/payment-failure-case";
 
 export const dynamic = "force-dynamic";
 
@@ -124,6 +125,12 @@ export async function POST(
     amountUsd: Number(item.amount_usd),
     amountVes: typeof body.amount_bss === "number" ? body.amount_bss : null,
   }).catch(() => {});
+
+  // Cerrar casos abiertos en kanban (admin verifico transferencia tras fallo
+  // del transfer-search auto). El cliente probablemente tenia caso abierto.
+  closeOpenCasesForPaidItem(item.id).catch(err =>
+    console.error("[PromotePaid] closeOpenCasesForPaidItem fallo:", err)
+  );
 
   // Audit en metadata para trazabilidad de quien promovio
   try {

@@ -25,6 +25,7 @@ import { triggerOdooSyncOrEnqueue } from "@/lib/integrations/odoo-sync-trigger";
 import { sendPaymentConfirmationWhatsApp } from "@/lib/notifications/whatsapp";
 import { sendPaymentConfirmationEmail } from "@/lib/notifications/email";
 import { logGatewayEvent, classifyError } from "@/lib/dal/payment-gateway-logs";
+import { createPaymentFailureCase, closeOpenCasesForPaidItem } from "@/lib/cobranzas/payment-failure-case";
 
 export const dynamic = "force-dynamic";
 
@@ -361,6 +362,12 @@ export async function POST(request: NextRequest) {
                 customerName: item.customer_name,
                 amountUsd: Number(item.amount_usd),
               }).catch(() => {});
+
+              // Cerrar caso(s) abierto(s) en kanban si los hay (cliente
+              // habia tenido fallo previo y eventualmente pago)
+              closeOpenCasesForPaidItem(item.id).catch(err =>
+                console.error("[Mercantil Alias] closeOpenCasesForPaidItem fallo:", err)
+              );
             }
             if (wasAlreadyPaid) {
               console.log("[Mercantil Alias] Item " + item.id + " ya estaba paid — skip notificaciones y sync (otro webhook lo proceso primero)");
@@ -484,6 +491,7 @@ export async function POST(request: NextRequest) {
               normalized.raw_status + " mensaje=" + (normalized.message || "") + ")"
             );
             // Log webhook rejected (error) — datos clave para forensics
+            const errCat = classifyError("mercantil", normalized.error_code, normalized.message);
             logGatewayEvent({
               collectionItemId: item.id, paymentToken: item.payment_token,
               gateway: "mercantil", gatewayProduct: "web_button",
@@ -495,13 +503,31 @@ export async function POST(request: NextRequest) {
               },
               responseCode: normalized.error_code || normalized.raw_status || null,
               responseMessage: normalized.message || null,
-              errorCategory: classifyError("mercantil", normalized.error_code, normalized.message),
+              errorCategory: errCat,
               ip,
               customerCedulaRif: item.customer_cedula_rif,
               customerName: item.customer_name,
               amountUsd: Number(item.amount_usd),
               amountVes: normalized.amount ?? null,
             }).catch(() => {});
+
+            // Auto-ticket en kanban: el cliente intento pagar pero el banco
+            // rechazo. Mapeo errorCategory -> failureType de createPaymentFailureCase.
+            const failureType: "intra_bank_limit" | "insufficient_funds" | "invalid_credentials" | "gateway_error" =
+              errCat === "intra_bank_limit" ? "intra_bank_limit" :
+              errCat === "insufficient_funds" ? "insufficient_funds" :
+              errCat === "invalid_credentials" ? "invalid_credentials" :
+              "gateway_error";
+            createPaymentFailureCase({
+              collectionItemId: item.id,
+              gateway: "mercantil",
+              gatewayProduct: "web_button",
+              failureType,
+              errorCode: normalized.error_code || normalized.raw_status,
+              errorMessage: normalized.message,
+            }).catch(err =>
+              console.error("[Mercantil Alias] createPaymentFailureCase fallo:", err)
+            );
           } else if (item && item.status === "paid") {
             console.log(
               "[Mercantil Alias] Item " + item.id + " ya esta paid — ignorando decline tardio"

@@ -13,6 +13,7 @@ import { checkRateLimit, getClientIP } from "@/lib/utils/rate-limit";
 import { sendPaymentConfirmationWhatsApp } from "@/lib/notifications/whatsapp";
 import { sendPaymentConfirmationEmail } from "@/lib/notifications/email";
 import { logGatewayEvent, classifyError } from "@/lib/dal/payment-gateway-logs";
+import { createPaymentFailureCase, closeOpenCasesForPaidItem } from "@/lib/cobranzas/payment-failure-case";
 
 export async function POST(request: NextRequest) {
   try {
@@ -76,15 +77,31 @@ export async function POST(request: NextRequest) {
       const status = String(result.status || "").trim();
       const approved = status === "00" || status === "0000" || status.toLowerCase() === "approved";
       if (!approved) {
+        const errCat = classifyError("c2p", status, result.message);
         logGatewayEvent({
           collectionItemId: item.id, paymentToken: item.payment_token,
           gateway: "c2p", gatewayProduct: "c2p_payment",
           eventType: "response_received", outcome: "error",
           response: { status, errorMessage: result.message || null },
           responseCode: status, responseMessage: result.message || null,
-          errorCategory: classifyError("c2p", status, result.message),
+          errorCategory: errCat,
           durationMs: Date.now() - t0,
         }).catch(() => {});
+        // Auto-ticket en kanban: pago C2P rechazado por el banco
+        const failureType: "invalid_otp" | "insufficient_funds" | "gateway_error" =
+          errCat === "invalid_otp" ? "invalid_otp" :
+          errCat === "insufficient_funds" ? "insufficient_funds" :
+          "gateway_error";
+        createPaymentFailureCase({
+          collectionItemId: item.id,
+          gateway: "c2p",
+          gatewayProduct: "c2p_payment",
+          failureType,
+          errorCode: status,
+          errorMessage: result.message,
+        }).catch(err =>
+          console.error("[C2P Confirm] createPaymentFailureCase fallo:", err)
+        );
         return apiError(result.message || `Pago rechazado por el banco (codigo ${status || "desconocido"})`, 402);
       }
       reference = result.reference_number || result.bank_transaction_id || `c2p_${Date.now()}`;
@@ -99,14 +116,29 @@ export async function POST(request: NextRequest) {
     } catch (err: unknown) {
       const e = err as { message?: string; details?: Record<string, unknown> };
       console.error("[C2P Confirm] Mercantil error:", e.message, e.details || {});
+      const errCat = classifyError("c2p", null, e.message);
       logGatewayEvent({
         collectionItemId: item.id, paymentToken: item.payment_token,
         gateway: "c2p", gatewayProduct: "c2p_payment",
         eventType: "error", outcome: "error",
         responseMessage: e.message || "unknown",
-        errorCategory: classifyError("c2p", null, e.message),
+        errorCategory: errCat,
         durationMs: Date.now() - t0,
       }).catch(() => {});
+      // Auto-ticket en kanban: exception en C2P payment
+      const failureType: "invalid_otp" | "insufficient_funds" | "gateway_error" =
+        errCat === "invalid_otp" ? "invalid_otp" :
+        errCat === "insufficient_funds" ? "insufficient_funds" :
+        "gateway_error";
+      createPaymentFailureCase({
+        collectionItemId: item.id,
+        gateway: "c2p",
+        gatewayProduct: "c2p_payment",
+        failureType,
+        errorMessage: e.message,
+      }).catch(err =>
+        console.error("[C2P Confirm] createPaymentFailureCase fallo:", err)
+      );
       const msg = (e.message || "").toLowerCase();
       const userMsg = msg.includes("invalid") || msg.includes("incorrect") || msg.includes("clave")
         ? "Clave incorrecta o vencida. Solicita una nueva."
@@ -122,6 +154,12 @@ export async function POST(request: NextRequest) {
       amount_bss: amountBss,
       bcv_rate: bcv.usd_to_bs,
     });
+
+    // Cerrar caso(s) abierto(s) en kanban si los hay (cliente habia tenido
+    // fallos previos en pasarelas y eventualmente pago via C2P)
+    closeOpenCasesForPaidItem(item.id).catch(err =>
+      console.error("[C2P Confirm] closeOpenCasesForPaidItem fallo:", err)
+    );
 
     // Sprint 4 — sync Odoo via waitUntil. No bloquea la respuesta al cliente.
     try {

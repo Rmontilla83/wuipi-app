@@ -14,6 +14,7 @@ import { checkRateLimit, getClientIP } from "@/lib/utils/rate-limit";
 import { MercantilSDK } from "@/lib/mercantil";
 import { fetchBCVRate, convertUsdToBs } from "@/lib/integrations/bcv";
 import { logGatewayEvent, classifyError, maskAccountLast4 } from "@/lib/dal/payment-gateway-logs";
+import { createPaymentFailureCase, closeOpenCasesForPaidItem } from "@/lib/cobranzas/payment-failure-case";
 
 // Wuipi bank account at Mercantil (destination of all transfers to us).
 // Full 20-digit number; Mercantil transfer-search expects the account number.
@@ -185,6 +186,12 @@ export async function POST(request: NextRequest) {
         message: "Transferencia reportada. Será verificada en las próximas horas.",
       });
     }
+
+    // Cerrar caso(s) abierto(s) en kanban si los hay (cliente habia tenido
+    // fallo previo y ahora pago via transferencia auto-verificada)
+    closeOpenCasesForPaidItem(item.id).catch(err =>
+      console.error("[PayConfirm] closeOpenCasesForPaidItem fallo:", err)
+    );
 
     // Sprint 4 — sync Odoo via waitUntil (no bloquea respuesta).
     try {

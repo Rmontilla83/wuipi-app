@@ -13,6 +13,7 @@ import { fetchBCVRate } from "@/lib/integrations/bcv";
 import { sendPaymentConfirmationWhatsApp } from "@/lib/notifications/whatsapp";
 import { sendPaymentConfirmationEmail } from "@/lib/notifications/email";
 import { logGatewayEvent } from "@/lib/dal/payment-gateway-logs";
+import { closeOpenCasesForPaidItem } from "@/lib/cobranzas/payment-failure-case";
 
 // Allowed tolerance between what the item asks vs what the client paid,
 // evaluated on the USD-equivalent. ±5% covers BCV rate fluctuations and
@@ -129,6 +130,11 @@ export async function POST(request: NextRequest) {
       amountUsd: Number(item.amount_usd),
       amountVes: paid_currency === "VES" ? paid_amount : null,
     }).catch(() => {});
+
+    // Cerrar casos abiertos en kanban (cliente pago en efectivo tras intentos previos)
+    closeOpenCasesForPaidItem(item.id).catch(err =>
+      console.error("[mark-cash] closeOpenCasesForPaidItem fallo:", err)
+    );
 
     // Sprint 4 — sync Odoo via waitUntil (no bloquea respuesta admin).
     try {

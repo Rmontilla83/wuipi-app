@@ -10,6 +10,7 @@ import { capturePayPalOrder, verifyPayPalWebhook } from "@/lib/integrations/payp
 import { sendPaymentConfirmationWhatsApp } from "@/lib/notifications/whatsapp";
 import { sendPaymentConfirmationEmail } from "@/lib/notifications/email";
 import { logGatewayEvent } from "@/lib/dal/payment-gateway-logs";
+import { createPaymentFailureCase, closeOpenCasesForPaidItem } from "@/lib/cobranzas/payment-failure-case";
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://api.wuipi.net";
 const WPY_TOKEN_RE = /^wpy_[A-Za-z0-9_-]{8,64}$/;
@@ -76,6 +77,15 @@ export async function GET(request: NextRequest) {
         const capturedAmount = parseFloat(capture.amount);
         if (Math.abs(capturedAmount - expectedAmount) > 0.01) {
           console.error(`[PayPal Return] AMOUNT MISMATCH: expected=${expectedAmount} captured=${capturedAmount}`);
+          createPaymentFailureCase({
+            collectionItemId: item.id,
+            gateway: "paypal",
+            gatewayProduct: "order_capture",
+            failureType: "amount_mismatch",
+            errorMessage: `Expected $${expectedAmount}, captured $${capturedAmount}`,
+          }).catch(err =>
+            console.error("[PayPal Return] createPaymentFailureCase fallo:", err)
+          );
           return safeRedirect(`/pagar/${wpy_token}?status=failed`);
         }
 
@@ -98,6 +108,11 @@ export async function GET(request: NextRequest) {
             customerName: item.customer_name,
             amountUsd: Number(item.amount_usd),
           }).catch(() => {});
+
+          // Cerrar casos abiertos en kanban (PayPal exitoso post-fallos)
+          closeOpenCasesForPaidItem(item.id).catch(err =>
+            console.error("[PayPal Return] closeOpenCasesForPaidItem fallo:", err)
+          );
         } catch (dbErr) {
           console.error("[PayPal Return] DB update error:", serializeError(dbErr));
           logGatewayEvent({
@@ -171,6 +186,22 @@ export async function GET(request: NextRequest) {
       responseCode: capture.status,
       errorCategory: "unknown",
     }).catch(() => {});
+    // Auto-ticket si tenemos item: capture no COMPLETED
+    {
+      const itemForCase = await getItemsByToken(wpy_token);
+      if (itemForCase) {
+        createPaymentFailureCase({
+          collectionItemId: itemForCase.id,
+          gateway: "paypal",
+          gatewayProduct: "order_capture",
+          failureType: "gateway_error",
+          errorCode: capture.status,
+          errorMessage: `Capture status: ${capture.status}`,
+        }).catch(err =>
+          console.error("[PayPal Return] createPaymentFailureCase fallo:", err)
+        );
+      }
+    }
     return safeRedirect(`/pagar/${wpy_token}?status=failed`);
   } catch (err) {
     console.error("[PayPal Return] EXCEPTION:", serializeError(err));
