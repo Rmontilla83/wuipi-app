@@ -1,11 +1,20 @@
 // ============================================================
 // WhatsApp Notifications — Meta Business API
-// Phone Number ID: 506922512512507
+// Phone Number ID actual (verificado contra Graph API 2026-05-03):
+//   ID:     433494769857633
+//   WABA:   545157688670835
+//   Tel:    +58 424-8800723 "WUIPI Cobranzas" (quality GREEN)
+//
+// Configurado via env var WHATSAPP_PHONE_NUMBER_ID en Vercel (production+development).
+// No defaultear hardcoded — si falta la env, fallar rapido en startup en vez
+// de mandar al numero equivocado silenciosamente.
 // ============================================================
 
-const PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_NUMBER_ID || "506922512512507";
+const PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_NUMBER_ID || "";
 const ACCESS_TOKEN = process.env.WHATSAPP_ACCESS_TOKEN || "";
-const API_URL = `https://graph.facebook.com/v21.0/${PHONE_NUMBER_ID}/messages`;
+const API_URL = PHONE_NUMBER_ID
+  ? `https://graph.facebook.com/v21.0/${PHONE_NUMBER_ID}/messages`
+  : "";
 
 // Language code for approved templates — try "es" first, common alternatives: "es_ES", "es_MX", "es_AR"
 const TEMPLATE_LANG = process.env.WHATSAPP_TEMPLATE_LANG || "es";
@@ -145,11 +154,13 @@ export interface SendCollectionWhatsAppParams {
 export async function sendCollectionWhatsApp(params: SendCollectionWhatsAppParams): Promise<WhatsAppResult> {
   const { phone, customerName, amountUsd, concept, paymentUrl, reminderType } = params;
 
-  if (!ACCESS_TOKEN) {
+  if (!ACCESS_TOKEN || !PHONE_NUMBER_ID) {
     return {
       ok: false, status: 0, phone, normalizedPhone: "",
       template: "", lang: TEMPLATE_LANG, phoneNumberId: PHONE_NUMBER_ID,
-      response: { _skip: "WHATSAPP_ACCESS_TOKEN is empty" },
+      response: { _skip: !ACCESS_TOKEN
+        ? "WHATSAPP_ACCESS_TOKEN is empty"
+        : "WHATSAPP_PHONE_NUMBER_ID is empty" },
     };
   }
 
@@ -234,7 +245,7 @@ export async function sendPaymentConfirmationWhatsApp(params: {
   amount: string;
   concept: string;
 }): Promise<void> {
-  if (!ACCESS_TOKEN) return;
+  if (!ACCESS_TOKEN || !PHONE_NUMBER_ID) return;
 
   const normalizedPhone = normalizePhone(params.phone);
 
