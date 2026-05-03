@@ -6,14 +6,10 @@ export async function middleware(request: NextRequest) {
   const publicPaths = [
     "/login",
     "/setup-password",
-    "/pay/",
     "/pagar/",
-    "/api/mercantil/webhook",
-    "/api/mercantil/callback",
-    "/api/mercantil/status/",
-    // /api/mercantil (root) tambien recibe webhooks — Mercantil lo registro
-    // sin /webhook. Se chequea exact-match abajo para no abrir /reconcile
-    // ni /create-payment, que son admin-only.
+    // /api/mercantil (root) recibe los webhooks de Mercantil — registrado
+    // sin sufijo. Match exacto abajo. Las subrutas viejas (/webhook, /callback,
+    // /create-payment, /reconcile, /status) fueron eliminadas en 2026-05-03.
     "/api/cobranzas/webhook/",
     "/api/cobranzas/bcv",
     "/api/cobranzas/pay",       // includes /pay, /pay/confirm, /pay/c2p-confirm

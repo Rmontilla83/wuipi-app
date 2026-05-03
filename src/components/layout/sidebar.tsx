@@ -20,7 +20,6 @@ import {
   ChevronLeft,
   ChevronRight,
   LogOut,
-  CreditCard,
   Radio,
   DollarSign,
 } from "lucide-react";
@@ -63,7 +62,6 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { id: "erp", label: "ERP Administrativo", icon: Building2, path: "/erp" },
       { id: "finanzas", label: "Finanzas", icon: DollarSign, path: "/finanzas" },
-      { id: "pagos", label: "Pagos Mercantil", icon: CreditCard, path: "/pagos" },
       { id: "clientes", label: "Clientes", icon: Users, path: "/clientes" },
     ],
   },

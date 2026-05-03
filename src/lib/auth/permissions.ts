@@ -8,7 +8,6 @@ export type Module =
   | "cobranzas"
   | "soporte"
   | "ventas"
-  | "mercantil"
   | "clientes"
   | "configuracion"
   | "usuarios"
@@ -27,7 +26,7 @@ export type Action = "create" | "read" | "update" | "delete" | "send" | "export"
 
 /** All operational modules (excludes sidebar-only pseudo-modules) */
 export const OPERATIONAL_MODULES: Module[] = [
-  "cobranzas", "soporte", "ventas", "mercantil", "clientes",
+  "cobranzas", "soporte", "ventas", "clientes",
   "configuracion", "usuarios", "auditoria", "infraestructura", "erp", "bequant", "finanzas",
 ];
 
@@ -53,7 +52,6 @@ export const SIDEBAR_MODULE_MAP: Record<string, string> = {
   "infraestructura": "infraestructura",
   "erp":             "erp",
   "finanzas":        "finanzas",
-  "pagos":           "mercantil",
   "clientes":        "clientes",
   "portal-admin":    "portal_admin",
   "configuracion":   "configuracion",
@@ -71,7 +69,6 @@ const PERMISSIONS: Record<string, Partial<Record<Module, Action[]>>> = {
     cobranzas: ["create", "read", "update", "delete", "send", "export", "approve"],
     soporte: ["create", "read", "update", "delete", "assign"],
     ventas: ["create", "read", "update", "delete"],
-    mercantil: ["create", "read", "update", "delete"],
     clientes: ["create", "read", "update", "delete"],
     configuracion: ["create", "read", "update", "delete"],
     usuarios: ["create", "read", "update", "delete"],
@@ -86,7 +83,6 @@ const PERMISSIONS: Record<string, Partial<Record<Module, Action[]>>> = {
     cobranzas: ["create", "read", "update", "delete", "send", "export"],
     soporte: ["create", "read", "update", "delete", "assign"],
     ventas: ["create", "read", "update", "delete"],
-    mercantil: ["create", "read", "update", "delete"],
     clientes: ["create", "read", "update", "delete"],
     configuracion: ["read"],
     usuarios: ["create", "read", "update", "delete"],
@@ -100,7 +96,6 @@ const PERMISSIONS: Record<string, Partial<Record<Module, Action[]>>> = {
     cobranzas: ["read", "approve"],
     soporte: ["read"],
     ventas: ["read"],
-    mercantil: ["read"],
     clientes: ["read"],
     configuracion: [],
     usuarios: [],
@@ -114,7 +109,6 @@ const PERMISSIONS: Record<string, Partial<Record<Module, Action[]>>> = {
     cobranzas: ["read", "update"],
     soporte: ["create", "read", "update", "delete", "assign"],
     ventas: ["read"],
-    mercantil: ["read"],
     clientes: ["read"],
     configuracion: [],
     usuarios: [],
@@ -127,7 +121,6 @@ const PERMISSIONS: Record<string, Partial<Record<Module, Action[]>>> = {
     cobranzas: ["create", "read", "update", "delete", "send", "export"],
     soporte: [],
     ventas: [],
-    mercantil: [],
     clientes: ["read"],
     configuracion: [],
     usuarios: [],
@@ -140,7 +133,6 @@ const PERMISSIONS: Record<string, Partial<Record<Module, Action[]>>> = {
     cobranzas: [],
     soporte: ["create", "read", "update", "delete"],
     ventas: [],
-    mercantil: [],
     clientes: ["read"],
     configuracion: [],
     usuarios: [],
@@ -154,7 +146,6 @@ const PERMISSIONS: Record<string, Partial<Record<Module, Action[]>>> = {
     cobranzas: ["create", "read", "update", "delete", "send", "export"],
     clientes: ["read"],
     erp: ["create", "read", "update", "delete"],
-    mercantil: ["read"],
   },
   soporte: {
     soporte: ["create", "read", "update", "delete"],

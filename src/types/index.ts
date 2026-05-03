@@ -51,14 +51,14 @@ export interface ModuleHealth {
 
 // Dashboard permission map — matches sidebar nav IDs
 export const ROLE_PERMISSIONS: Record<UserRole, string[]> = {
-  super_admin:         ["comando", "supervisor", "soporte", "ventas", "cobranzas", "bequant", "infraestructura", "erp", "pagos", "clientes", "portal-admin", "configuracion", "actualizaciones"],
-  admin:               ["comando", "supervisor", "soporte", "ventas", "cobranzas", "bequant", "infraestructura", "erp", "pagos", "clientes", "portal-admin", "configuracion", "actualizaciones"],
-  gerente:             ["comando", "supervisor", "soporte", "ventas", "cobranzas", "bequant", "infraestructura", "erp", "pagos", "clientes", "configuracion", "actualizaciones"],
+  super_admin:         ["comando", "supervisor", "soporte", "ventas", "cobranzas", "bequant", "infraestructura", "erp", "clientes", "portal-admin", "configuracion", "actualizaciones"],
+  admin:               ["comando", "supervisor", "soporte", "ventas", "cobranzas", "bequant", "infraestructura", "erp", "clientes", "portal-admin", "configuracion", "actualizaciones"],
+  gerente:             ["comando", "supervisor", "soporte", "ventas", "cobranzas", "bequant", "infraestructura", "erp", "clientes", "configuracion", "actualizaciones"],
   supervisor:          ["comando", "soporte", "cobranzas", "clientes"],
   analista_cobranzas:  ["cobranzas", "clientes"],
   analista_soporte:    ["soporte", "clientes"],
   // Legacy roles
-  finanzas:            ["comando", "cobranzas", "erp", "pagos", "clientes"],
+  finanzas:            ["comando", "cobranzas", "erp", "clientes"],
   soporte:             ["comando", "soporte", "clientes"],
   infraestructura:     ["comando", "bequant", "infraestructura", "clientes"],
   tecnico:             ["soporte"],
