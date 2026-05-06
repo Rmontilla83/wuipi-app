@@ -14,12 +14,36 @@ import type {
 import { getProductCredentials, getMerchantIdentify } from '../core/config';
 import { encryptField } from '../core/crypto';
 import { apiRequest } from '../core/http';
+import { transferReferenceLast8 } from '../utils/helpers';
+
+/**
+ * Builds the merchantIdentify block for transfer-search with the special
+ * "Numero de persona" override. Mercantil exige aqui el RIF/cedula natural
+ * (11269635 para Wuipi), NO el codigo de afiliacion estandar (217546) que
+ * usan los otros 8 productos. Confirmado con soporte tecnico Mercantil
+ * 2026-05-05. Env var: MERCANTIL_TRANSFER_SEARCH_PERSON_NUMBER.
+ */
+export function buildTransferSearchMerchantIdentify(
+  config: MercantilConfig,
+  fallbackMerchantId: string
+) {
+  const personNumber = process.env.MERCANTIL_TRANSFER_SEARCH_PERSON_NUMBER || fallbackMerchantId;
+  return {
+    integratorId: config.integratorId,
+    merchantId: personNumber,
+    terminalId: config.terminalId,
+  };
+}
 
 /**
  * Search bank transfers received (Debito Inmediato + interbancarias).
  * Uses 'transfer_search' product credentials — DIFFERENT clientId from other products.
  * Node name is "transferSearchBy" (confirmed by Mercantil).
  * Sensitive fields (account, issuerCustomerId) are encrypted with AES-128/ECB.
+ *
+ * Quirks fixed por Mercantil 2026-05-05:
+ *   1. merchantId DEBE ser MERCANTIL_TRANSFER_SEARCH_PERSON_NUMBER (11269635), no 217546
+ *   2. paymentReference DEBE ser solo los ultimos 8 digitos de la referencia bancaria
  */
 export async function searchTransfers(
   params: TransferSearchParams,
@@ -33,7 +57,7 @@ export async function searchTransfers(
     ? `${creds.baseUrl.replace(/\/$/, '')}/v1/payment/transfer-search`
     : endpoints.searchTransfersUrl;
   const body: Record<string, unknown> = {
-    merchantIdentify: getMerchantIdentify(config, creds),
+    merchantIdentify: buildTransferSearchMerchantIdentify(config, creds.merchantId),
     clientIdentify: {
       ipAddress: '127.0.0.1',
       browserAgent: 'Mozilla/5.0',
@@ -44,7 +68,7 @@ export async function searchTransfers(
       trxDate: params.trxDate,
       issuerBankId: params.issuerBankId,
       transactionType: params.transactionType,
-      paymentReference: params.paymentReference,
+      paymentReference: transferReferenceLast8(params.paymentReference),
       amount: params.amount,
     },
   };

@@ -42,6 +42,21 @@ export function formatAmount(amount: number): string {
   return amount.toFixed(2);
 }
 
+/**
+ * Mercantil transfer-search expects paymentReference as the LAST 8 digits
+ * of the bank reference, NOT the full reference. Confirmed by Mercantil
+ * tech support 2026-05-05 (3 fixes for prod transfer-search).
+ *
+ * Examples:
+ *   "0025583242567" → "83242567"
+ *   "12345678"      → "12345678"
+ *   "ABC-12345"     → "12345"  (only digits, no padding)
+ */
+export function transferReferenceLast8(reference: string | number): string {
+  const digits = String(reference ?? '').replace(/\D/g, '');
+  return digits.length > 8 ? digits.slice(-8) : digits;
+}
+
 /** Validate Venezuelan cedula format */
 export function validateCedula(cedula: string, type: string): boolean {
   if (!['V', 'E', 'J', 'P'].includes(type.toUpperCase())) return false;
