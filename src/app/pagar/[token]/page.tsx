@@ -631,16 +631,23 @@ export default function PagarPage() {
             accent="#F46800"
           />
 
-          {/* Stripe */}
-          <PaymentMethodCard
-            icon={<CreditCard className="w-5 h-5" />}
-            title="Tarjeta Internacional"
-            subtitle={`$${Number(data.amount_usd).toFixed(2)} USD`}
-            description="Visa, Mastercard, American Express"
-            selected={selectedMethod === "stripe"}
-            onClick={() => setSelectedMethod("stripe")}
-            accent="#635BFF"
-          />
+          {/* Stripe — minimo $0.50 USD por requisito de Stripe Checkout */}
+          {(() => {
+            const stripeDisabled = Number(data.amount_usd) < 0.5;
+            return (
+              <PaymentMethodCard
+                icon={<CreditCard className="w-5 h-5" />}
+                title="Tarjeta Nacional o Internacional (Divisas)"
+                subtitle={`$${Number(data.amount_usd).toFixed(2)} USD`}
+                description="Visa, Mastercard, American Express"
+                selected={selectedMethod === "stripe"}
+                onClick={() => !stripeDisabled && setSelectedMethod("stripe")}
+                accent="#635BFF"
+                disabled={stripeDisabled}
+                disabledReason="Monto mínimo $0.50 USD (requisito Stripe)"
+              />
+            );
+          })()}
 
           {/* PayPal */}
           <PaymentMethodCard
@@ -773,6 +780,8 @@ function PaymentMethodCard({
   selected,
   onClick,
   accent,
+  disabled,
+  disabledReason,
 }: {
   icon: React.ReactNode;
   title: string;
@@ -781,26 +790,32 @@ function PaymentMethodCard({
   selected: boolean;
   onClick: () => void;
   accent: string;
+  disabled?: boolean;
+  disabledReason?: string;
 }) {
   return (
     <button
       onClick={onClick}
+      disabled={disabled}
+      title={disabled ? disabledReason : undefined}
       className={`w-full text-left p-4 rounded-xl border-2 transition-all duration-200 ${
-        selected
+        disabled
+          ? "border-white/5 bg-white/[0.01] opacity-50 cursor-not-allowed"
+          : selected
           ? "border-opacity-100 bg-opacity-5 scale-[1.02] shadow-lg"
           : "border-white/5 bg-white/[0.02] hover:border-white/10 hover:bg-white/[0.04]"
       }`}
       style={{
-        borderColor: selected ? accent : undefined,
-        backgroundColor: selected ? `${accent}08` : undefined,
+        borderColor: !disabled && selected ? accent : undefined,
+        backgroundColor: !disabled && selected ? `${accent}08` : undefined,
       }}
     >
       <div className="flex items-center gap-3">
         <div
           className="w-10 h-10 rounded-lg flex items-center justify-center shrink-0"
           style={{
-            backgroundColor: selected ? `${accent}15` : "rgba(255,255,255,0.05)",
-            color: selected ? accent : "#9ca3af",
+            backgroundColor: !disabled && selected ? `${accent}15` : "rgba(255,255,255,0.05)",
+            color: !disabled && selected ? accent : "#9ca3af",
           }}
         >
           {icon}
@@ -810,7 +825,9 @@ function PaymentMethodCard({
             <span className="text-white text-sm font-medium">{title}</span>
             <span className="text-gray-400 text-xs">{subtitle}</span>
           </div>
-          <p className="text-gray-500 text-xs mt-0.5">{description}</p>
+          <p className="text-gray-500 text-xs mt-0.5">
+            {disabled && disabledReason ? disabledReason : description}
+          </p>
         </div>
       </div>
     </button>
@@ -1130,7 +1147,7 @@ function PaidConfirmation({ data, autoVerifiedMsg }: { data: PaymentData; autoVe
                 ? "Pago Móvil C2P"
                 : data.payment_method === "paypal"
                 ? "PayPal"
-                : "Tarjeta Internacional"}
+                : "Tarjeta Nacional o Internacional (Divisas)"}
             </span>
           </div>
         )}

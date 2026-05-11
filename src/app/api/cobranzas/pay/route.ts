@@ -173,7 +173,16 @@ export async function POST(request: NextRequest) {
     if (method === "stripe") {
       const stripeKey = process.env.STRIPE_SECRET_KEY?.trim();
       if (!stripeKey || stripeKey.length < 10) {
-        return apiError("Pago con tarjeta internacional no disponible en este momento", 503);
+        return apiError("Pago con tarjeta no disponible en este momento", 503);
+      }
+
+      // Stripe Checkout exige minimo $0.50 USD por sesion. Validar antes de
+      // llamar al SDK evita un error feo en ingles y ahorra la llamada.
+      if (Number(item.amount_usd) < 0.5) {
+        return apiError(
+          "El monto mínimo para pagar con tarjeta es $0.50 USD. Usa otro método de pago.",
+          400
+        );
       }
 
       const t0 = Date.now();
@@ -252,7 +261,9 @@ export async function POST(request: NextRequest) {
         }).catch(() => {});
         const userMsg = stripeErr.code === "api_key_expired"
           ? "La configuración de pagos con tarjeta necesita actualización. Contacte soporte."
-          : `Error al procesar pago con tarjeta: ${stripeErr.message || "Intente nuevamente."}`;
+          : stripeErr.code === "amount_too_small"
+          ? "El monto mínimo para pagar con tarjeta es $0.50 USD. Usa otro método de pago."
+          : `No pudimos procesar el pago con tarjeta. Intenta nuevamente o usa otro método.`;
         return apiError(userMsg, 500);
       }
     }
