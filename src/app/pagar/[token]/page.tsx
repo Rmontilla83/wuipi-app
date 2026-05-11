@@ -601,21 +601,24 @@ export default function PagarPage() {
             accent="#03318C"
           />
 
-          {/* Pago Movil C2P */}
-          <PaymentMethodCard
-            icon={<Smartphone className="w-5 h-5" />}
-            title="Pago Móvil"
-            subtitle={`Bs. ${amountBss > 0 ? amountBss.toLocaleString("es-VE", { minimumFractionDigits: 2 }) : "..."}`}
-            description="Paga desde tu banco con tu teléfono (C2P)"
-            selected={selectedMethod === "c2p"}
-            onClick={() => {
-              setSelectedMethod("c2p");
-              setC2pStep("form");
-              setC2pInfo(null);
-              setError("");
-            }}
-            accent="#10B981"
-          />
+          {/* Pago Movil C2P — OCULTO temporalmente (2026-05-11). El código se
+              conserva intencionalmente para reactivar cuando se reanude el flujo C2P. */}
+          {false && (
+            <PaymentMethodCard
+              icon={<Smartphone className="w-5 h-5" />}
+              title="Pago Móvil"
+              subtitle={`Bs. ${amountBss > 0 ? amountBss.toLocaleString("es-VE", { minimumFractionDigits: 2 }) : "..."}`}
+              description="Paga desde tu banco con tu teléfono (C2P)"
+              selected={selectedMethod === "c2p"}
+              onClick={() => {
+                setSelectedMethod("c2p");
+                setC2pStep("form");
+                setC2pInfo(null);
+                setError("");
+              }}
+              accent="#10B981"
+            />
+          )}
 
           {/* Transferencia */}
           <PaymentMethodCard
@@ -656,7 +659,7 @@ export default function PagarPage() {
           <TransferDetails
             amountBss={amountBss}
             bcvRate={bcvRate}
-            concept={data.invoice_number || token}
+            concept={data.invoice_number || `WPY-${token.replace(/^wpy_/, "").slice(0, 8).toUpperCase()}`}
             transferRef={transferRef}
             setTransferRef={setTransferRef}
             originBank={originBank}
@@ -867,11 +870,14 @@ function TransferDetails({
           extra={<CopyBtn text="J-41156771-0" field="rif" />}
         />
         <DetailRow label="Razón Social" value="WUIPI TECH, C.A." />
-        <DetailRow
-          label="Pago Móvil"
-          value="04248803917"
-          extra={<CopyBtn text="04248803917" field="movil" />}
-        />
+        {/* Pago Móvil destino — OCULTO (2026-05-11). Conservado por si se reactiva. */}
+        {false && (
+          <DetailRow
+            label="Pago Móvil"
+            value="04248803917"
+            extra={<CopyBtn text="04248803917" field="movil" />}
+          />
+        )}
 
         <div className="border-t border-white/5 pt-3">
           <DetailRow
@@ -904,9 +910,11 @@ function TransferDetails({
           onChange={(e) => setOriginBank(e.target.value)}
           className="w-full px-4 py-3 rounded-xl bg-white/[0.03] border border-white/10 text-white text-sm focus:border-[#F46800]/50 focus:outline-none"
         >
-          <option value="">Tu banco origen…</option>
+          {/* style en cada <option> porque navegadores en light mode renderean
+              fondo blanco por default y heredan text-white → opciones invisibles */}
+          <option value="" className="bg-[#0a0a1a] text-white">Tu banco origen…</option>
           {BANCOS_VENEZUELA.map(b => (
-            <option key={b.code} value={b.code}>{b.name}</option>
+            <option key={b.code} value={b.code} className="bg-[#0a0a1a] text-white">{b.name}</option>
           ))}
         </select>
         <input
@@ -1065,15 +1073,16 @@ function DetailRow({
   highlight?: boolean;
 }) {
   return (
-    <div className="flex items-center justify-between">
-      <span className="text-gray-500 text-xs">{label}</span>
-      <div className="flex items-center">
+    <div className="flex items-center justify-between gap-3 min-w-0">
+      <span className="text-gray-500 text-xs shrink-0">{label}</span>
+      <div className="flex items-center min-w-0 flex-1 justify-end">
         <span
-          className={`text-xs ${highlight ? "text-[#F46800] font-bold text-sm" : "text-white"} ${mono ? "font-mono" : ""}`}
+          title={value}
+          className={`text-xs truncate ${highlight ? "text-[#F46800] font-bold text-sm" : "text-white"} ${mono ? "font-mono" : ""}`}
         >
           {value}
         </span>
-        {extra}
+        {extra && <span className="shrink-0">{extra}</span>}
       </div>
     </div>
   );
