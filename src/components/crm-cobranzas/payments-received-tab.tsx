@@ -8,7 +8,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Card } from "@/components/ui/card";
 import {
   RefreshCw, Search, DollarSign, TrendingUp, CreditCard,
-  Calendar, CheckCircle2,
+  Calendar, CheckCircle2, Inbox,
 } from "lucide-react";
 import { useVisibilityPolling } from "@/hooks/useVisibilityPolling";
 
@@ -210,6 +210,9 @@ export default function PaymentsReceivedTab() {
         </div>
       </Card>
 
+      {/* Sub-panel: pagos externos sin matchear */}
+      <ExternalPaymentsPanel />
+
       {/* Tabla */}
       <Card className="!p-0 overflow-hidden">
         <div className="overflow-x-auto">
@@ -265,5 +268,153 @@ export default function PaymentsReceivedTab() {
         </div>
       </Card>
     </div>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Sub-panel: pagos recibidos por el banco SIN factura asociada
+// (PAGO MOVIL directos al número Wuipi, transferencias fuera del portal, etc).
+// Solo visibilidad — el equipo de finanzas concilia manualmente en Odoo.
+// ──────────────────────────────────────────────────────────────────────────
+
+interface ExternalPaymentRow {
+  id: string;
+  received_at: string;
+  payment_method: string | null;
+  reference_number: string | null;
+  amount: number | null;
+  status: string | null;
+}
+
+interface ExternalStats {
+  total_count: number;
+  total_bs: number;
+  by_method: Record<string, { count: number; totalBs: number }>;
+  since: string;
+}
+
+function ExternalPaymentsPanel() {
+  const [items, setItems] = useState<ExternalPaymentRow[]>([]);
+  const [stats, setStats] = useState<ExternalStats | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [expanded, setExpanded] = useState(false);
+
+  const fetchData = useCallback(async () => {
+    try {
+      const res = await fetch("/api/cobranzas/external-payments?limit=100", { cache: "no-store" });
+      const json = await res.json();
+      if (res.ok) {
+        setItems(json.items || []);
+        setStats(json.stats || null);
+      }
+    } catch (err) {
+      console.error("[ExternalPayments] fetch error:", err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+  useVisibilityPolling(fetchData, 60000);
+
+  if (loading && !stats) return null;
+  if (!stats || stats.total_count === 0) return null;
+
+  return (
+    <Card className="!p-0 overflow-hidden border-amber-500/30">
+      <button
+        onClick={() => setExpanded(e => !e)}
+        className="w-full p-3 flex items-center gap-3 hover:bg-amber-500/5 transition-colors text-left"
+      >
+        <div className="w-9 h-9 rounded-lg bg-amber-500/15 border border-amber-500/30 flex items-center justify-center shrink-0">
+          <Inbox size={18} className="text-amber-400" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold text-white">
+            Pagos externos sin matchear
+            <span className="ml-2 px-2 py-0.5 rounded-full text-[10px] bg-amber-500/15 border border-amber-500/30 text-amber-400">
+              {stats.total_count}
+            </span>
+          </p>
+          <p className="text-xs text-gray-500">
+            Pagos recibidos en el banco sin factura asociada — conciliar manualmente en Odoo
+          </p>
+        </div>
+        <div className="text-right shrink-0">
+          <p className="text-xs text-gray-500">Total</p>
+          <p className="text-sm font-bold text-amber-400">
+            Bs {Number(stats.total_bs).toLocaleString("es-VE", { minimumFractionDigits: 2 })}
+          </p>
+        </div>
+        <span className="text-gray-500 text-xs ml-2">{expanded ? "▲" : "▼"}</span>
+      </button>
+
+      {expanded && (
+        <>
+          {/* Breakdown por método */}
+          <div className="px-3 pb-3 border-t border-wuipi-border pt-3">
+            <div className="flex flex-wrap gap-2">
+              {Object.entries(stats.by_method).map(([method, m]) => (
+                <div
+                  key={method}
+                  className="px-3 py-1.5 rounded-lg border border-amber-500/20 bg-amber-500/5 text-xs"
+                >
+                  <span className="font-semibold text-amber-300">{method}</span>
+                  <span className="ml-2 text-gray-500">
+                    {m.count} · Bs {Number(m.totalBs).toLocaleString("es-VE", { minimumFractionDigits: 2 })}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Tabla */}
+          <div className="overflow-x-auto border-t border-wuipi-border">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-gray-500 text-xs border-b border-wuipi-border bg-wuipi-bg/50">
+                  <th className="text-left p-3 pl-4 font-medium">Fecha</th>
+                  <th className="text-left p-3 font-medium">Método</th>
+                  <th className="text-left p-3 font-medium">Referencia</th>
+                  <th className="text-right p-3 pr-4 font-medium">Monto Bs</th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.length === 0 ? (
+                  <tr><td colSpan={4} className="p-6 text-center text-gray-500 text-xs">
+                    No hay pagos externos pendientes en los últimos 30 días
+                  </td></tr>
+                ) : items.map(it => (
+                  <tr key={it.id} className="border-b border-wuipi-border/50 hover:bg-wuipi-card-hover">
+                    <td className="p-3 pl-4 text-xs text-gray-300 whitespace-nowrap">
+                      {new Date(it.received_at).toLocaleString("es-VE", {
+                        day: "2-digit", month: "2-digit", year: "2-digit",
+                        hour: "2-digit", minute: "2-digit",
+                      })}
+                    </td>
+                    <td className="p-3">
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold border border-amber-500/20 bg-amber-500/5 text-amber-300">
+                        {it.payment_method || "—"}
+                      </span>
+                    </td>
+                    <td className="p-3 text-xs text-gray-300 font-mono truncate max-w-[180px]" title={it.reference_number || ""}>
+                      {it.reference_number || "—"}
+                    </td>
+                    <td className="p-3 pr-4 text-right text-xs font-semibold text-amber-300">
+                      {it.amount != null
+                        ? Number(it.amount).toLocaleString("es-VE", { minimumFractionDigits: 2 })
+                        : "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </Card>
   );
 }

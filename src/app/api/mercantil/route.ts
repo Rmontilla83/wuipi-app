@@ -460,6 +460,19 @@ export async function POST(request: NextRequest) {
             processingError = "No se encontro item para invoice " + normalized.invoice_number;
             console.warn("[Mercantil Alias] " + processingError);
           }
+        } else if (normalized.status === "approved" && !normalized.invoice_number) {
+          // Pago externo aprobado SIN factura asociada: cliente pagó directo
+          // por Pago Móvil/Transferencia al banco sin pasar por nuestro portal.
+          // No tenemos a qué item asociarlo. Lo marcamos como processed=true
+          // con flag `external_unmatched` para que aparezca en el sub-panel
+          // "Pagos externos sin matchear" y finanzas lo concilie manual en Odoo.
+          // El cron C1a (polling Odoo) cerrará casos en kanban si correspondiera.
+          processed = true;
+          processingError = `external_unmatched: ${normalized.payment_method || "unknown"}`;
+          console.log(
+            "[Mercantil Alias] Pago externo sin invoice — ref=" + normalized.reference_number +
+            " method=" + normalized.payment_method + " amount=" + normalized.amount + " → external_unmatched"
+          );
         } else if (normalized.status !== "approved" && normalized.invoice_number) {
           // Banco rechazo el pago. Marcar el item como failed para que la UI
           // muestre el mensaje de error inmediato en vez de esperar 5 minutos
