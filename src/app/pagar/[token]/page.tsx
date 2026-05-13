@@ -158,6 +158,42 @@ export default function PagarPage() {
     }
   }, [token]);
 
+  // MEJORA #3 (2026-05-13) — Detección activa de fallos Botón Web.
+  // Si el cliente vuelve con un errorCode != success en la URL, dispara
+  // inmediatamente el endpoint que marca el item failed + abre caso en
+  // kanban. Antes esto esperaba 60min al cron de abandonos.
+  // Idempotente del lado server (guard .neq("status","paid")), seguro
+  // dispararlo de más; rate limited 5/min por IP+token.
+  useEffect(() => {
+    if (!isPostPayment || !mercantilErrorCode) return;
+    let cancelled = false;
+    const referenceFromUrl = searchParams.get("paymentReference")
+      || searchParams.get("reference_number")
+      || searchParams.get("trxRef")
+      || "";
+    const messageFromUrl = searchParams.get("message")
+      || searchParams.get("mensajeCliente")
+      || searchParams.get("description")
+      || "";
+    fetch(`/api/cobranzas/${token}/mercantil-callback-failure`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      cache: "no-store",
+      body: JSON.stringify({
+        errorCode: mercantilErrorCode,
+        message: messageFromUrl || undefined,
+        paymentReference: referenceFromUrl || undefined,
+      }),
+    }).then(async (res) => {
+      if (cancelled) return;
+      // Refetch para que la UI flip a "failed" inmediatamente sin esperar polling
+      if (res.ok) fetchData();
+    }).catch((err) => {
+      console.warn("[Pagar] callback-failure dispatch error:", err);
+    });
+    return () => { cancelled = true; };
+  }, [isPostPayment, mercantilErrorCode, token, fetchData, searchParams]);
+
   useEffect(() => {
     fetchData().then((json) => {
       // If already paid or no post-payment callback, don't poll
