@@ -91,21 +91,38 @@ export async function POST(request: NextRequest) {
         amountVes: amountBss, customerCedulaRif: item.customer_cedula_rif,
       }).catch(() => {});
       try {
-        // Strip any prefix from the cedula (V/J/E/G) — Mercantil expects digits only.
-        const cedulaDigits = String(item.customer_cedula_rif).replace(/^[VJEGP]-?/i, "").replace(/\D/g, "");
+        // Pass cedula completa al SDK. normalizeIssuerCustomerId() preserva la
+        // letra (V/J/E/G/P) — quitarla aquí rompía clientes jurídicos porque
+        // el helper caía al default 'V'. Mercantil exige formato exacto V17123456.
+        const issuerCustomerId = String(item.customer_cedula_rif ?? "");
 
-        // Transfers land same-day in Venezuela for Débito Inmediato; search today.
-        const today = new Date().toISOString().split("T")[0];
-
-        const results = await sdk.searchTransfers({
-          account: WUIPI_ACCOUNT,
-          issuerCustomerId: cedulaDigits,
-          trxDate: today,
-          issuerBankId: parseInt(bankCode!, 10),
-          transactionType: TRANSACTION_TYPE_DEFAULT,
-          paymentReference: reference,
-          amount: amountBss!,
+        // Búsqueda multi-fecha: clientes a veces reportan la transferencia al
+        // día siguiente (especialmente nocturnas). Probamos hoy → ayer → 2 días
+        // atrás. Para más antiguas el admin promueve manual via promote-paid.
+        const dates = [0, 1, 2].map((daysAgo) => {
+          const d = new Date();
+          d.setUTCDate(d.getUTCDate() - daysAgo);
+          return d.toISOString().split("T")[0];
         });
+
+        let results: Awaited<ReturnType<typeof sdk.searchTransfers>> = [];
+        let matchedDate: string | null = null;
+        for (const trxDate of dates) {
+          const r = await sdk.searchTransfers({
+            account: WUIPI_ACCOUNT,
+            issuerCustomerId,
+            trxDate,
+            issuerBankId: parseInt(bankCode!, 10),
+            transactionType: TRANSACTION_TYPE_DEFAULT,
+            paymentReference: reference,
+            amount: amountBss!,
+          });
+          if (r.length > 0) {
+            results = r;
+            matchedDate = trxDate;
+            break;
+          }
+        }
 
         // Match: Mercantil returned at least one transaction matching ref+amount.
         // Extra sanity: verify the reference matches (some banks return empty
@@ -115,6 +132,9 @@ export async function POST(request: NextRequest) {
           const amtDiff = Math.abs(Number(t.amount) - amountBss!);
           return refMatches && amtDiff < 0.01;
         });
+        if (hit && matchedDate) {
+          console.log(`[PayConfirm] match en trxDate=${matchedDate}`);
+        }
 
         if (hit) {
           autoVerified = true;
@@ -130,7 +150,7 @@ export async function POST(request: NextRequest) {
           }).catch(() => {});
         } else {
           console.log(
-            `[PayConfirm] no match on Mercantil — ref=${reference} cedula=${cedulaDigits} bank=${bankCode} amount=${amountBss} results=${results.length} → conciliating`
+            `[PayConfirm] no match on Mercantil — ref=${reference} cedula=${issuerCustomerId} bank=${bankCode} amount=${amountBss} dates=${dates.join(",")} results=${results.length} → conciliating`
           );
           logGatewayEvent({
             collectionItemId: item.id, paymentToken: item.payment_token,
