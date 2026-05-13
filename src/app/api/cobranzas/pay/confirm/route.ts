@@ -24,8 +24,12 @@ const WUIPI_ACCOUNT = "01050745651745103031";
 // interbank transfers in Mercantil's transfer-search taxonomy.
 const TRANSACTION_TYPE_DEFAULT = 1;
 
+// Deploy marker — si ves este string en runtime logs, este deploy SI tiene el fix duck-type
+const PAY_CONFIRM_DEPLOY_MARKER = "PAY_CONFIRM_v2026_05_13_DUCKTYPE_2";
+
 export async function POST(request: NextRequest) {
   try {
+    console.log(`[PayConfirm] start | marker=${PAY_CONFIRM_DEPLOY_MARKER}`);
     const ip = getClientIP(request.headers);
     const rl = checkRateLimit(`confirm:${ip}`, 5, 60_000);
     if (!rl.allowed) {
@@ -128,9 +132,11 @@ export async function POST(request: NextRequest) {
           return d.toISOString().split("T")[0];
         });
 
+        console.log(`[PayConfirm] starting multi-date loop dates=[${dates.join(",")}] amount=${searchAmount} ref=${reference} cedula=${issuerCustomerId}`);
         let results: Awaited<ReturnType<typeof sdk.searchTransfers>> = [];
         let matchedDate: string | null = null;
         for (const trxDate of dates) {
+          console.log(`[PayConfirm] trying trxDate=${trxDate}`);
           const r = await sdk.searchTransfers({
             account: WUIPI_ACCOUNT,
             issuerCustomerId,
@@ -140,6 +146,7 @@ export async function POST(request: NextRequest) {
             paymentReference: reference,
             amount: searchAmount,
           });
+          console.log(`[PayConfirm] trxDate=${trxDate} → results.length=${r.length}`);
           if (r.length > 0) {
             results = r;
             matchedDate = trxDate;
