@@ -6,6 +6,7 @@ export async function middleware(request: NextRequest) {
   const publicPaths = [
     "/login",
     "/setup-password",
+    "/api/version",
     "/pagar/",
     // /api/mercantil (root) recibe los webhooks de Mercantil — registrado
     // sin sufijo. Match exacto abajo. Las subrutas viejas (/webhook, /callback,
