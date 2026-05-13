@@ -62,14 +62,24 @@ export async function searchTransfers(
     : endpoints.searchTransfersUrl;
   const normalizedCedula = normalizeIssuerCustomerId(params.issuerCustomerId);
   const truncatedRef = transferReferenceLast8(params.paymentReference);
-  // DEBUG: loggear los valores REALES que viajan a Mercantil (sin cifrar) para
-  // diagnosticar errorCode 90 (formato cedula incorrecto). Removerlo cuando
-  // el flow este 100% estable en prod.
+  const cedulaCipher = encryptField(normalizedCedula, creds.secretKey);
+  const accountCipher = encryptField(params.account, creds.secretKey);
+  const merchantIdentifyForLog = buildTransferSearchMerchantIdentify(config, creds.merchantId);
+  // DEBUG: loggear los valores REALES + cifrados que viajan a Mercantil
   console.log(
-    `[searchTransfers] req | rawCedula=${JSON.stringify(params.issuerCustomerId)} → normalized=${JSON.stringify(normalizedCedula)} | rawRef=${JSON.stringify(params.paymentReference)} → last8=${JSON.stringify(truncatedRef)} | account=${params.account} bank=${params.issuerBankId} type=${params.transactionType} date=${params.trxDate} amount=${params.amount} | merchantId=${creds.merchantId} clientId=${creds.clientId.slice(0,4)}...${creds.clientId.slice(-4)} url=${url}`
+    `[searchTransfers] req | rawCedula=${JSON.stringify(params.issuerCustomerId)} → normalized=${JSON.stringify(normalizedCedula)} → cipher_first20=${cedulaCipher.slice(0,20)} cipher_full_b64_len=${cedulaCipher.length}`
+  );
+  console.log(
+    `[searchTransfers] req | account=${params.account} → cipher_first20=${accountCipher.slice(0,20)} | rawRef=${JSON.stringify(params.paymentReference)} → last8=${JSON.stringify(truncatedRef)}`
+  );
+  console.log(
+    `[searchTransfers] req | bank=${params.issuerBankId} (${typeof params.issuerBankId}) type=${params.transactionType} (${typeof params.transactionType}) date=${params.trxDate} amount=${params.amount} (${typeof params.amount})`
+  );
+  console.log(
+    `[searchTransfers] req | merchantIdentify=${JSON.stringify(merchantIdentifyForLog)} types=${JSON.stringify({intId: typeof merchantIdentifyForLog.integratorId, mId: typeof merchantIdentifyForLog.merchantId, tId: typeof merchantIdentifyForLog.terminalId})}`
   );
   const body: Record<string, unknown> = {
-    merchantIdentify: buildTransferSearchMerchantIdentify(config, creds.merchantId),
+    merchantIdentify: merchantIdentifyForLog,
     clientIdentify: {
       ipAddress: '127.0.0.1',
       // Mercantil valida formato "Nombre Version" (errorCode 51 con Mozilla/5.0)
@@ -77,8 +87,8 @@ export async function searchTransfers(
       mobile: { manufacturer: 'Samsung' },
     },
     transferSearchBy: {
-      account: encryptField(params.account, creds.secretKey),
-      issuerCustomerId: encryptField(normalizedCedula, creds.secretKey),
+      account: accountCipher,
+      issuerCustomerId: cedulaCipher,
       trxDate: params.trxDate,
       issuerBankId: params.issuerBankId,
       transactionType: params.transactionType,
