@@ -60,6 +60,14 @@ export async function searchTransfers(
   const url = creds.baseUrl
     ? `${creds.baseUrl.replace(/\/$/, '')}/v1/payment/transfer-search`
     : endpoints.searchTransfersUrl;
+  const normalizedCedula = normalizeIssuerCustomerId(params.issuerCustomerId);
+  const truncatedRef = transferReferenceLast8(params.paymentReference);
+  // DEBUG: loggear los valores REALES que viajan a Mercantil (sin cifrar) para
+  // diagnosticar errorCode 90 (formato cedula incorrecto). Removerlo cuando
+  // el flow este 100% estable en prod.
+  console.log(
+    `[searchTransfers] req | rawCedula=${JSON.stringify(params.issuerCustomerId)} → normalized=${JSON.stringify(normalizedCedula)} | rawRef=${JSON.stringify(params.paymentReference)} → last8=${JSON.stringify(truncatedRef)} | account=${params.account} bank=${params.issuerBankId} type=${params.transactionType} date=${params.trxDate} amount=${params.amount} | merchantId=${creds.merchantId} clientId=${creds.clientId.slice(0,4)}...${creds.clientId.slice(-4)} url=${url}`
+  );
   const body: Record<string, unknown> = {
     merchantIdentify: buildTransferSearchMerchantIdentify(config, creds.merchantId),
     clientIdentify: {
@@ -70,11 +78,11 @@ export async function searchTransfers(
     },
     transferSearchBy: {
       account: encryptField(params.account, creds.secretKey),
-      issuerCustomerId: encryptField(normalizeIssuerCustomerId(params.issuerCustomerId), creds.secretKey),
+      issuerCustomerId: encryptField(normalizedCedula, creds.secretKey),
       trxDate: params.trxDate,
       issuerBankId: params.issuerBankId,
       transactionType: params.transactionType,
-      paymentReference: transferReferenceLast8(params.paymentReference),
+      paymentReference: truncatedRef,
       amount: params.amount,
     },
   };
