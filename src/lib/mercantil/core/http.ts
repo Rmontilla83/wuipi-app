@@ -70,10 +70,21 @@ export async function apiRequest<T = unknown>(
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), timeout);
 
+      const bodyStr = body ? JSON.stringify(body) : undefined;
+      // DEBUG: log full body + headers que se mandan al banco (sin el clientId)
+      if (url.includes("transfer-search")) {
+        const safeHeaders: Record<string, string> = {};
+        for (const [k, v] of Object.entries(headers)) {
+          safeHeaders[k] = k.toLowerCase().includes("client-id") ? v.slice(0, 4) + "..." + v.slice(-4) : v;
+        }
+        console.log(
+          `[apiRequest] POST ${url} | headers=${JSON.stringify(safeHeaders)} | bodyLen=${bodyStr?.length} | bodyStr=${bodyStr}`
+        );
+      }
       const response = await fetch(url, {
         method,
         headers,
-        body: body ? JSON.stringify(body) : undefined,
+        body: bodyStr,
         signal: controller.signal,
       });
 
