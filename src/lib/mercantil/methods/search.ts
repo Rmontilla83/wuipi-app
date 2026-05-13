@@ -95,11 +95,33 @@ export async function searchTransfers(
     // errorCode 330 en lugar del esperado HTTP 200 con array vacío.
     // Lo tratamos como búsqueda válida sin matches para que el caller pueda
     // iterar (por fecha, por monto, etc) sin que el SDK throwee.
-    if (err instanceof MercantilApiError) {
-      const details = err.details as { errorList?: Array<{ errorCode?: string }> } | undefined;
-      const errorList = details?.errorList || [];
-      const hasNoMatch = errorList.some(e => String(e.errorCode) === '330');
+    //
+    // Importante: duck-type check (no `instanceof MercantilApiError`). En
+    // bundling de Next.js la clase puede aparecer duplicada entre módulos
+    // compilados separados y el instanceof falla aunque la shape sea idéntica.
+    const e = err as {
+      status?: number;
+      details?: { errorList?: Array<{ errorCode?: string | number; description?: string }> };
+    } | undefined;
+    const errorList = e?.details?.errorList;
+    const isApiErrorShape = typeof e?.status === 'number' && Array.isArray(errorList);
+    if (isApiErrorShape) {
+      const hasNoMatch = errorList!.some(item => String(item?.errorCode) === '330');
+      // Log condicional para que en prod podamos confirmar qué pasó cuando un
+      // item queda en conciliating: el catch atrapó el error correctamente y
+      // decidió "no match" sin throwear; el caller puede continuar el loop.
+      console.log(
+        `[searchTransfers] caught ApiError-shape status=${e!.status} errorCodes=[${errorList!.map(i => i.errorCode).join(',')}] hasNoMatch=${hasNoMatch} (instanceof MercantilApiError? ${err instanceof MercantilApiError})`
+      );
       if (hasNoMatch) return [];
+    } else {
+      console.warn(
+        `[searchTransfers] caught non-ApiError-shape err — re-throwing. shape=${JSON.stringify({
+          status: e?.status,
+          hasDetails: !!e?.details,
+          hasErrorList: Array.isArray(errorList),
+        })}`
+      );
     }
     throw err;
   }
