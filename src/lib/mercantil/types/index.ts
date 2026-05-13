@@ -281,14 +281,34 @@ export interface TransferSearchParams {
   amount: number;
 }
 
+/**
+ * Resultado real que devuelve Mercantil transfer-search en prod (schema en
+ * español). Confirmado 2026-05-13 con HTTP 200 contra el banco. Mercantil NO
+ * devuelve amount ni origin_bank en la respuesta — son filtros del request, y
+ * si una trx aparece en la lista ya pasó todos esos filtros exact-match.
+ *
+ * Los campos *Customer* (cedula y nombre) vienen cifrados con la misma
+ * secretKey del producto; descifrarlos requiere `decrypt(value, secretKey)`.
+ */
 export interface TransferSearchResult {
-  reference_number: string;
-  amount: number;
-  date: string;
-  origin_bank: string;
-  origin_account: string;
-  status: string;
-  description: string;
+  /** Hora de la transacción en formato HH:MM:SS */
+  trxTime: string;
+  /** Moneda — "VES" para transferencias locales */
+  currency: string;
+  /** Estado: "A" = aprobado */
+  trxStatus: string;
+  /** Cédula/RIF del emisor (CIFRADO base64) */
+  issuerCustomerId: string;
+  /** Canal: "INTERNET", "OFICINA", etc. */
+  channel: string;
+  /** Fecha de la transacción (YYYY-MM-DD) */
+  trxValueDate: string;
+  /** "S"/"N" — si esta búsqueda ya devolvió este resultado antes */
+  previouslySearched: string;
+  /** Nombre del emisor (CIFRADO base64) */
+  issuerCustomerName: string;
+  /** Últimos 8 dígitos de la referencia bancaria */
+  paymentReference: string;
 }
 
 /** Postman: node "search_by" with trx_date, payment_reference. Phones encrypted. */

@@ -188,10 +188,12 @@ export async function POST(
     }, { status: 502 });
   }
 
+  // Mercantil ya filtró exact-match en el search; verificamos sanity con last8
+  // del paymentReference. La respuesta no incluye amount ni reference_number.
+  const expectedLast8 = String(reference).replace(/\D/g, "").slice(-8);
   const hit = results.find(t => {
-    const refMatches = !t.reference_number || t.reference_number === reference;
-    const amtDiff = Math.abs(Number(t.amount) - amountBss);
-    return refMatches && amtDiff < 0.01;
+    if (!t.paymentReference) return true;
+    return t.paymentReference === expectedLast8;
   });
 
   if (!hit) {

@@ -11,7 +11,7 @@ import { getItemsByToken, updateItem } from "@/lib/dal/collection-campaigns";
 import { sendPaymentConfirmationWhatsApp } from "@/lib/notifications/whatsapp";
 import { sendPaymentConfirmationEmail } from "@/lib/notifications/email";
 import { checkRateLimit, getClientIP } from "@/lib/utils/rate-limit";
-import { MercantilSDK } from "@/lib/mercantil";
+import { MercantilSDK, transferReferenceLast8 } from "@/lib/mercantil";
 import { fetchBCVRate, convertUsdToBs } from "@/lib/integrations/bcv";
 import { logGatewayEvent, classifyError, maskAccountLast4 } from "@/lib/dal/payment-gateway-logs";
 import { createPaymentFailureCase, closeOpenCasesForPaidItem } from "@/lib/cobranzas/payment-failure-case";
@@ -154,14 +154,16 @@ export async function POST(request: NextRequest) {
           }
         }
 
-        // Match: Mercantil returned at least one transaction matching ref+amount.
-        // Extra sanity: verify the reference matches (some banks return empty
-        // reference_number field inconsistently). Comparamos contra el monto
-        // que buscamos (searchAmount), no contra amountBss del item.
+        // Match: Mercantil ya filtró por amount+ref+account+cedula+bank exact
+        // match al hacer el search; si retorna algún resultado, ese resultado
+        // YA matchea todos los criterios. La respuesta no incluye `amount` ni
+        // `reference_number` — viene como `paymentReference` (last8). Sanity:
+        // confirmamos que el último 8 de la ref coincide.
+        const expectedLast8 = transferReferenceLast8(reference);
         const hit = results.find(t => {
-          const refMatches = !t.reference_number || t.reference_number === reference;
-          const amtDiff = Math.abs(Number(t.amount) - searchAmount);
-          return refMatches && amtDiff < 0.01;
+          // paymentReference viene como string con last8. Sanity check.
+          if (!t.paymentReference) return true; // si banco lo omite, confiamos
+          return t.paymentReference === expectedLast8;
         });
         if (hit && matchedDate) {
           console.log(`[PayConfirm] match en trxDate=${matchedDate}`);
@@ -174,10 +176,13 @@ export async function POST(request: NextRequest) {
           // recalculó), o pagó parcial/excedido por error.
           if (isDifferentAmount) {
             amountMismatch = true;
-            mercantilFoundAmount = Number(hit.amount);
+            // Mercantil no devuelve `amount` en la respuesta del search; si
+            // encontró match, fue contra `searchAmount` (lo que el cliente
+            // declaró). Ese es el monto real de la trx.
+            mercantilFoundAmount = searchAmount;
             console.log(
               `[PayConfirm] AMOUNT MISMATCH: cliente declaró ${searchAmount} Bs, ` +
-              `Mercantil confirmó ${hit.amount} Bs, item esperaba ${amountBss} Bs — NO marca paid`
+              `Mercantil confirmó match con ${searchAmount} Bs, item esperaba ${amountBss} Bs — NO marca paid`
             );
             logGatewayEvent({
               collectionItemId: item.id, paymentToken: item.payment_token,
