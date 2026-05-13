@@ -2025,12 +2025,16 @@ export async function previewInvoicePosting(
   }
 
   // Detectar escenario:
-  //  1. Si paymentMethod indica pago en USD -> "usd-no-convert" (factura debe quedar en USD)
+  //  1. Si paymentMethod indica factura en USD -> "usd-no-convert" (factura debe quedar en USD)
   //  2. Si la factura ya esta en VED -> "skip-conversion" (reentrada)
-  //  3. Si la factura esta en USD y el pago es en VES -> "convert"
+  //  3. Si la factura esta en USD y debe convertirse a VES -> "convert"
+  //
+  // OJO: usa `invoiceCurrencyId` (la moneda final de la factura), NO el alias
+  // viejo `currencyId` que ahora es la moneda del PAYMENT. Para Stripe/PayPal:
+  //   invoiceCurrencyId=166 (factura VES) + paymentCurrencyId=1 (payment USD).
   const currentCurrencyName = invoice.currency_id?.[1];
   const mappingForMethod = paymentMethod ? PAYMENT_METHOD_MAPPING[paymentMethod] : undefined;
-  const targetCurrencyId = mappingForMethod?.currencyId;
+  const targetCurrencyId = mappingForMethod?.invoiceCurrencyId ?? mappingForMethod?.currencyId;
   const wantsUsdTarget = targetCurrencyId === 1;
 
   let scenario: "convert" | "skip-conversion" | "usd-no-convert";
@@ -2261,6 +2265,15 @@ function round4(n: number): number {
 export interface PaymentMethodMapping {
   journalId: number;
   paymentMethodLineId: number;
+  /** Moneda en la que va a quedar POSTED la factura (Odoo currency_id). */
+  invoiceCurrencyId: number;
+  /** Moneda del account.payment que se va a crear (Odoo currency_id). */
+  paymentCurrencyId: number;
+  /**
+   * @deprecated Alias retrocompatible = paymentCurrencyId. Antes era el único
+   * campo de moneda; manténgase igual a paymentCurrencyId para no romper
+   * callers viejos. Nuevos callers deben usar invoiceCurrencyId/paymentCurrencyId.
+   */
   currencyId: number;
   description: string;
 }
@@ -2269,60 +2282,79 @@ export interface PaymentMethodMapping {
  * Mapeo de metodo de pago de collection_items -> journal/payment_method_line
  * en Odoo. IDs verificados directamente en Odoo prod (2026-04-30).
  *
- * IMPORTANTE — multimoneda:
- *  - currencyId=166 (VED): la factura draft USD se convierte a VES al postear
- *    (logica de postInvoiceInVes con scenario "convert")
- *  - currencyId=1 (USD): la factura se postea en USD sin conversion
- *    (scenario "usd-no-convert")
+ * IMPORTANTE — multimoneda (separado en 2 campos desde 2026-05-13):
+ *  - `invoiceCurrencyId`: moneda final de la factura tras postear.
+ *      166 (VED) → scenario "convert" (draft USD → posted VES con BCV)
+ *      1 (USD)   → scenario "usd-no-convert" (factura permanece USD)
+ *  - `paymentCurrencyId`: moneda del account.payment.
+ *      Igual a invoiceCurrencyId para métodos en Bs (Mercantil, c2p, etc.)
+ *      Distinto para Stripe/PayPal: factura VES + payment USD (FX automático
+ *      en el reconcile contra el diario USD 9021).
  */
 export const PAYMENT_METHOD_MAPPING: Record<string, PaymentMethodMapping> = {
   debito_inmediato: {
     journalId: 29,                  // BNK1 "Bank" -> cuenta 1102002 BANCO MERCANTIL 3031
     paymentMethodLineId: 47,        // "Pago manual" del journal Bank
-    currencyId: 166,                // VED
+    invoiceCurrencyId: 166,         // VED
+    paymentCurrencyId: 166,         // VED
+    currencyId: 166,
     description: "Mercantil Bs (cuenta 3031)",
   },
   c2p: {
     journalId: 29,                  // mismo journal Mercantil Bs
     paymentMethodLineId: 47,
+    invoiceCurrencyId: 166,
+    paymentCurrencyId: 166,
     currencyId: 166,
     description: "Mercantil Bs (cuenta 3031) — Pago Movil C2P",
   },
   transferencia: {
     journalId: 29,                  // default Mercantil Bs (todas las transferencias entran ahi)
     paymentMethodLineId: 47,
+    invoiceCurrencyId: 166,
+    paymentCurrencyId: 166,
     currencyId: 166,
     description: "Mercantil Bs (cuenta 3031) — Transferencia",
   },
   cash: {                            // Cash en VES (efectivo en Bs)
     journalId: 38,                  // CSH2 "Efectivo Bs"
     paymentMethodLineId: 69,
-    currencyId: 166,                // VED
+    invoiceCurrencyId: 166,
+    paymentCurrencyId: 166,
+    currencyId: 166,
     description: "Efectivo Bs",
   },
   cash_ves: {                        // alias explicito
     journalId: 38,
     paymentMethodLineId: 69,
+    invoiceCurrencyId: 166,
+    paymentCurrencyId: 166,
     currencyId: 166,
     description: "Efectivo Bs",
   },
   cash_usd: {                        // Cash en USD (oficina PLC/Lecheria)
     journalId: 30,                  // CSH1 "Cash" (USD)
     paymentMethodLineId: 72,
-    currencyId: 1,                  // USD
+    invoiceCurrencyId: 1,           // factura permanece USD (cash USD se cobró en USD reales)
+    paymentCurrencyId: 1,
+    currencyId: 1,
     description: "Cash USD",
   },
   stripe: {
     journalId: 41,                  // BNK6 "Banco Mercantil 9021" (USD)
     paymentMethodLineId: 119,       // "Stripe"
-    currencyId: 1,                  // USD
-    description: "Stripe -> Mercantil USD 9021",
+    invoiceCurrencyId: 166,         // factura en VES (igual que los otros métodos)
+    paymentCurrencyId: 1,           // payment en USD (Stripe es USD nativo)
+    currencyId: 1,
+    description: "Stripe USD → factura VES",
   },
   paypal: {
     journalId: 41,                  // mismo Mercantil USD 9021
     paymentMethodLineId: 86,        // "PayPal"
-    currencyId: 1,                  // USD
-    description: "PayPal -> Mercantil USD 9021",
+    invoiceCurrencyId: 166,         // factura en VES
+    paymentCurrencyId: 1,           // payment en USD
+    currencyId: 1,
+    description: "PayPal USD → factura VES",
   },
 };
 
@@ -2460,6 +2492,13 @@ export async function registerPaymentForInvoice(opts: {
   paymentReference: string;
   paymentToken: string;
   paymentDate?: string;
+  /**
+   * Monto del pago en USD. Sólo relevante cuando paymentCurrencyId !==
+   * invoiceCurrencyId (ej. Stripe/PayPal: factura VES + payment USD).
+   * Si la factura y el payment están en la misma moneda, este campo se
+   * ignora y se usa `invoice.amount_total`.
+   */
+  amountUsd?: number | null;
 }): Promise<PaymentRegisterResult> {
   const errors: string[] = [];
   const preview = await previewRegisterPayment(opts);
@@ -2472,6 +2511,18 @@ export async function registerPaymentForInvoice(opts: {
   }
 
   try {
+    // Multimoneda: si paymentCurrency difiere de invoiceCurrency (Stripe/PayPal),
+    // el account.payment se crea en la moneda del payment con su propio amount.
+    // Si coinciden, payment.amount = invoice.amount_total (comportamiento previo).
+    const paymentCurrencyId =
+      preview.mapping.paymentCurrencyId ?? preview.mapping.currencyId;
+    const invoiceCurrencyId =
+      preview.mapping.invoiceCurrencyId ?? preview.mapping.currencyId;
+    const isMultiCurrency = paymentCurrencyId !== invoiceCurrencyId;
+    const paymentAmount = isMultiCurrency && typeof opts.amountUsd === "number" && opts.amountUsd > 0
+      ? opts.amountUsd
+      : preview.amount;
+
     // 1. Crear el account.payment directamente (state inicial = draft)
     const paymentId = await odooCreate("account.payment", {
       payment_type: "inbound",
@@ -2479,8 +2530,8 @@ export async function registerPaymentForInvoice(opts: {
       partner_id: preview.partner_id,
       journal_id: preview.mapping.journalId,
       payment_method_line_id: preview.mapping.paymentMethodLineId,
-      amount: preview.amount,
-      currency_id: preview.mapping.currencyId,
+      amount: paymentAmount,
+      currency_id: paymentCurrencyId,
       date: preview.payment_date,
       memo: preview.memo,
     });
@@ -2625,6 +2676,13 @@ export async function syncOdooForCollectionItem(opts: {
   paymentDate?: string;
   postInvoiceDone?: boolean;
   registerPaymentDone?: boolean;
+  /**
+   * Monto del pago en USD. Sólo se usa cuando el mapeo del método tiene
+   * paymentCurrencyId !== invoiceCurrencyId (ej. Stripe/PayPal: factura
+   * posted en VES, account.payment creado en USD). Si la moneda del pago
+   * coincide con la de la factura, este campo se ignora.
+   */
+  amountUsd?: number | null;
 }): Promise<SyncOdooResult> {
   const result: SyncOdooResult = {
     ok: false,
@@ -2687,6 +2745,7 @@ export async function syncOdooForCollectionItem(opts: {
         paymentReference: opts.paymentReference,
         paymentToken: opts.paymentToken,
         paymentDate: opts.paymentDate,
+        amountUsd: opts.amountUsd ?? null,
       });
       result.payment_result = payRes;
       if (!payRes.ok) {

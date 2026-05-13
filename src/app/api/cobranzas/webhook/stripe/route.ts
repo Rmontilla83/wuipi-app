@@ -7,6 +7,7 @@ import { sendPaymentConfirmationWhatsApp } from "@/lib/notifications/whatsapp";
 import { sendPaymentConfirmationEmail } from "@/lib/notifications/email";
 import { logGatewayEvent } from "@/lib/dal/payment-gateway-logs";
 import { createPaymentFailureCase, closeOpenCasesForPaidItem } from "@/lib/cobranzas/payment-failure-case";
+import { fetchBCVRate, convertUsdToBs } from "@/lib/integrations/bcv";
 import Stripe from "stripe";
 
 export async function POST(request: NextRequest) {
@@ -85,9 +86,27 @@ export async function POST(request: NextRequest) {
         }
       }
 
+      // Stripe es USD nativo. Necesitamos persistir amount_bss + bcv_rate
+      // para que el sync Odoo pueda postear la factura en VES (igual que los
+      // demas metodos). Sin esto, la cola Odoo queda con amount_ves=null y
+      // register_payment falla con "metodo de pago no disponible".
+      let bcvRate: number | null = null;
+      let amountBss: number | null = null;
+      if (item) {
+        try {
+          const bcv = await fetchBCVRate();
+          bcvRate = bcv.usd_to_bs;
+          amountBss = convertUsdToBs(Number(item.amount_usd), bcvRate);
+        } catch (err) {
+          console.warn("[Stripe Webhook] BCV fetch failed:", err);
+        }
+      }
+
       await markItemPaid(token, {
         payment_method: "stripe",
         payment_reference: session.payment_intent as string || session.id,
+        amount_bss: amountBss ?? undefined,
+        bcv_rate: bcvRate ?? undefined,
       });
 
       // Log: pago Stripe completado
@@ -113,7 +132,8 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      // Sprint 4 — sync Odoo via waitUntil (factura queda en USD).
+      // Sync Odoo: factura se postea en VES (con BCV calculado arriba),
+      // payment se crea en USD contra journal Stripe USD (mapping multimoneda).
       if (item) {
         try {
           const ref = (session.payment_intent as string) || session.id;
@@ -132,7 +152,7 @@ export async function POST(request: NextRequest) {
               paymentMethod: "stripe",
               paymentReference: ref,
               amountUsd: Number(item.amount_usd),
-              amountVes: null,
+              amountVes: amountBss,  // calculado con BCV arriba
               odooInvoiceIds,
             }).catch((err) => console.error("[Stripe Webhook] Sync Odoo fallo:", err))
           );

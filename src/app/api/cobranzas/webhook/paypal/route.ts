@@ -11,6 +11,7 @@ import { sendPaymentConfirmationWhatsApp } from "@/lib/notifications/whatsapp";
 import { sendPaymentConfirmationEmail } from "@/lib/notifications/email";
 import { logGatewayEvent } from "@/lib/dal/payment-gateway-logs";
 import { createPaymentFailureCase, closeOpenCasesForPaidItem } from "@/lib/cobranzas/payment-failure-case";
+import { fetchBCVRate, convertUsdToBs } from "@/lib/integrations/bcv";
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://api.wuipi.net";
 const WPY_TOKEN_RE = /^wpy_[A-Za-z0-9_-]{8,64}$/;
@@ -89,10 +90,25 @@ export async function GET(request: NextRequest) {
           return safeRedirect(`/pagar/${wpy_token}?status=failed`);
         }
 
+        // PayPal es USD nativo. Igual que Stripe: persistir amount_bss + bcv_rate
+        // para que el sync Odoo postee la factura en VES con esa tasa, y el
+        // account.payment quede en USD contra el journal PayPal USD.
+        let bcvRate: number | null = null;
+        let amountBss: number | null = null;
+        try {
+          const bcv = await fetchBCVRate();
+          bcvRate = bcv.usd_to_bs;
+          amountBss = convertUsdToBs(Number(item.amount_usd), bcvRate);
+        } catch (err) {
+          console.warn("[PayPal Return] BCV fetch failed:", err);
+        }
+
         try {
           await markItemPaid(wpy_token, {
             payment_method: "paypal",
             payment_reference: capture.captureId,
+            amount_bss: amountBss ?? undefined,
+            bcv_rate: bcvRate ?? undefined,
           });
           // Log: pago PayPal capturado exitosamente
           logGatewayEvent({
@@ -124,7 +140,7 @@ export async function GET(request: NextRequest) {
           // Payment was captured by PayPal — redirect success anyway; reconcile manually.
         }
 
-        // Sprint 4 — sync Odoo via waitUntil (factura queda en USD).
+        // Sync Odoo: factura posted en VES (con BCV), payment USD en journal PayPal.
         try {
           const { waitUntil } = await import("@vercel/functions");
           const { triggerOdooSyncOrEnqueue } = await import("@/lib/integrations/odoo-sync-trigger");
@@ -141,7 +157,7 @@ export async function GET(request: NextRequest) {
               paymentMethod: "paypal",
               paymentReference: capture.captureId,
               amountUsd: Number(item.amount_usd),
-              amountVes: null,
+              amountVes: amountBss,  // calculado con BCV arriba
               odooInvoiceIds,
             }).catch((err) => console.error("[PayPal Return] Sync Odoo fallo:", err))
           );

@@ -101,6 +101,7 @@ export async function GET(request: NextRequest) {
           paymentDate: item.payment_date || undefined,
           postInvoiceDone: item.post_invoice_done,
           registerPaymentDone: item.register_payment_done,
+          amountUsd: item.amount_usd ?? null,  // Stripe/PayPal: factura VES + payment USD
         });
 
         if (result.ok) {

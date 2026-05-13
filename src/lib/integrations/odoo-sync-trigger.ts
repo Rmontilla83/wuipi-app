@@ -143,6 +143,7 @@ export async function triggerOdooSyncOrEnqueue(input: SyncTriggerInput): Promise
         paymentReference: paymentReference || "",
         paymentToken,
         paymentDate,
+        amountUsd,  // necesario para Stripe/PayPal (payment USD vs factura VES)
       });
 
       if (result.ok) {
