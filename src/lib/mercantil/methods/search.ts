@@ -13,7 +13,7 @@ import type {
 } from '../types';
 import { getProductCredentials, getMerchantIdentify } from '../core/config';
 import { encryptField } from '../core/crypto';
-import { apiRequest } from '../core/http';
+import { apiRequest, MercantilApiError } from '../core/http';
 import { transferReferenceLast8, normalizeIssuerCustomerId } from '../utils/helpers';
 
 /**
@@ -79,11 +79,30 @@ export async function searchTransfers(
     },
   };
 
-  const response = await apiRequest<{ transactions: TransferSearchResult[] }>({
-    method: 'POST', url,
-    clientId: creds.clientId, body,
-  });
-  return response.data.transactions || [];
+  try {
+    const response = await apiRequest<{
+      transactions?: TransferSearchResult[];
+      transferSearchList?: TransferSearchResult[];
+    }>({
+      method: 'POST', url,
+      clientId: creds.clientId, body,
+    });
+    // Mercantil prod devuelve el nodo "transferSearchList" en español; algunas
+    // versiones del playground devuelven "transactions". Aceptamos ambos.
+    return response.data.transferSearchList || response.data.transactions || [];
+  } catch (err) {
+    // Mercantil señala "no se encontraron transacciones" con HTTP 400 +
+    // errorCode 330 en lugar del esperado HTTP 200 con array vacío.
+    // Lo tratamos como búsqueda válida sin matches para que el caller pueda
+    // iterar (por fecha, por monto, etc) sin que el SDK throwee.
+    if (err instanceof MercantilApiError) {
+      const details = err.details as { errorList?: Array<{ errorCode?: string }> } | undefined;
+      const errorList = details?.errorList || [];
+      const hasNoMatch = errorList.some(e => String(e.errorCode) === '330');
+      if (hasNoMatch) return [];
+    }
+    throw err;
+  }
 }
 
 /**
