@@ -11,6 +11,9 @@ import { NextResponse } from "next/server";
 const DEPLOY_MARKER = "PAY_CONFIRM_v2026_05_13_DUCKTYPE_2";
 
 export async function GET() {
+  console.log(`[/api/version] hit | marker=${DEPLOY_MARKER}`);
+  console.warn(`[/api/version] warn level test`);
+  console.error(`[/api/version] error level test (not a real error)`);
   return NextResponse.json({
     marker: DEPLOY_MARKER,
     commit: process.env.VERCEL_GIT_COMMIT_SHA || "unknown",

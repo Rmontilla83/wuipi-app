@@ -85,6 +85,11 @@ export async function apiRequest<T = unknown>(
         // Expose x-global-transaction-id in details — Mercantil support needs it
         // to trace a failing request on their side (generic code=99999 otherwise).
         const gtid = response.headers.get("x-global-transaction-id") || undefined;
+        // DEBUG: loggear lo que devuelve Mercantil para que el caller pueda
+        // diagnosticar errores como 330 (no match) vs estructurales.
+        console.error(
+          `[Mercantil HTTP ${response.status}] url=${url} gtid=${gtid} body=${JSON.stringify(responseData).slice(0, 1000)}`
+        );
         throw new MercantilApiError({
           status: response.status,
           code: responseData?.code || `HTTP_${response.status}`,
