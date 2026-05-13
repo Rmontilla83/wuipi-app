@@ -47,13 +47,15 @@ export async function GET(request: NextRequest) {
 
   try {
     // Buscar items 'viewed' que llevan mas de ABANDONED_MINUTES sin avanzar.
-    // Usamos `updated_at` (no `created_at`) porque el item pudo crearse hace
-    // dias y solo recien hoy el cliente abrio el link.
+    // Usamos `viewed_at` (timestamp explicito de cuando el cliente abrio el
+    // portal). Antes usabamos `updated_at` pero esa columna no existe en
+    // collection_items — el cron fallaba silenciosamente desde 2026-05-03.
+    // Migración 019 (2026-05-13) introdujo viewed_at + backfill.
     const { data: candidates, error } = await sb
       .from("collection_items")
-      .select("id, payment_token, customer_name, customer_cedula_rif, customer_phone, customer_email, amount_usd, status, updated_at")
+      .select("id, payment_token, customer_name, customer_cedula_rif, customer_phone, customer_email, amount_usd, status, viewed_at")
       .eq("status", "viewed")
-      .lte("updated_at", cutoff)
+      .lte("viewed_at", cutoff)
       .limit(BATCH_LIMIT);
 
     if (error) throw new Error(error.message);

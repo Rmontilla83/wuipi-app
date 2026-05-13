@@ -41,7 +41,10 @@ export async function GET(
     // /api/cobranzas/bcv for display, but the authoritative figure for
     // verification lives on the item.
     if (item.status === "pending" || item.status === "sent") {
-      const update: Record<string, unknown> = { status: "viewed" };
+      const update: Record<string, unknown> = {
+        status: "viewed",
+        viewed_at: new Date().toISOString(),
+      };
       if (!item.amount_bss) {
         try {
           const bcv = await fetchBCVRate();
