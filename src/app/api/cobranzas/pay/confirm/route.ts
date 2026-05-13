@@ -36,7 +36,7 @@ export async function POST(request: NextRequest) {
     const parsed = validate(collectionConfirmTransferSchema, body);
     if (!parsed.success) return apiError(parsed.error, 400);
 
-    const { token, reference, bankCode } = parsed.data;
+    const { token, reference, bankCode, declaredAmountBss } = parsed.data;
     const item = await getItemsByToken(token);
     if (!item) return apiError("Enlace de pago no encontrado", 404);
     if (item.status === "paid") return apiError("Este cobro ya fue pagado", 400);
@@ -49,6 +49,12 @@ export async function POST(request: NextRequest) {
     //           transfer_search product configured with prod credentials.
     let autoVerified = false;
     let autoVerifyError: string | null = null;
+    // Flag "monto declarado != adeudado del item" — la trx existe pero por
+    // un monto distinto (ej: cliente transfirió ayer con tasa BCV anterior).
+    // NO marca paid, abre caso amount_mismatch en kanban y devuelve mensaje
+    // claro al cliente para que se comunique con cobranzas.
+    let amountMismatch = false;
+    let mercantilFoundAmount: number | null = null;
 
     // Ensure amount_bss is populated. The transfer-flow UI never hits
     // /api/cobranzas/pay (that's only for debito_inmediato/stripe/paypal),
@@ -77,18 +83,35 @@ export async function POST(request: NextRequest) {
 
     if (canVerify) {
       const t0 = Date.now();
+      // Monto que se va a usar en la búsqueda Mercantil: si el cliente
+      // declaró un monto explícito (el que realmente transfirió, posiblemente
+      // distinto al adeudado actual por cambio de tasa BCV), usamos ese. Si
+      // no, fallback al amount_bss del item (comportamiento previo).
+      const searchAmount = typeof declaredAmountBss === "number" && declaredAmountBss > 0
+        ? declaredAmountBss
+        : amountBss!;
+      // Tolerancia: 1 centavo (los montos vienen con 2 decimales). Si el
+      // cliente declara explícitamente un monto que difiere del item por
+      // más de 1 centavo, lo tratamos como "intento distinto".
+      const isDifferentAmount =
+        typeof declaredAmountBss === "number" &&
+        Math.abs(declaredAmountBss - amountBss!) >= 0.01;
+
       logGatewayEvent({
         collectionItemId: item.id, paymentToken: item.payment_token,
         gateway: "transferencia", gatewayProduct: "transfer_search",
         eventType: "request_sent",
         request: {
-          amount: amountBss,
+          amount: searchAmount,
+          item_amount_bss: amountBss,
+          declared_amount_bss: declaredAmountBss ?? null,
+          amount_intent: isDifferentAmount ? "different" : "exact",
           reference_number: reference,
           account_last4: maskAccountLast4(WUIPI_ACCOUNT),
           bank_code: bankCode,
           date: new Date().toISOString().split("T")[0],
         },
-        amountVes: amountBss, customerCedulaRif: item.customer_cedula_rif,
+        amountVes: searchAmount, customerCedulaRif: item.customer_cedula_rif,
       }).catch(() => {});
       try {
         // Pass cedula completa al SDK. normalizeIssuerCustomerId() preserva la
@@ -115,7 +138,7 @@ export async function POST(request: NextRequest) {
             issuerBankId: parseInt(bankCode!, 10),
             transactionType: TRANSACTION_TYPE_DEFAULT,
             paymentReference: reference,
-            amount: amountBss!,
+            amount: searchAmount,
           });
           if (r.length > 0) {
             results = r;
@@ -126,10 +149,11 @@ export async function POST(request: NextRequest) {
 
         // Match: Mercantil returned at least one transaction matching ref+amount.
         // Extra sanity: verify the reference matches (some banks return empty
-        // reference_number field inconsistently).
+        // reference_number field inconsistently). Comparamos contra el monto
+        // que buscamos (searchAmount), no contra amountBss del item.
         const hit = results.find(t => {
           const refMatches = !t.reference_number || t.reference_number === reference;
-          const amtDiff = Math.abs(Number(t.amount) - amountBss!);
+          const amtDiff = Math.abs(Number(t.amount) - searchAmount);
           return refMatches && amtDiff < 0.01;
         });
         if (hit && matchedDate) {
@@ -137,17 +161,44 @@ export async function POST(request: NextRequest) {
         }
 
         if (hit) {
-          autoVerified = true;
-          console.log(
-            `[PayConfirm] auto-verified ref=${reference} item=${item.id} via Mercantil`
-          );
-          logGatewayEvent({
-            collectionItemId: item.id, paymentToken: item.payment_token,
-            gateway: "transferencia", gatewayProduct: "transfer_search",
-            eventType: "response_received", outcome: "success",
-            response: { matched: true },
-            durationMs: Date.now() - t0,
-          }).catch(() => {});
+          // Match en Mercantil. Si el monto declarado difería del adeudado,
+          // NO marcamos paid — la trx existe pero por un monto distinto.
+          // Casos típicos: cliente transfirió con tasa BCV antigua (deuda
+          // recalculó), o pagó parcial/excedido por error.
+          if (isDifferentAmount) {
+            amountMismatch = true;
+            mercantilFoundAmount = Number(hit.amount);
+            console.log(
+              `[PayConfirm] AMOUNT MISMATCH: cliente declaró ${searchAmount} Bs, ` +
+              `Mercantil confirmó ${hit.amount} Bs, item esperaba ${amountBss} Bs — NO marca paid`
+            );
+            logGatewayEvent({
+              collectionItemId: item.id, paymentToken: item.payment_token,
+              gateway: "transferencia", gatewayProduct: "transfer_search",
+              eventType: "response_received", outcome: "pending",
+              response: {
+                matched: true,
+                amount_mismatch: true,
+                mercantil_amount: mercantilFoundAmount,
+                item_amount: amountBss,
+                declared_amount: declaredAmountBss,
+              },
+              errorCategory: "amount_mismatch",
+              durationMs: Date.now() - t0,
+            }).catch(() => {});
+          } else {
+            autoVerified = true;
+            console.log(
+              `[PayConfirm] auto-verified ref=${reference} item=${item.id} via Mercantil`
+            );
+            logGatewayEvent({
+              collectionItemId: item.id, paymentToken: item.payment_token,
+              gateway: "transferencia", gatewayProduct: "transfer_search",
+              eventType: "response_received", outcome: "success",
+              response: { matched: true },
+              durationMs: Date.now() - t0,
+            }).catch(() => {});
+          }
         } else {
           console.log(
             `[PayConfirm] no match on Mercantil — ref=${reference} cedula=${issuerCustomerId} bank=${bankCode} amount=${amountBss} dates=${dates.join(",")} results=${results.length} → conciliating`
@@ -191,7 +242,49 @@ export async function POST(request: NextRequest) {
     if (autoVerified) {
       update.paid_at = new Date().toISOString();
     }
+    if (amountMismatch) {
+      // Persistimos los detalles del mismatch en metadata para que el
+      // sub-panel admin / WA outbox tengan el contexto al revisar el caso.
+      update.metadata = {
+        ...((item.metadata as Record<string, unknown> | null) || {}),
+        amount_mismatch: {
+          detected_at: new Date().toISOString(),
+          item_amount_bss: amountBss,
+          declared_amount_bss: declaredAmountBss,
+          mercantil_found_amount: mercantilFoundAmount,
+          message: "Cliente reportó monto distinto al adeudado — verificar manualmente",
+        },
+      };
+    }
     await updateItem(item.id, update);
+
+    // Caso especial: la trx existe en Mercantil pero por un monto distinto al
+    // adeudado. Abrimos caso en kanban con failureType=amount_mismatch para
+    // que finanzas contacte al cliente. NO marcamos paid ni enviamos confirm.
+    if (amountMismatch) {
+      createPaymentFailureCase({
+        collectionItemId: item.id,
+        gateway: "transferencia",
+        gatewayProduct: "transfer_search",
+        failureType: "amount_mismatch",
+        errorCode: "amount_mismatch",
+        errorMessage: `Cliente declaró Bs ${declaredAmountBss?.toFixed(2)}, Mercantil confirmó Bs ${mercantilFoundAmount?.toFixed(2)}, adeudado Bs ${amountBss?.toFixed(2)}`,
+      }).catch((err) =>
+        console.error("[PayConfirm] createPaymentFailureCase amount_mismatch fallo:", err)
+      );
+
+      return apiSuccess({
+        status: "conciliating",
+        auto_verified: false,
+        amount_mismatch: true,
+        mercantil_amount: mercantilFoundAmount,
+        expected_amount_bss: amountBss,
+        declared_amount_bss: declaredAmountBss,
+        message:
+          "Detectamos tu transferencia en el banco, pero el monto difiere del adeudado. " +
+          "Comunícate con cobranzas por WhatsApp para regularizar la diferencia.",
+      });
+    }
 
     // Only send "pago recibido" confirmations when the payment is ACTUALLY
     // paid (auto-verified against Mercantil). For 'conciliating' we must NOT

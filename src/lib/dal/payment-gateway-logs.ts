@@ -52,6 +52,7 @@ export type ErrorCategory =
   | "insufficient_funds"
   | "invalid_otp"
   | "invalid_credentials"
+  | "amount_mismatch"         // trx existe en pasarela pero por monto distinto al adeudado
   | "timeout"
   | "rate_limited"
   | "gateway_5xx"

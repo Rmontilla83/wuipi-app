@@ -302,6 +302,14 @@ export const collectionConfirmTransferSchema = z.object({
    * transfer-search.
    */
   bankCode: z.enum(VENEZUELAN_BANK_CODES).optional(),
+  /**
+   * Monto en Bs que el cliente reporta haber transferido. Opcional — si se
+   * omite, el servidor usa amount_bss del item (lo que el cliente vio al
+   * abrir el portal). Útil cuando la tasa BCV cambió entre apertura y
+   * transferencia: el cliente declara el monto real para que la búsqueda
+   * Mercantil encuentre la trx aunque difiera del adeudado actual.
+   */
+  declaredAmountBss: z.number().positive("Monto debe ser positivo").max(10_000_000, "Monto excesivo").optional(),
 });
 
 /**

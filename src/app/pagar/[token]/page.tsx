@@ -97,8 +97,19 @@ export default function PagarPage() {
   const [processing, setProcessing] = useState(false);
   const [transferRef, setTransferRef] = useState("");
   const [originBank, setOriginBank] = useState("");
+  // Monto en Bs que el cliente declara haber transferido. Pre-llenado con el
+  // monto adeudado (lo que ve en pantalla) cuando data carga; editable por si
+  // transfirió con tasa BCV antigua que difiere del actual.
+  const [declaredAmount, setDeclaredAmount] = useState<string>("");
   const [confirmingSent, setConfirmingSent] = useState(false);
   const [autoVerifiedMsg, setAutoVerifiedMsg] = useState<string | null>(null);
+  // Mensaje específico cuando Mercantil confirma la trx pero por monto distinto al adeudado.
+  const [amountMismatchInfo, setAmountMismatchInfo] = useState<{
+    mercantil_amount: number;
+    expected_amount: number;
+    declared_amount: number;
+    message: string;
+  } | null>(null);
   // C2P wizard state
   const [c2pStep, setC2pStep] = useState<C2PStep>("form");
   const [c2pCedula, setC2pCedula] = useState("");
@@ -146,7 +157,12 @@ export default function PagarPage() {
       if (json.amount_usd) {
         const bcvRes = await fetch(`/api/cobranzas/bcv?amount=${json.amount_usd}`, { cache: "no-store" });
         const bcvJson = await bcvRes.json();
-        if (bcvRes.ok) setBcv(bcvJson);
+        if (bcvRes.ok) {
+          setBcv(bcvJson);
+          // Pre-llenar el monto declarado con el monto adeudado actual la
+          // primera vez (no sobrescribir si el cliente ya editó).
+          setDeclaredAmount(prev => prev || (bcvJson.amount_bss ? bcvJson.amount_bss.toFixed(2) : ""));
+        }
       }
 
       return json;
@@ -324,7 +340,15 @@ export default function PagarPage() {
     if (!transferRef.trim()) return;
     setConfirmingSent(true);
     setAutoVerifiedMsg(null);
+    setAmountMismatchInfo(null);
     try {
+      // Parsear el monto declarado. Si está vacío o inválido, omitirlo y el
+      // servidor usará el amount_bss del item (comportamiento previo).
+      const declaredNum = declaredAmount ? parseFloat(declaredAmount.replace(",", ".")) : NaN;
+      const declaredAmountBss = !Number.isNaN(declaredNum) && declaredNum > 0
+        ? Math.round(declaredNum * 100) / 100
+        : undefined;
+
       const res = await fetch("/api/cobranzas/pay/confirm", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -332,10 +356,26 @@ export default function PagarPage() {
           token,
           reference: transferRef,
           ...(originBank ? { bankCode: originBank } : {}),
+          ...(declaredAmountBss !== undefined ? { declaredAmountBss } : {}),
         }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Error");
+
+      // Caso especial: Mercantil confirmó la trx pero por monto distinto al
+      // adeudado. Server NO marca paid, devuelve detalles para que el UI
+      // muestre mensaje claro con CTA hacia WA cobranzas.
+      if (json.amount_mismatch) {
+        setAmountMismatchInfo({
+          mercantil_amount: Number(json.mercantil_amount),
+          expected_amount: Number(json.expected_amount_bss),
+          declared_amount: Number(json.declared_amount_bss),
+          message: json.message || "El monto difiere del adeudado",
+        });
+        setData((prev) => prev ? { ...prev, status: "conciliating" } : prev);
+        return;
+      }
+
       // Server returns auto_verified=true when Mercantil confirmed the transfer.
       // Map the UI status to "paid" on instant verification, else "conciliating".
       const newStatus: PaymentData["status"] = json.auto_verified ? "paid" : "conciliating";
@@ -388,6 +428,69 @@ export default function PagarPage() {
     return (
       <PageShell>
         <PaidConfirmation data={data} autoVerifiedMsg={autoVerifiedMsg} />
+      </PageShell>
+    );
+  }
+
+  // ---- Amount mismatch: la trx existe en Mercantil pero por monto distinto ----
+  // Tiene precedencia sobre el render genérico de conciliating porque ofrece
+  // info accionable (monto trx vs adeudado + CTA WhatsApp cobranzas).
+  if (amountMismatchInfo) {
+    const diff = amountMismatchInfo.expected_amount - amountMismatchInfo.mercantil_amount;
+    const diffAbs = Math.abs(diff);
+    const isShortage = diff > 0; // cliente pagó menos que el adeudado
+    const waMsg = encodeURIComponent(
+      `Hola, transferí Bs ${amountMismatchInfo.mercantil_amount.toFixed(2)} pero la deuda actualizada es Bs ${amountMismatchInfo.expected_amount.toFixed(2)}. Mi referencia: ${transferRef}`
+    );
+    return (
+      <PageShell>
+        <div className="max-w-md mx-auto text-center py-12">
+          <div className="w-16 h-16 rounded-full bg-amber-500/10 flex items-center justify-center mx-auto mb-4">
+            <AlertCircle className="w-8 h-8 text-amber-400" />
+          </div>
+          <h2 className="text-white text-xl font-semibold mb-2">El monto difiere del adeudado</h2>
+          <p className="text-gray-400 text-sm mb-5">
+            Detectamos tu transferencia en el banco, pero el monto no coincide con lo adeudado actualmente
+            (la tasa BCV pudo haber cambiado entre tu transferencia y hoy).
+          </p>
+
+          <div className="bg-white/[0.03] rounded-xl p-4 border border-amber-500/20 mb-4 text-left space-y-2">
+            <div className="flex justify-between text-sm">
+              <span className="text-gray-500">Transferiste</span>
+              <span className="text-white font-mono">Bs {amountMismatchInfo.mercantil_amount.toLocaleString("es-VE", { minimumFractionDigits: 2 })}</span>
+            </div>
+            <div className="flex justify-between text-sm">
+              <span className="text-gray-500">Adeudado actual</span>
+              <span className="text-white font-mono">Bs {amountMismatchInfo.expected_amount.toLocaleString("es-VE", { minimumFractionDigits: 2 })}</span>
+            </div>
+            <div className="border-t border-white/5 pt-2 flex justify-between text-sm">
+              <span className="text-amber-400 font-semibold">
+                {isShortage ? "Falta por pagar" : "Pagaste de más"}
+              </span>
+              <span className="text-amber-400 font-mono font-bold">
+                Bs {diffAbs.toLocaleString("es-VE", { minimumFractionDigits: 2 })}
+              </span>
+            </div>
+          </div>
+
+          {transferRef && (
+            <p className="text-gray-500 text-xs mb-4">
+              Tu referencia: <span className="font-mono">{transferRef}</span>
+            </p>
+          )}
+
+          <a
+            href={`https://wa.me/584248800723?text=${waMsg}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-2 px-5 py-3 rounded-xl bg-[#25D366] text-white text-sm font-semibold hover:bg-[#25D366]/90"
+          >
+            Contactar cobranzas por WhatsApp
+          </a>
+          <p className="text-gray-600 text-[11px] mt-3">
+            Nuestro equipo ya tiene tu caso registrado. Te contactaremos para regularizar la diferencia.
+          </p>
+        </div>
       </PageShell>
     );
   }
@@ -707,6 +810,8 @@ export default function PagarPage() {
             setTransferRef={setTransferRef}
             originBank={originBank}
             setOriginBank={setOriginBank}
+            declaredAmount={declaredAmount}
+            setDeclaredAmount={setDeclaredAmount}
             confirming={confirmingSent}
             onConfirm={handleConfirmTransfer}
             copied={copied}
@@ -878,6 +983,8 @@ function TransferDetails({
   setTransferRef,
   originBank,
   setOriginBank,
+  declaredAmount,
+  setDeclaredAmount,
   confirming,
   onConfirm,
   copied,
@@ -890,11 +997,17 @@ function TransferDetails({
   setTransferRef: (v: string) => void;
   originBank: string;
   setOriginBank: (v: string) => void;
+  declaredAmount: string;
+  setDeclaredAmount: (v: string) => void;
   confirming: boolean;
   onConfirm: () => void;
   copied: string | null;
   onCopy: (text: string, field: string) => void;
 }) {
+  // Detecta si el monto declarado difiere del adeudado para mostrar aviso
+  const declaredNum = parseFloat(declaredAmount.replace(",", "."));
+  const declaredIsValid = !Number.isNaN(declaredNum) && declaredNum > 0;
+  const declaredDiffers = declaredIsValid && Math.abs(declaredNum - amountBss) >= 0.01;
   const CopyBtn = ({ text, field }: { text: string; field: string }) => (
     <button
       onClick={() => onCopy(text, field)}
@@ -976,6 +1089,29 @@ function TransferDetails({
           placeholder="Número de referencia"
           className="w-full px-4 py-3 rounded-xl bg-white/[0.03] border border-white/10 text-white text-sm placeholder-gray-600 focus:border-[#F46800]/50 focus:outline-none"
         />
+        <div className="space-y-1">
+          <label className="text-gray-500 text-[11px] block">
+            Monto exacto en Bs que transferiste
+          </label>
+          <input
+            value={declaredAmount}
+            onChange={(e) => setDeclaredAmount(e.target.value)}
+            inputMode="decimal"
+            placeholder={amountBss.toFixed(2)}
+            className={`w-full px-4 py-3 rounded-xl bg-white/[0.03] border text-white text-sm placeholder-gray-600 focus:outline-none ${
+              declaredDiffers
+                ? "border-amber-400/50 focus:border-amber-400"
+                : "border-white/10 focus:border-[#F46800]/50"
+            }`}
+          />
+          {declaredDiffers && (
+            <p className="text-amber-400/90 text-[11px] leading-snug">
+              El monto difiere del adeudado actual ({amountBss.toFixed(2)} Bs).
+              Si transferiste con una tasa BCV anterior, déjalo así. Tu pago se
+              detectará y nuestro equipo te contactará para la diferencia.
+            </p>
+          )}
+        </div>
         <button
           onClick={onConfirm}
           disabled={confirming || !transferRef.trim()}
