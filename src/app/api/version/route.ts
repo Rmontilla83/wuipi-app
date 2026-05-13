@@ -42,6 +42,7 @@ export async function GET(request: NextRequest) {
 
   const { searchParams } = new URL(request.url);
   const testTransfer = searchParams.get("test-transfer") === "1";
+  const testTransferSdk = searchParams.get("test-transfer") === "sdk";
 
   const baseResponse = {
     marker: DEPLOY_MARKER,
@@ -60,8 +61,55 @@ export async function GET(request: NextRequest) {
     },
   };
 
-  if (!testTransfer) {
+  if (!testTransfer && !testTransferSdk) {
     return NextResponse.json(baseResponse);
+  }
+
+  // Modo SDK: usar la lib real (MercantilSDK + searchTransfers) con los mismos
+  // valores raw que /pay/confirm pasa. Si esto falla con HTTP 400 y el modo
+  // hardcoded da HTTP 200, sabemos que el SDK arma body distinto.
+  if (testTransferSdk) {
+    try {
+      const { MercantilSDK } = await import("@/lib/mercantil");
+      const sdk = new MercantilSDK();
+      const t0 = Date.now();
+      try {
+        const results = await sdk.searchTransfers({
+          account: "01050745651745103031",
+          issuerCustomerId: "16006905", // mismo input raw que llega de Supabase
+          trxDate: "2026-05-13",
+          issuerBankId: 105,
+          transactionType: 1,
+          paymentReference: "0025572651965", // referencia completa, SDK la trunca
+          amount: 106.81,
+        });
+        return NextResponse.json({
+          ...baseResponse,
+          test_transfer_sdk: {
+            duration_ms: Date.now() - t0,
+            results_count: results.length,
+            results,
+          },
+        });
+      } catch (err) {
+        const e = err as { message?: string; status?: number; details?: unknown };
+        return NextResponse.json({
+          ...baseResponse,
+          test_transfer_sdk: {
+            duration_ms: Date.now() - t0,
+            sdk_threw: true,
+            status: e.status,
+            message: e.message,
+            details: e.details,
+          },
+        });
+      }
+    } catch (err) {
+      return NextResponse.json({
+        ...baseResponse,
+        test_transfer_sdk_error: (err as Error).message,
+      });
+    }
   }
 
   // Build body de transfer-search idéntico al de mi script local (que devuelve HTTP 200).
