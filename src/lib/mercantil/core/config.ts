@@ -129,8 +129,12 @@ export function configFromEnv(): MercantilConfig {
   }
 
   return {
-    integratorId: env.MERCANTIL_INTEGRATOR_ID || '',
-    terminalId: env.MERCANTIL_TERMINAL_ID || '',
+    // Defaults sensatos cuando las env vars no estan seteadas. integratorId 31
+    // y terminalId "1" son los que Wuipi tiene asignados por Mercantil.
+    // Sin terminalId, transfer-search devuelve errorCode 43 ("Codigo de
+    // terminal en nulo"); confirmado en prod 2026-05-13.
+    integratorId: env.MERCANTIL_INTEGRATOR_ID || '31',
+    terminalId: env.MERCANTIL_TERMINAL_ID || '1',
     environment: (env.MERCANTIL_ENVIRONMENT as 'sandbox' | 'production') || 'sandbox',
     baseUrl: env.MERCANTIL_BASE_URL || undefined,
     webButtonBaseUrl: env.MERCANTIL_WEB_BUTTON_BASE_URL || undefined,
