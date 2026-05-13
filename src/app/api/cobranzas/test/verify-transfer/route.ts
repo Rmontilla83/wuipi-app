@@ -103,7 +103,8 @@ export async function POST(request: NextRequest) {
       merchantIdentify,
       clientIdentify: {
         ipAddress: "127.0.0.1",
-        browserAgent: "Mozilla/5.0 (WUIPI verify-transfer test)",
+        // Mercantil valida formato "Nombre Version" (errorCode 51 con Mozilla/5.0)
+        browserAgent: "Chrome 18.1.3",
         mobile: { manufacturer: "Samsung" },
       },
       transferSearchBy: {

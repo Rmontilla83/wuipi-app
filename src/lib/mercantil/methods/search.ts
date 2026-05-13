@@ -64,7 +64,8 @@ export async function searchTransfers(
     merchantIdentify: buildTransferSearchMerchantIdentify(config, creds.merchantId),
     clientIdentify: {
       ipAddress: '127.0.0.1',
-      browserAgent: 'Mozilla/5.0',
+      // Mercantil valida formato "Nombre Version" (errorCode 51 con Mozilla/5.0)
+      browserAgent: 'Chrome 18.1.3',
       mobile: { manufacturer: 'Samsung' },
     },
     transferSearchBy: {
