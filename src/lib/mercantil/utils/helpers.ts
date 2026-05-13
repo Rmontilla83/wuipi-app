@@ -57,6 +57,19 @@ export function transferReferenceLast8(reference: string | number): string {
   return digits.length > 8 ? digits.slice(-8) : digits;
 }
 
+/**
+ * Mercantil transfer-search exige `issuerCustomerId` con formato compacto
+ * `V17123456` (letra + dígitos, sin guiones, espacios ni puntos). Confirmado
+ * por soporte Mercantil 2026-05-13. Tolerante a entradas como `V-17.123.456`,
+ * `v17123456`, `17123456V`, etc.
+ */
+export function normalizeIssuerCustomerId(value: string): string {
+  if (!value) return '';
+  const letter = (value.match(/[A-Za-z]/)?.[0] || 'V').toUpperCase();
+  const digits = value.replace(/\D/g, '');
+  return letter + digits;
+}
+
 /** Validate Venezuelan cedula format */
 export function validateCedula(cedula: string, type: string): boolean {
   if (!['V', 'E', 'J', 'P'].includes(type.toUpperCase())) return false;

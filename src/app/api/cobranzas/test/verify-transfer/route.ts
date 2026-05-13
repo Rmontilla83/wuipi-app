@@ -34,6 +34,7 @@ import {
   getProductCredentials,
   encryptField,
   transferReferenceLast8,
+  normalizeIssuerCustomerId,
 } from "@/lib/mercantil";
 import { buildTransferSearchMerchantIdentify } from "@/lib/mercantil/methods/search";
 import { apiRequest, MercantilApiError } from "@/lib/mercantil/core/http";
@@ -91,17 +92,19 @@ export async function POST(request: NextRequest) {
       ? `${creds.baseUrl.replace(/\/$/, "")}/v1/payment/transfer-search`
       : resolved.endpoints.searchTransfersUrl;
 
-    // Aplicar los 3 fixes
+    // Aplicar los 4 fixes (2026-05-05 + 2026-05-13)
     const merchantIdentify = buildTransferSearchMerchantIdentify(config, creds.merchantId);
     const truncatedReference = transferReferenceLast8(body.paymentReference);
+    const normalizedIssuerCustomerId = normalizeIssuerCustomerId(body.issuerCustomerId);
     const encryptedAccount = encryptField(body.account, creds.secretKey);
-    const encryptedIssuerCustomerId = encryptField(body.issuerCustomerId, creds.secretKey);
+    const encryptedIssuerCustomerId = encryptField(normalizedIssuerCustomerId, creds.secretKey);
 
     const requestBody = {
       merchantIdentify,
       clientIdentify: {
         ipAddress: "127.0.0.1",
         browserAgent: "Mozilla/5.0 (WUIPI verify-transfer test)",
+        mobile: { manufacturer: "Samsung" },
       },
       transferSearchBy: {
         account: encryptedAccount,
@@ -124,11 +127,21 @@ export async function POST(request: NextRequest) {
         input: body.paymentReference,
         truncated_last_8: truncatedReference,
       },
+      fix_3_clientIdentify_mobile: {
+        added: true,
+        value: { manufacturer: "Samsung" },
+        reason: "Mercantil 2026-05-13: sin subnodo mobile el API responde 9999 por estructura",
+      },
+      fix_4_issuerCustomerId_format: {
+        input: body.issuerCustomerId,
+        normalized: normalizedIssuerCustomerId,
+        reason: "Mercantil 2026-05-13: formato compacto V17123456 (sin guiones/puntos)",
+      },
       encryption: {
         algorithm: "AES-128/ECB/PKCS5Padding",
         secret_key_tail: maskTail(creds.secretKey, 6),
         account_masked: maskTail(body.account, 4),
-        issuerCustomerId_masked: body.issuerCustomerId,
+        issuerCustomerId_masked: normalizedIssuerCustomerId,
       },
       endpoint: url,
       client_id: creds.clientId,
@@ -219,6 +232,8 @@ export async function GET() {
       notas: [
         "merchantId se override automaticamente con MERCANTIL_TRANSFER_SEARCH_PERSON_NUMBER (11269635 para Wuipi)",
         "paymentReference se trunca a los ultimos 8 digitos antes de mandar",
+        "clientIdentify incluye subnodo mobile.manufacturer obligatorio (fix Mercantil 2026-05-13)",
+        "issuerCustomerId se normaliza a formato compacto V17123456 antes de cifrar (fix Mercantil 2026-05-13)",
         "account y issuerCustomerId se cifran con AES-128/ECB usando la Clave B (productos 6-9)",
       ],
     });

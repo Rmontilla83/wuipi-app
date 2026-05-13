@@ -14,7 +14,7 @@ import type {
 import { getProductCredentials, getMerchantIdentify } from '../core/config';
 import { encryptField } from '../core/crypto';
 import { apiRequest } from '../core/http';
-import { transferReferenceLast8 } from '../utils/helpers';
+import { transferReferenceLast8, normalizeIssuerCustomerId } from '../utils/helpers';
 
 /**
  * Builds the merchantIdentify block for transfer-search with the special
@@ -44,6 +44,10 @@ export function buildTransferSearchMerchantIdentify(
  * Quirks fixed por Mercantil 2026-05-05:
  *   1. merchantId DEBE ser MERCANTIL_TRANSFER_SEARCH_PERSON_NUMBER (11269635), no 217546
  *   2. paymentReference DEBE ser solo los ultimos 8 digitos de la referencia bancaria
+ *
+ * Quirks fixed por Mercantil 2026-05-13 (resolución error 9999):
+ *   3. clientIdentify DEBE incluir subnodo `mobile`; sin él el API responde 9999 por estructura
+ *   4. issuerCustomerId DEBE ir en formato compacto `V17123456` (sin guiones ni puntos)
  */
 export async function searchTransfers(
   params: TransferSearchParams,
@@ -61,10 +65,11 @@ export async function searchTransfers(
     clientIdentify: {
       ipAddress: '127.0.0.1',
       browserAgent: 'Mozilla/5.0',
+      mobile: { manufacturer: 'Samsung' },
     },
     transferSearchBy: {
       account: encryptField(params.account, creds.secretKey),
-      issuerCustomerId: encryptField(params.issuerCustomerId, creds.secretKey),
+      issuerCustomerId: encryptField(normalizeIssuerCustomerId(params.issuerCustomerId), creds.secretKey),
       trxDate: params.trxDate,
       issuerBankId: params.issuerBankId,
       transactionType: params.transactionType,
