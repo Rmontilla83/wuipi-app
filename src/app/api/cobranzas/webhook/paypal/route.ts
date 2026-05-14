@@ -6,7 +6,7 @@ export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from "next/server";
 import { markItemPaid, getItemsByToken } from "@/lib/dal/collection-campaigns";
-import { capturePayPalOrder, verifyPayPalWebhook } from "@/lib/integrations/paypal";
+import { capturePayPalOrder, verifyPayPalWebhook, PayPalCaptureError } from "@/lib/integrations/paypal";
 import { sendPaymentConfirmationWhatsApp } from "@/lib/notifications/whatsapp";
 import { sendPaymentConfirmationEmail } from "@/lib/notifications/email";
 import { logGatewayEvent } from "@/lib/dal/payment-gateway-logs";
@@ -221,13 +221,57 @@ export async function GET(request: NextRequest) {
     return safeRedirect(`/pagar/${wpy_token}?status=failed`);
   } catch (err) {
     console.error("[PayPal Return] EXCEPTION:", serializeError(err));
+
+    // Si PayPal nos devolvió un error tipado (INSTRUMENT_DECLINED,
+    // INSUFFICIENT_FUNDS, PAYER_CANNOT_PAY, etc.), propagamos el issue al
+    // redirect para que la UI muestre un mensaje específico al cliente.
+    let reasonSlug: string | null = null;
+    let errorCode: string | null = null;
+    let errorMessage: string = err instanceof Error ? err.message : "unknown exception";
+    if (err instanceof PayPalCaptureError) {
+      errorCode = err.issue;
+      errorMessage = err.description || err.message;
+      // Mapeo issue PayPal → slug URL (lowercase, snake_case, seguro de pasar en URL)
+      reasonSlug = (err.issue || "gateway_error").toLowerCase().replace(/[^a-z0-9]+/g, "_").slice(0, 50);
+    }
+
     logGatewayEvent({
       paymentToken: collectionToken,
       gateway: "paypal", gatewayProduct: "order_capture",
       eventType: "error", outcome: "error",
-      responseMessage: err instanceof Error ? err.message : "unknown exception",
+      responseCode: errorCode,
+      responseMessage: errorMessage,
+      errorCategory: reasonSlug === "instrument_declined" ? "invalid_credentials" : "unknown",
     }).catch(() => {});
-    return safeRedirect(`/pagar/${collectionToken || "error"}?status=failed`);
+
+    // Auto-ticket en kanban: PayPal rechazó el pago. Failure type = gateway_error
+    // o invalid_credentials según el issue. El equipo de cobranzas verá el caso.
+    if (collectionToken) {
+      try {
+        const item = await getItemsByToken(collectionToken);
+        if (item) {
+          const failureType: "invalid_credentials" | "insufficient_funds" | "gateway_error" =
+            reasonSlug === "instrument_declined" ? "invalid_credentials" :
+            reasonSlug === "insufficient_funds" ? "insufficient_funds" :
+            "gateway_error";
+          createPaymentFailureCase({
+            collectionItemId: item.id,
+            gateway: "paypal",
+            gatewayProduct: "order_capture",
+            failureType,
+            errorCode,
+            errorMessage,
+          }).catch((e) => console.error("[PayPal Return] createPaymentFailureCase fallo:", e));
+        }
+      } catch (e) {
+        console.error("[PayPal Return] lookup item para caso fallo:", e);
+      }
+    }
+
+    const params = new URLSearchParams({ status: "failed" });
+    if (reasonSlug) params.set("reason", reasonSlug);
+    if (errorCode) params.set("gateway_code", errorCode);
+    return safeRedirect(`/pagar/${collectionToken || "error"}?${params.toString()}`);
   }
 }
 

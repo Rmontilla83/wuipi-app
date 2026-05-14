@@ -159,6 +159,35 @@ export async function verifyPayPalWebhook(params: {
   return { verified: false, reason: `verification_status=${data.verification_status}` };
 }
 
+/**
+ * Excepción tipada para errores de capture de PayPal. Permite al caller
+ * extraer el `issue` (INSTRUMENT_DECLINED, INSUFFICIENT_FUNDS, etc.) sin
+ * tener que parsear el mensaje string.
+ */
+export class PayPalCaptureError extends Error {
+  status: number;
+  issue: string | null;
+  description: string | null;
+  debugId: string | null;
+  rawBody: unknown;
+
+  constructor(opts: {
+    status: number;
+    issue: string | null;
+    description: string | null;
+    debugId: string | null;
+    rawBody: unknown;
+  }) {
+    super(`PayPal capture error ${opts.status}: ${opts.issue || "unknown"} — ${opts.description || ""}`);
+    this.name = "PayPalCaptureError";
+    this.status = opts.status;
+    this.issue = opts.issue;
+    this.description = opts.description;
+    this.debugId = opts.debugId;
+    this.rawBody = opts.rawBody;
+  }
+}
+
 export async function capturePayPalOrder(orderId: string): Promise<{
   status: string;
   captureId: string;
@@ -180,7 +209,15 @@ export async function capturePayPalOrder(orderId: string): Promise<{
   console.log(`[PayPal] Capture response status=${res.status}:`, JSON.stringify(data));
 
   if (!res.ok) {
-    throw new Error(`PayPal capture error ${res.status}: ${JSON.stringify(data)}`);
+    // PayPal returns: { name, message, details: [{ issue, description }], debug_id, ... }
+    const details = Array.isArray(data?.details) ? data.details[0] : null;
+    throw new PayPalCaptureError({
+      status: res.status,
+      issue: details?.issue || data?.name || null,
+      description: details?.description || data?.message || null,
+      debugId: data?.debug_id || null,
+      rawBody: data,
+    });
   }
 
   const capture = data.purchase_units?.[0]?.payments?.captures?.[0];

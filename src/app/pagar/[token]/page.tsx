@@ -725,6 +725,15 @@ export default function PagarPage() {
           </div>
         </div>
 
+        {/* Banner contextual cuando el cliente vuelve de un gateway que rechazó
+            el pago (PayPal INSTRUMENT_DECLINED, etc). Le explicamos el motivo y
+            le sugerimos probar otro método sin sacarlo del recibo. */}
+        <GatewayFailureBanner
+          status={callbackStatus}
+          reason={searchParams.get("reason")}
+          gatewayCode={searchParams.get("gateway_code")}
+        />
+
         {/* Payment methods */}
         <h3 className="text-white text-sm font-semibold mb-3">Selecciona tu método de pago</h3>
 
@@ -1368,5 +1377,91 @@ function Clock({ className }: { className?: string }) {
       <circle cx="12" cy="12" r="10" />
       <polyline points="12 6 12 12 16 14" />
     </svg>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Banner contextual cuando el cliente regresa al recibo después de que un
+// gateway externo (PayPal, Mercantil) rechazó el pago. Le mostramos el
+// motivo en lenguaje claro y le sugerimos probar otro método sin tener que
+// salirse del flujo.
+// ──────────────────────────────────────────────────────────────────────────
+function GatewayFailureBanner({
+  status,
+  reason,
+  gatewayCode,
+}: {
+  status: string | null;
+  reason: string | null;
+  gatewayCode: string | null;
+}) {
+  if (status !== "failed") return null;
+
+  // Mensajes user-friendly por reason slug. El slug viene del handler del
+  // gateway (ej. /api/cobranzas/webhook/paypal lo arma desde el `issue` de
+  // PayPal: INSTRUMENT_DECLINED → "instrument_declined").
+  const messages: Record<string, { title: string; body: string }> = {
+    instrument_declined: {
+      title: "PayPal rechazó tu método de pago",
+      body:
+        "PayPal no pudo procesar el cobro con la tarjeta o cuenta que usaste. " +
+        "Esto suele pasar cuando el banco emisor bloquea el pago internacional, " +
+        "la tarjeta no tiene fondos suficientes, o tu cuenta PayPal tiene alguna " +
+        "restricción. Probá con otro método más abajo (transferencia, débito " +
+        "inmediato o tarjeta vía Stripe).",
+    },
+    insufficient_funds: {
+      title: "Fondos insuficientes",
+      body:
+        "Tu cuenta PayPal o tarjeta no tiene saldo suficiente. Probá con otro " +
+        "método de pago.",
+    },
+    payer_cannot_pay: {
+      title: "PayPal no acepta este pago",
+      body:
+        "Tu cuenta PayPal no puede completar la transacción. Probá con otra " +
+        "cuenta, o usá tarjeta directa vía Stripe / transferencia bancaria.",
+    },
+    transaction_refused: {
+      title: "PayPal rechazó la transacción",
+      body:
+        "Por razones de seguridad, PayPal no procesó el pago. Probá con otro " +
+        "método de pago.",
+    },
+  };
+
+  const reasonKey = reason || "";
+  const msg = messages[reasonKey] || {
+    title: "No pudimos procesar el pago",
+    body:
+      "El método de pago que usaste rechazó la transacción. Probá con otro " +
+      "método de los que aparecen abajo, o contactanos por WhatsApp si necesitás ayuda.",
+  };
+
+  return (
+    <div className="mb-4 rounded-xl border border-red-500/30 bg-red-500/5 p-4">
+      <div className="flex items-start gap-3">
+        <div className="w-9 h-9 rounded-lg bg-red-500/15 border border-red-500/30 flex items-center justify-center shrink-0">
+          <AlertCircle className="w-5 h-5 text-red-400" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-red-300 text-sm font-semibold mb-1">{msg.title}</p>
+          <p className="text-gray-400 text-xs leading-relaxed">{msg.body}</p>
+          {gatewayCode && (
+            <p className="text-gray-600 text-[10px] mt-2 font-mono">
+              Código: {gatewayCode}
+            </p>
+          )}
+          <a
+            href="https://wa.me/584248800723"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 mt-2 text-[#25D366] text-xs font-medium hover:underline"
+          >
+            ¿Necesitas ayuda? Escríbenos por WhatsApp →
+          </a>
+        </div>
+      </div>
+    </div>
   );
 }
