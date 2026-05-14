@@ -321,11 +321,8 @@ export async function POST(request: NextRequest) {
     // Sprint 4 — sync Odoo via waitUntil (no bloquea respuesta).
     try {
       const { waitUntil } = await import("@vercel/functions");
-      const { triggerOdooSyncOrEnqueue } = await import("@/lib/integrations/odoo-sync-trigger");
-      const itemMeta = (item.metadata as Record<string, unknown> | null) || null;
-      const odooInvoiceIds = Array.isArray(itemMeta?.odoo_invoice_ids)
-        ? (itemMeta!.odoo_invoice_ids as unknown[]).map(Number).filter(n => Number.isInteger(n) && n > 0)
-        : null;
+      const { triggerOdooSyncOrEnqueue, extractInvoiceSyncFields } = await import("@/lib/integrations/odoo-sync-trigger");
+      const { odooInvoiceIds, invoiceAmountsUsd } = extractInvoiceSyncFields(item.metadata);
       waitUntil(
         triggerOdooSyncOrEnqueue({
           collectionItemId: item.id,
@@ -337,6 +334,7 @@ export async function POST(request: NextRequest) {
           amountUsd: Number(item.amount_usd),
           amountVes: typeof item.amount_bss === "number" ? item.amount_bss : null,
           odooInvoiceIds,
+          invoiceAmountsUsd,
         }).catch((err) => console.error("[PayConfirm] Sync Odoo fallo:", err))
       );
     } catch (err) {

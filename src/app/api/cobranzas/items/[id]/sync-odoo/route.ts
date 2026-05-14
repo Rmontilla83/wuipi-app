@@ -19,7 +19,7 @@ export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { requirePermission } from "@/lib/auth/check-permission";
 import { createAdminSupabase } from "@/lib/supabase/server";
-import { triggerOdooSyncOrEnqueue } from "@/lib/integrations/odoo-sync-trigger";
+import { triggerOdooSyncOrEnqueue, extractInvoiceSyncFields } from "@/lib/integrations/odoo-sync-trigger";
 
 export async function POST(
   request: NextRequest,
@@ -75,11 +75,9 @@ export async function POST(
     }
   }
 
-  // 3. Extraer odoo_invoice_ids de metadata si están
+  // 3. Extraer odoo_invoice_ids + odoo_invoice_amounts_usd de metadata
   const itemMeta = (item.metadata as Record<string, unknown> | null) || null;
-  const odooInvoiceIds = Array.isArray(itemMeta?.odoo_invoice_ids)
-    ? (itemMeta!.odoo_invoice_ids as unknown[]).map(Number).filter((n) => Number.isInteger(n) && n > 0)
-    : null;
+  const { odooInvoiceIds, invoiceAmountsUsd } = extractInvoiceSyncFields(itemMeta);
 
   // 4. Disparar el trigger (sync sincrónico o encolar si falla)
   const t0 = Date.now();
@@ -95,6 +93,7 @@ export async function POST(
       amountVes: typeof item.amount_bss === "number" ? item.amount_bss : Number(item.amount_bss) || null,
       paymentDate: item.paid_at || undefined,
       odooInvoiceIds,
+      invoiceAmountsUsd,
     });
 
     // Audit en metadata para trazabilidad

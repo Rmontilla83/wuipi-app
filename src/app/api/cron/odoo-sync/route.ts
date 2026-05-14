@@ -15,12 +15,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireCronAuth } from "@/lib/auth/cron-guard";
 import { createAdminSupabase } from "@/lib/supabase/server";
-import { syncOdooForCollectionItem } from "@/lib/integrations/odoo";
+import {
+  syncOdooForCollectionItem,
+  isMultiCurrencyMethod,
+  computeProratedAmounts,
+} from "@/lib/integrations/odoo";
+import { extractInvoiceSyncFields } from "@/lib/integrations/odoo-sync-trigger";
 import {
   getReadyToProcess,
   markQueueItemDone,
   markQueueItemFailed,
-  markQueueItemProgress,
   getUnnotifiedManualReviewItems,
   markQueueItemNotified,
   type OdooSyncQueueItem,
@@ -77,51 +81,105 @@ export async function GET(request: NextRequest) {
         continue;
       }
 
-      // Validar campos minimos
-      if (!item.odoo_invoice_id) {
-        await markQueueItemFailed(item.id, {
-          error: "odoo_invoice_id es null — no se puede sync sin saber a que factura aplicar",
-        });
-        stats.items_failed++;
-        continue;
-      }
       if (!item.payment_token) {
         await markQueueItemFailed(item.id, { error: "payment_token requerido" });
         stats.items_failed++;
         continue;
       }
 
-      // Ejecutar el sync (con idempotencia paso a paso)
+      // Resolver el universo de facturas a procesar para este item:
+      // 1) Leer collection_items.metadata para extraer odoo_invoice_ids + amounts
+      //    (formato nuevo desde 2026-05-14 que cubre multi-factura).
+      // 2) Si no hay metadata válida → fallback al item.odoo_invoice_id legacy
+      //    (UNA factura). Mantiene compat con filas viejas en cola.
+      let invoiceIds: number[] = [];
+      let invoiceAmountsUsd: Record<number, number> | null = null;
       try {
-        const result = await syncOdooForCollectionItem({
-          invoiceId: item.odoo_invoice_id,
-          paymentMethod: item.payment_method,
-          paymentReference: item.payment_reference || "",
-          paymentToken: item.payment_token,
-          paymentDate: item.payment_date || undefined,
-          postInvoiceDone: item.post_invoice_done,
-          registerPaymentDone: item.register_payment_done,
-          amountUsd: item.amount_usd ?? null,  // Stripe/PayPal: factura VES + payment USD
-        });
-
-        if (result.ok) {
-          await markQueueItemDone(item.id);
-          stats.items_done++;
-          console.log(`[OdooSync Cron] ✅ ${item.id} (invoice ${item.odoo_invoice_id}) done`);
-        } else {
-          await markQueueItemFailed(item.id, {
-            error: result.error || "unknown",
-            post_invoice_done: result.post_invoice_done,
-            register_payment_done: result.register_payment_done,
-          });
-          stats.items_failed++;
-          console.warn(`[OdooSync Cron] ❌ ${item.id} (invoice ${item.odoo_invoice_id}) failed: ${result.error}`);
+        const { data: ci } = await supabase
+          .from("collection_items")
+          .select("metadata")
+          .eq("id", item.collection_item_id)
+          .single();
+        const fields = extractInvoiceSyncFields(ci?.metadata);
+        if (fields.odooInvoiceIds && fields.odooInvoiceIds.length > 0) {
+          invoiceIds = fields.odooInvoiceIds;
+          invoiceAmountsUsd = fields.invoiceAmountsUsd;
         }
       } catch (err) {
-        const errMsg = err instanceof Error ? err.message : String(err);
-        await markQueueItemFailed(item.id, { error: "exception: " + errMsg });
+        console.warn(`[OdooSync Cron] Failed reading collection_items ${item.collection_item_id}:`, err);
+      }
+      if (invoiceIds.length === 0) {
+        // Fallback legacy: una sola factura desde la fila de la cola
+        if (item.odoo_invoice_id) {
+          invoiceIds = [item.odoo_invoice_id];
+        } else {
+          await markQueueItemFailed(item.id, {
+            error: "Sin invoiceIds — ni metadata.odoo_invoice_ids ni queue.odoo_invoice_id",
+          });
+          stats.items_failed++;
+          continue;
+        }
+      }
+      if (invoiceIds.length > 1 && !invoiceAmountsUsd && isMultiCurrencyMethod(item.payment_method)) {
+        console.warn(
+          `[OdooSync Cron] Item ${item.collection_item_id} multi-moneda con ${invoiceIds.length} facturas ` +
+          `SIN invoiceAmountsUsd → split equitativo. Considerá inspeccionar el item legacy.`
+        );
+      }
+
+      // Calcular prorrateo (si aplica) — mismo criterio que el trigger.
+      const isMultiCur = isMultiCurrencyMethod(item.payment_method);
+      const totalAmountUsd = item.amount_usd ?? null;
+      const prorated: Record<number, number> = (isMultiCur && typeof totalAmountUsd === "number" && totalAmountUsd > 0)
+        ? computeProratedAmounts(invoiceIds, invoiceAmountsUsd, totalAmountUsd)
+        : {};
+
+      // Procesar TODAS las facturas. La idempotencia por factura está en
+      // syncOdooForCollectionItem (pre-check del state). Si ya está posted+paid,
+      // retorna already_synced=true sin tocar nada.
+      // Para los flags post_invoice_done/register_payment_done de la cola
+      // NO los pasamos en multi-factura (eran un atajo cuando había 1 sola).
+      // El pre-check del sync los infiere desde el state real de cada factura.
+      const passQueueFlags = invoiceIds.length === 1;
+      const failures: Array<{ invoiceId: number; error: string }> = [];
+      let allOk = true;
+
+      for (const invoiceId of invoiceIds) {
+        try {
+          const amountUsdForInvoice = isMultiCur ? prorated[invoiceId] : undefined;
+          const result = await syncOdooForCollectionItem({
+            invoiceId,
+            paymentMethod: item.payment_method,
+            paymentReference: item.payment_reference || "",
+            paymentToken: item.payment_token,
+            paymentDate: item.payment_date || undefined,
+            postInvoiceDone: passQueueFlags ? item.post_invoice_done : undefined,
+            registerPaymentDone: passQueueFlags ? item.register_payment_done : undefined,
+            amountUsd: amountUsdForInvoice,
+          });
+          if (result.ok) {
+            console.log(`[OdooSync Cron] ✅ item=${item.id} invoice=${invoiceId} sync OK${result.already_synced ? " (already_synced)" : ""}`);
+          } else {
+            allOk = false;
+            failures.push({ invoiceId, error: result.error || "unknown" });
+            console.warn(`[OdooSync Cron] ❌ item=${item.id} invoice=${invoiceId} failed: ${result.error}`);
+          }
+        } catch (err) {
+          allOk = false;
+          const errMsg = err instanceof Error ? err.message : String(err);
+          failures.push({ invoiceId, error: `exception: ${errMsg}` });
+          console.error(`[OdooSync Cron] ❌ item=${item.id} invoice=${invoiceId} exception:`, err);
+        }
+      }
+
+      if (allOk) {
+        await markQueueItemDone(item.id);
+        stats.items_done++;
+      } else {
+        await markQueueItemFailed(item.id, {
+          error: `${failures.length}/${invoiceIds.length} fallaron: ${failures.map(f => `inv${f.invoiceId}=${f.error}`).join("; ").slice(0, 1500)}`,
+        });
         stats.items_failed++;
-        console.error(`[OdooSync Cron] ❌ ${item.id} exception:`, err);
       }
     }
   }

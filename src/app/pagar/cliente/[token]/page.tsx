@@ -210,6 +210,11 @@ export default function ClientPaymentPage() {
                 <><CreditCard size={20} /> {data.invoices.length > 1 ? `Pagar todo (${fmtUsd(data.net_due)})` : `Pagar ${fmtUsd(data.net_due)}`}</>
               )}
             </button>
+            {data.invoices.length > 1 && (
+              <p className="text-center text-gray-500 text-[11px] -mt-3">
+                Vas a pagar {data.invoices.length} facturas en una sola transacción
+              </p>
+            )}
             <p className="text-center text-gray-600 text-[10px]">Pago seguro — Debito inmediato, transferencia o tarjeta</p>
           </>
         )}

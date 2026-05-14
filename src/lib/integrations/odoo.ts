@@ -1865,6 +1865,44 @@ export async function getSubscriptionByName(name: string): Promise<{
 }
 
 /**
+ * Fallback usado cuando una factura draft NO trae `invoice_origin` (caso real:
+ * facturas creadas manualmente en Odoo o por flujos prorrateados que no
+ * heredan el origin de la suscripción).
+ *
+ * Devuelve la única suscripción ACTIVA del partner si hay UNA sola con
+ * `subscription_state=3_progress` (en curso) y `next_invoice_date` populado.
+ * Si hay 0 o >1, devuelve null (mantener el fallo del sync para no asumir mal).
+ */
+export async function findActiveSubscriptionForPartner(partnerId: number): Promise<{
+  id: number;
+  name: string;
+  next_invoice_date: string | false;
+} | null> {
+  const list = await searchRead("sale.order",
+    [
+      ["partner_id", "=", partnerId],
+      ["is_subscription", "=", true],
+      ["subscription_state", "=", "3_progress"],
+      ["state", "=", "sale"],
+    ],
+    {
+      fields: ["id", "name", "next_invoice_date"],
+      limit: 5,
+    }
+  );
+  // Solo confiamos cuando es UNÍVOCA. Si hay varias, no podemos elegir bien.
+  const withDate = list.filter((s: { next_invoice_date: string | false }) =>
+    typeof s.next_invoice_date === "string" && s.next_invoice_date
+  );
+  if (withDate.length !== 1) return null;
+  return {
+    id: withDate[0].id,
+    name: withDate[0].name,
+    next_invoice_date: withDate[0].next_invoice_date,
+  };
+}
+
+/**
  * Calcula el campo `month_billed` (texto del mes en espanol) que Odoo
  * espera en facturas con `custom_month_billed=true`.
  *
@@ -2108,21 +2146,49 @@ export async function previewInvoicePosting(
     total_ves: round2(invoice.amount_total * rate.bsPerUsd),
   };
 
-  // Resolver month_billed desde la suscripcion origen
+  // Resolver month_billed desde la suscripcion origen.
+  // Estrategia (en orden):
+  //  1) invoice.invoice_origin → getSubscriptionByName (caso normal)
+  //  2) Fallback: si origin viene vacío y el partner tiene UNA SOLA suscripción
+  //     activa (state=sale + subscription_state=3_progress), usar esa.
+  //     Cubre facturas creadas manualmente o prorrateadas sin origin.
+  //     Si hay varias activas, no asumimos — preferimos fallar a equivocarnos.
   let subscription: PreviewResult["subscription"] = null;
   let month_billed: string | null = null;
+  let resolvedVia: "origin" | "partner_fallback" | null = null;
+
   if (typeof invoice.invoice_origin === "string" && invoice.invoice_origin) {
     const sub = await getSubscriptionByName(invoice.invoice_origin);
     if (sub) {
       subscription = { id: sub.id, name: sub.name, next_invoice_date: sub.next_invoice_date };
       if (typeof sub.next_invoice_date === "string" && sub.next_invoice_date) {
         month_billed = computeMonthBilled(sub.next_invoice_date) || null;
+        if (month_billed) resolvedVia = "origin";
       }
     }
   }
+
+  if (!month_billed) {
+    const partnerId = invoice.partner_id?.[0];
+    if (partnerId) {
+      const fallbackSub = await findActiveSubscriptionForPartner(partnerId);
+      if (fallbackSub && typeof fallbackSub.next_invoice_date === "string" && fallbackSub.next_invoice_date) {
+        subscription = { id: fallbackSub.id, name: fallbackSub.name, next_invoice_date: fallbackSub.next_invoice_date };
+        month_billed = computeMonthBilled(fallbackSub.next_invoice_date) || null;
+        if (month_billed) resolvedVia = "partner_fallback";
+        // No empujamos warning acá — `ok` exige warnings.length===0. La traza
+        // del fallback va por console.warn más abajo + el campo `subscription`
+        // queda populado para que el caller pueda inspeccionarlo.
+      }
+    }
+  }
+
   validations.month_billed_resolved = !!month_billed;
   if (!month_billed) {
     warnings.push("No se pudo resolver month_billed desde la suscripcion origen — sin esto el action_post puede quedarse silenciosamente en draft");
+  } else if (resolvedVia === "partner_fallback") {
+    // Log para que en runtime quede traza de cuándo se está usando el fallback.
+    console.warn(`[OdooSync] month_billed=${month_billed} resuelto via fallback partner para invoice ${invoiceId}`);
   }
 
   const ok = validations.invoice_exists && validations.invoice_is_draft &&
@@ -2357,6 +2423,87 @@ export const PAYMENT_METHOD_MAPPING: Record<string, PaymentMethodMapping> = {
     description: "PayPal USD → BNK8 línea PayPal (factura VES)",
   },
 };
+
+/**
+ * Devuelve true si el método tiene `paymentCurrencyId !== invoiceCurrencyId`,
+ * es decir el `account.payment` se crea en moneda distinta a la de la factura
+ * (ej. Stripe/PayPal: factura VES + payment USD). Para estos métodos el monto
+ * del payment NO puede derivarse de `invoice.amount_total` (que está en VES);
+ * hay que pasarle el `amountUsd` explícito al sync.
+ *
+ * Importancia para multi-factura: cuando un cliente paga N facturas con un solo
+ * cobro Stripe/PayPal, el monto total cobrado debe PRORRATEARSE entre las N
+ * facturas. Para los métodos misma-moneda esto no aplica — cada factura recibe
+ * su `amount_total` exacto.
+ */
+export function isMultiCurrencyMethod(paymentMethod: string): boolean {
+  const mapping = PAYMENT_METHOD_MAPPING[paymentMethod];
+  if (!mapping) return false;
+  return mapping.paymentCurrencyId !== mapping.invoiceCurrencyId;
+}
+
+/**
+ * Reparte un monto total cobrado en USD entre N facturas, proporcional al
+ * `amount_total` USD de cada factura. Garantiza que la suma de los
+ * prorrateados === totalAmountUsd EXACTO (el último item absorbe el delta de
+ * redondeo a 2 decimales).
+ *
+ * Casos:
+ *  - 1 factura → devuelve { id: totalAmountUsd } (idempotente con singleton).
+ *  - N facturas con `invoiceAmountsUsd` válidos → prorrateo proporcional.
+ *  - N facturas pero `invoiceAmountsUsd` vacío/incompleto → split equitativo
+ *    `totalAmountUsd / N` (fallback defensivo; loguea warning aparte).
+ *
+ * NO lanza — el caller debe verificar que `invoiceIds.length > 0` antes.
+ */
+export function computeProratedAmounts(
+  invoiceIds: number[],
+  invoiceAmountsUsd: Record<number, number> | null | undefined,
+  totalAmountUsd: number,
+): Record<number, number> {
+  if (invoiceIds.length === 0) return {};
+  if (invoiceIds.length === 1) {
+    return { [invoiceIds[0]]: round2(totalAmountUsd) };
+  }
+
+  // Reunir los amounts conocidos. Sin map o sin todos los amounts → split equitativo.
+  const amounts = invoiceAmountsUsd || {};
+  const knownAmounts = invoiceIds.map((id) => amounts[id]);
+  const allKnown = knownAmounts.every((v) => typeof v === "number" && v > 0);
+  const totalKnown = knownAmounts.reduce((s, v) => s + (typeof v === "number" ? v : 0), 0);
+
+  const result: Record<number, number> = {};
+  if (!allKnown || totalKnown <= 0) {
+    // Fallback equitativo: divide parejo entre todas. Último absorbe delta.
+    const equalShare = round2(totalAmountUsd / invoiceIds.length);
+    let acc = 0;
+    for (let i = 0; i < invoiceIds.length; i++) {
+      const id = invoiceIds[i];
+      if (i === invoiceIds.length - 1) {
+        result[id] = round2(totalAmountUsd - acc);
+      } else {
+        result[id] = equalShare;
+        acc += equalShare;
+      }
+    }
+    return result;
+  }
+
+  // Prorrateo proporcional al amount conocido de cada factura.
+  let acc = 0;
+  for (let i = 0; i < invoiceIds.length; i++) {
+    const id = invoiceIds[i];
+    if (i === invoiceIds.length - 1) {
+      // Último item absorbe el delta para garantizar suma exacta.
+      result[id] = round2(totalAmountUsd - acc);
+    } else {
+      const share = round2((amounts[id] / totalKnown) * totalAmountUsd);
+      result[id] = share;
+      acc += share;
+    }
+  }
+  return result;
+}
 
 export interface PaymentRegisterResult {
   ok: boolean;

@@ -59,15 +59,35 @@ export function transferReferenceLast8(reference: string | number): string {
 
 /**
  * Mercantil transfer-search exige `issuerCustomerId` con formato compacto
- * `V17123456` (letra + dígitos, sin guiones, espacios ni puntos). Confirmado
- * por soporte Mercantil 2026-05-13. Tolerante a entradas como `V-17.123.456`,
- * `v17123456`, `17123456V`, etc.
+ * `<LETRA><DÍGITOS>` (ej: V17123456, J411567710, G20009990991, E12345678,
+ * P12345678). Confirmado por soporte Mercantil 2026-05-13 + 2026-05-14:
+ * "el valor del atributo issuerCustomerId no será estático en V12345678,
+ * sino que podrá variar dependiendo del tipo de documento del emisor
+ * (J si es jurídico, G si es gubernamental, etc.)".
+ *
+ * Tolerante a `V-17.123.456`, `v 17 123 456`, etc. — la letra debe venir
+ * al inicio. Si no hay letra prefijo, lanza error: el viejo default a 'V'
+ * causaba que clientes J/G/E/P silenciosamente devolvieran 99999/vacío
+ * porque Mercantil no encontraba match.
  */
 export function normalizeIssuerCustomerId(value: string): string {
-  if (!value) return '';
-  const letter = (value.match(/[A-Za-z]/)?.[0] || 'V').toUpperCase();
-  const digits = value.replace(/\D/g, '');
-  return letter + digits;
+  const trimmed = (value ?? '').trim();
+  if (!trimmed) {
+    throw new Error('issuerCustomerId vacío: Mercantil exige V/J/G/E/P + dígitos');
+  }
+  const letterAtStart = trimmed.match(/^[VEJGPvejgp]/)?.[0]?.toUpperCase();
+  if (!letterAtStart) {
+    throw new Error(
+      `issuerCustomerId "${value}" sin prefijo válido (V/J/G/E/P al inicio). ` +
+      `Mercantil exige el tipo de documento del emisor — el viejo default 'V' ` +
+      `hacía que jurídicos/gobierno/extranjeros nunca matchearan (99999 silente).`
+    );
+  }
+  const digits = trimmed.replace(/\D/g, '');
+  if (!digits) {
+    throw new Error(`issuerCustomerId "${value}" sin dígitos numéricos`);
+  }
+  return letterAtStart + digits;
 }
 
 /** Validate Venezuelan cedula format */

@@ -5,6 +5,7 @@ import { isOdooConfigured, searchRead, read } from "@/lib/integrations/odoo";
 import { createAdminSupabase } from "@/lib/supabase/server";
 import { generateCollectionToken } from "@/lib/dal/collection-campaigns";
 import { checkRateLimit, getClientIP } from "@/lib/utils/rate-limit";
+import { normalizeOdooVatToCedula } from "@/lib/utils/cedula";
 
 export const dynamic = "force-dynamic";
 
@@ -33,9 +34,15 @@ export async function POST(request: NextRequest) {
     const partnerId = verifyClientPaymentToken(token);
     if (!partnerId) return apiError("Token no valido", 400);
 
-    // Get client info
-    const [partner] = await read("res.partner", [partnerId], ["name", "email", "vat", "mobile", "credit"]);
+    // Get client info — `is_company` se necesita para inferir la letra del
+    // documento (J vs V) cuando partner.vat viene sin prefijo desde Odoo.
+    const [partner] = await read("res.partner", [partnerId], ["name", "email", "vat", "mobile", "credit", "is_company"]);
     if (!partner) return apiError("Cliente no encontrado", 404);
+
+    // Normaliza la cédula/RIF al formato exacto que Mercantil exige en
+    // transfer-search (V/J/G/E/P + dígitos). Sin esto los clientes jurídicos
+    // y extranjeros nunca matcheaban porque el helper caía al default 'V'.
+    const cedulaRif = normalizeOdooVatToCedula(partner.vat, partner.is_company, partnerId);
 
     // Get current draft total
     const drafts = await searchRead("account.move", [
@@ -74,24 +81,74 @@ export async function POST(request: NextRequest) {
     // Reusa item existente SOLO en el caso "pago todo" (sin invoice_ids).
     // Si el cliente pide invoice_ids especificos, siempre crea un item nuevo
     // para no mezclar selecciones distintas.
+    // Mapa { invoiceId: amount_usd } para que el sync pueda prorratear el monto
+    // total del pago entre las N facturas cuando es multi-moneda (Stripe/PayPal).
+    // Para misma moneda no se usa, pero se persiste igual por consistencia y
+    // para cubrir reuso de items. El amount_total de los drafts viene en USD
+    // (suscripciones son USD; conversión a VES sucede en posting).
+    const odooInvoiceAmountsUsd: Record<number, number> = {};
+    for (const d of selectedDrafts) {
+      odooInvoiceAmountsUsd[d.id] = d.amount_total || 0;
+    }
+
     if (isPayAll) {
+      // Busca items abiertos que pertenezcan a este partner. Cubrimos:
+      // 1) cedulaRif normalizado (formato nuevo, V/J/G/E/P + dígitos)
+      // 2) partner.vat crudo (items legacy creados antes de la normalización)
+      // 3) odoo_<partnerId> placeholder (cuando Odoo no tenía vat al crear)
+      const lookupCedulas = Array.from(new Set([
+        cedulaRif,
+        (partner.vat ?? "").trim(),
+        `odoo_${partnerId}`,
+      ].filter(Boolean)));
       const { data: existing } = await sb
         .from("collection_items")
-        .select("id, payment_token, amount_usd, status, metadata")
-        .eq("customer_cedula_rif", partner.vat || `odoo_${partnerId}`)
+        .select("id, payment_token, amount_usd, status, metadata, customer_cedula_rif")
+        .in("customer_cedula_rif", lookupCedulas)
         .in("status", ["pending", "sent", "viewed"])
         .order("created_at", { ascending: false })
         .limit(1);
 
-      // Solo reusar si el item existente tambien era "pago todo" (no tenia
-      // odoo_invoice_ids especificos).
-      const reusable = existing && existing.length > 0
-        && !((existing[0].metadata as Record<string, unknown> | null)?.odoo_invoice_ids);
+      // Solo reusar si el item existente también era "pago todo" — chequeamos
+      // por el flag is_pay_all en metadata (no por ausencia de odoo_invoice_ids,
+      // que ahora siempre se setea). Items legacy sin el flag se siguen
+      // considerando is_pay_all si no tienen odoo_invoice_ids — backward compat.
+      const existingMeta = existing && existing.length > 0
+        ? (existing[0].metadata as Record<string, unknown> | null) : null;
+      const wasPayAll = existingMeta
+        ? (existingMeta.is_pay_all === true || !existingMeta.odoo_invoice_ids)
+        : false;
+      const reusable = existing && existing.length > 0 && wasPayAll;
 
       if (reusable) {
         const item = existing[0];
+        const itemUpdate: Record<string, unknown> = {};
         if (Math.abs(item.amount_usd - netDue) > 0.01) {
-          await sb.from("collection_items").update({ amount_usd: netDue }).eq("id", item.id);
+          itemUpdate.amount_usd = netDue;
+        }
+        // Migra el formato de cedula al normalizado para que el siguiente
+        // transfer-search no tenga que adivinar (helper estricto post-2026-05-14).
+        if (item.customer_cedula_rif !== cedulaRif) {
+          itemUpdate.customer_cedula_rif = cedulaRif;
+        }
+        // Refresca odoo_invoice_ids y odoo_invoice_amounts_usd con la lista
+        // ACTUAL de drafts. Cliente puede haber abierto el portal hace días y
+        // mientras tanto se generaron facturas nuevas / se postearon viejas.
+        const newInvoiceIds = selectedDrafts.map(d => d.id).sort((a, b) => a - b);
+        const oldInvoiceIds = Array.isArray(existingMeta?.odoo_invoice_ids)
+          ? (existingMeta.odoo_invoice_ids as number[]).slice().sort((a, b) => a - b)
+          : null;
+        const idsChanged = !oldInvoiceIds || JSON.stringify(oldInvoiceIds) !== JSON.stringify(newInvoiceIds);
+        if (idsChanged) {
+          itemUpdate.metadata = {
+            ...(existingMeta || {}),
+            odoo_invoice_ids: newInvoiceIds,
+            odoo_invoice_amounts_usd: odooInvoiceAmountsUsd,
+            is_pay_all: true,
+          };
+        }
+        if (Object.keys(itemUpdate).length > 0) {
+          await sb.from("collection_items").update(itemUpdate).eq("id", item.id);
         }
         return apiSuccess({ payment_token: item.payment_token, amount: netDue });
       }
@@ -128,10 +185,11 @@ export async function POST(request: NextRequest) {
       products: [],
     }));
 
-    // odoo_invoice_ids: usado por el sync para saber cuales facturas postear.
-    // Si el cliente eligio pago parcial, va el subset; sino vacio (sync busca
-    // la draft mas reciente como antes).
-    const odooInvoiceIds = isPayAll ? null : selectedDrafts.map((d: { id: number }) => d.id);
+    // odoo_invoice_ids: SIEMPRE se setea con todas las facturas seleccionadas
+    // (antes era null cuando is_pay_all → sync solo posteaba la más reciente).
+    // Sin esto, clientes con N drafts pagando "todo" dejaban N-1 facturas en
+    // draft post-pago. Confirmado bug 2026-05-14 (10% de partners afectados).
+    const odooInvoiceIds = selectedDrafts.map((d: { id: number }) => d.id);
 
     // Create collection item
     const paymentToken = generateCollectionToken();
@@ -141,7 +199,7 @@ export async function POST(request: NextRequest) {
         campaign_id: campaignId,
         payment_token: paymentToken,
         customer_name: partner.name || "",
-        customer_cedula_rif: partner.vat || `odoo_${partnerId}`,
+        customer_cedula_rif: cedulaRif,
         customer_email: partner.email || null,
         customer_phone: partner.mobile || null,
         amount_usd: netDue,
@@ -149,7 +207,8 @@ export async function POST(request: NextRequest) {
         metadata: {
           odoo_partner_id: partnerId,
           odoo_invoices: odooInvoices,
-          ...(odooInvoiceIds ? { odoo_invoice_ids: odooInvoiceIds } : {}),
+          odoo_invoice_ids: odooInvoiceIds,
+          odoo_invoice_amounts_usd: odooInvoiceAmountsUsd,
           draft_total_all: draftTotalAll,
           is_pay_all: isPayAll,
         },

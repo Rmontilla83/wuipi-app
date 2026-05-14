@@ -21,7 +21,7 @@ import { decrypt } from "@/lib/mercantil/core/crypto";
 import { configFromEnv, getAllSecretKeys } from "@/lib/mercantil/core/config";
 import { markItemPaid, getItemByMercantilInvoiceId } from "@/lib/dal/collection-campaigns";
 import { getClientIP } from "@/lib/utils/rate-limit";
-import { triggerOdooSyncOrEnqueue } from "@/lib/integrations/odoo-sync-trigger";
+import { triggerOdooSyncOrEnqueue, extractInvoiceSyncFields } from "@/lib/integrations/odoo-sync-trigger";
 import { sendPaymentConfirmationWhatsApp } from "@/lib/notifications/whatsapp";
 import { sendPaymentConfirmationEmail } from "@/lib/notifications/email";
 import { logGatewayEvent, classifyError } from "@/lib/dal/payment-gateway-logs";
@@ -435,10 +435,7 @@ export async function POST(request: NextRequest) {
             // Solo si fuimos los primeros (wasAlreadyPaid=false) — sino otro
             // webhook concurrente ya disparo el sync.
             if (!wasAlreadyPaid) {
-            const itemMeta = (item.metadata as Record<string, unknown> | null) || null;
-            const odooInvoiceIds = Array.isArray(itemMeta?.odoo_invoice_ids)
-              ? (itemMeta!.odoo_invoice_ids as unknown[]).map(Number).filter(n => Number.isInteger(n) && n > 0)
-              : null;
+            const { odooInvoiceIds, invoiceAmountsUsd } = extractInvoiceSyncFields(item.metadata);
             const itemForSync = item;
             waitUntil(
               triggerOdooSyncOrEnqueue({
@@ -451,6 +448,7 @@ export async function POST(request: NextRequest) {
                 amountUsd: Number(itemForSync.amount_usd),
                 amountVes: normalized.amount ?? null,
                 odooInvoiceIds,
+                invoiceAmountsUsd,
               }).catch((err) => {
                 console.error("[Mercantil Alias] Sync Odoo waitUntil fallo:", err);
               })

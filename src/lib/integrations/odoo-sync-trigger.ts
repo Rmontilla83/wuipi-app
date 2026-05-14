@@ -27,6 +27,8 @@ import {
   findOdooPartnerByIdentifiers,
   findLatestDraftInvoiceForPartner,
   PAYMENT_METHOD_MAPPING,
+  isMultiCurrencyMethod,
+  computeProratedAmounts,
 } from "@/lib/integrations/odoo";
 import { enqueueOdooSync } from "@/lib/dal/odoo-sync-queue";
 
@@ -52,6 +54,12 @@ export interface SyncTriggerInput {
   /** IDs de facturas Odoo a postear (de metadata.odoo_invoice_ids).
    *  Si se pasa, el sync postea CADA una. Si no, busca la draft mas reciente. */
   odooInvoiceIds?: number[] | null;
+  /** Mapa { invoiceId: amount_usd } de metadata.odoo_invoice_amounts_usd.
+   *  Usado para PRORRATEAR el `amountUsd` total entre las N facturas cuando es
+   *  multi-moneda (Stripe/PayPal). Sin este mapa con multi-moneda multi-factura,
+   *  el sync aplicaría el monto total a CADA factura → sobrepayment N veces.
+   *  Items legacy sin este mapa caen al split equitativo + warning. */
+  invoiceAmountsUsd?: Record<number, number> | null;
 }
 
 export async function triggerOdooSyncOrEnqueue(input: SyncTriggerInput): Promise<void> {
@@ -132,18 +140,60 @@ export async function triggerOdooSyncOrEnqueue(input: SyncTriggerInput): Promise
     return;
   }
 
-  // 6. Sync sincronico — iterar cada factura. Cada una se postea + tiene
+  // 6. Calcular el `amountUsd` que recibe CADA factura.
+  //
+  // Caso A — misma moneda (transferencia, débito, c2p, cash_ves):
+  //   El sync ignora `amountUsd` y usa `invoice.amount_total` (en VES) para
+  //   crear el payment. Pasamos `undefined` por factura. La suma de los
+  //   payments == suma de invoice.amount_total == total cobrado.
+  //
+  // Caso B — multi-moneda (Stripe/PayPal/cash_usd):
+  //   El sync DEPENDE de `amountUsd` para crear el payment USD contra la
+  //   factura VES. Si pasáramos `amountUsd` total a CADA factura → 3
+  //   payments de $30 c/u en vez de 3 de $10. Bug. Prorrateamos:
+  //   - Con `invoiceAmountsUsd` válido → reparto proporcional al amount_total
+  //     USD de cada factura (preserva el hecho de que facturas pueden tener
+  //     montos distintos).
+  //   - Sin el mapa (item legacy con >1 factura) → split equitativo +
+  //     warning. Muy raro: items legacy con multi-factura ya pagados son
+  //     casos pasados; nuevos items siempre traen el mapa.
+  const isMultiCur = isMultiCurrencyMethod(paymentMethod);
+  let proratedByInvoice: Record<number, number> = {};
+  if (isMultiCur && typeof amountUsd === "number" && amountUsd > 0) {
+    proratedByInvoice = computeProratedAmounts(invoiceIds, input.invoiceAmountsUsd ?? null, amountUsd);
+    if (invoiceIds.length > 1) {
+      const hasMap = input.invoiceAmountsUsd
+        && invoiceIds.every(id => typeof input.invoiceAmountsUsd?.[id] === "number");
+      if (!hasMap) {
+        console.warn(
+          `[OdooSyncTrigger] Item ${collectionItemId} multi-moneda con ${invoiceIds.length} facturas SIN ` +
+          `invoiceAmountsUsd map → split equitativo $${(amountUsd / invoiceIds.length).toFixed(2)} c/u. ` +
+          `Item probablemente legacy. Prorrateo proporcional requiere metadata.odoo_invoice_amounts_usd.`
+        );
+      }
+      console.log(
+        `[OdooSyncTrigger] Item ${collectionItemId} prorrateo multi-moneda total=$${amountUsd}: ` +
+        invoiceIds.map(id => `inv${id}=$${proratedByInvoice[id]}`).join(", ")
+      );
+    }
+  }
+
+  // 7. Sync sincronico — iterar cada factura. Cada una se postea + tiene
   // su propio account.payment + reconcile. Si una falla, encolamos solo esa.
   const failures: Array<{ invoiceId: number; error: string }> = [];
   for (const invoiceId of invoiceIds) {
     try {
+      // Para multi-moneda: monto prorrateado por factura.
+      // Para misma moneda: undefined (sync usa invoice.amount_total).
+      const amountUsdForInvoice = isMultiCur ? proratedByInvoice[invoiceId] : undefined;
+
       const result = await syncOdooForCollectionItem({
         invoiceId,
         paymentMethod,
         paymentReference: paymentReference || "",
         paymentToken,
         paymentDate,
-        amountUsd,  // necesario para Stripe/PayPal (payment USD vs factura VES)
+        amountUsd: amountUsdForInvoice,
       });
 
       if (result.ok) {
@@ -171,6 +221,41 @@ export async function triggerOdooSyncOrEnqueue(input: SyncTriggerInput): Promise
       error: `${failures.length}/${invoiceIds.length} fallaron: ${failures.map(f => `inv${f.invoiceId}=${f.error}`).join("; ").slice(0, 1500)}`,
     });
   }
+}
+
+/**
+ * Helper para los 8 callers: extrae `odoo_invoice_ids` + `odoo_invoice_amounts_usd`
+ * del `metadata` de un collection_item, validando tipos. Devuelve null cuando no
+ * hay datos válidos (item legacy o pago con factura única implícita).
+ */
+export function extractInvoiceSyncFields(
+  metadata: unknown,
+): { odooInvoiceIds: number[] | null; invoiceAmountsUsd: Record<number, number> | null } {
+  const meta = (metadata && typeof metadata === "object") ? (metadata as Record<string, unknown>) : null;
+  if (!meta) return { odooInvoiceIds: null, invoiceAmountsUsd: null };
+
+  const odooInvoiceIds = Array.isArray(meta.odoo_invoice_ids)
+    ? (meta.odoo_invoice_ids as unknown[]).map(Number).filter(n => Number.isInteger(n) && n > 0)
+    : null;
+
+  let invoiceAmountsUsd: Record<number, number> | null = null;
+  if (meta.odoo_invoice_amounts_usd && typeof meta.odoo_invoice_amounts_usd === "object") {
+    const raw = meta.odoo_invoice_amounts_usd as Record<string, unknown>;
+    const parsed: Record<number, number> = {};
+    for (const [k, v] of Object.entries(raw)) {
+      const id = Number(k);
+      const amt = Number(v);
+      if (Number.isInteger(id) && id > 0 && Number.isFinite(amt) && amt > 0) {
+        parsed[id] = amt;
+      }
+    }
+    if (Object.keys(parsed).length > 0) invoiceAmountsUsd = parsed;
+  }
+
+  return {
+    odooInvoiceIds: odooInvoiceIds && odooInvoiceIds.length > 0 ? odooInvoiceIds : null,
+    invoiceAmountsUsd,
+  };
 }
 
 async function safeEnqueue(opts: {

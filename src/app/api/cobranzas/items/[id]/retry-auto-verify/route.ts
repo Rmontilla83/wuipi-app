@@ -28,7 +28,7 @@ import { requirePermission } from "@/lib/auth/check-permission";
 import { createAdminSupabase } from "@/lib/supabase/server";
 import { markItemPaid } from "@/lib/dal/collection-campaigns";
 import { MercantilSDK } from "@/lib/mercantil";
-import { triggerOdooSyncOrEnqueue } from "@/lib/integrations/odoo-sync-trigger";
+import { triggerOdooSyncOrEnqueue, extractInvoiceSyncFields } from "@/lib/integrations/odoo-sync-trigger";
 import { sendPaymentConfirmationWhatsApp } from "@/lib/notifications/whatsapp";
 import { sendPaymentConfirmationEmail } from "@/lib/notifications/email";
 import { logGatewayEvent, classifyError, maskAccountLast4 } from "@/lib/dal/payment-gateway-logs";
@@ -259,9 +259,7 @@ export async function POST(
 
   // Sync Odoo
   try {
-    const odooInvoiceIds = Array.isArray(metadataObj?.odoo_invoice_ids)
-      ? (metadataObj!.odoo_invoice_ids as unknown[]).map(Number).filter(n => Number.isInteger(n) && n > 0)
-      : null;
+    const { odooInvoiceIds, invoiceAmountsUsd } = extractInvoiceSyncFields(metadataObj);
     await triggerOdooSyncOrEnqueue({
       collectionItemId: item.id,
       paymentToken: item.payment_token,
@@ -272,6 +270,7 @@ export async function POST(
       amountUsd: Number(item.amount_usd),
       amountVes: amountBss,
       odooInvoiceIds,
+      invoiceAmountsUsd,
     });
   } catch (err) {
     console.error("[RetryAutoVerify] Sync Odoo fallo (no bloqueante):", err);
