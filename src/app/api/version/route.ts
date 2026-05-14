@@ -59,6 +59,12 @@ export async function GET(request: NextRequest) {
       transfer_base_url: process.env.MERCANTIL_SEARCH_TRANSFER_BASE_URL || null,
       base_url: process.env.MERCANTIL_BASE_URL || null,
     },
+    odoo_env: {
+      sync_enabled: process.env.ODOO_SYNC_ENABLED || null,
+      partner_whitelist_raw: process.env.ODOO_SYNC_PARTNER_WHITELIST || null,
+      partner_whitelist_parsed: (process.env.ODOO_SYNC_PARTNER_WHITELIST || "")
+        .split(",").map(s => s.trim()).filter(Boolean),
+    },
   };
 
   if (!testTransfer && !testTransferSdk) {
