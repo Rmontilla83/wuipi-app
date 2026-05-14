@@ -2341,20 +2341,20 @@ export const PAYMENT_METHOD_MAPPING: Record<string, PaymentMethodMapping> = {
     description: "Cash USD",
   },
   stripe: {
-    journalId: 46,                  // BNK8 "Banco Mercantil 9021" (USD) — Pagos Electronicos
-    paymentMethodLineId: 87,        // "Pago manual" (Manual Payment) en BNK8
+    journalId: 46,                  // BNK8 "Banco Mercantil 9021" (USD)
+    paymentMethodLineId: 119,       // linea "Stripe" en BNK8 (Outstanding Receipts ya configurada)
     invoiceCurrencyId: 166,         // factura en VES (igual que los otros métodos)
     paymentCurrencyId: 1,           // payment en USD (Stripe es USD nativo)
     currencyId: 1,
-    description: "Stripe USD → BNK8 Pagos Electronicos (factura VES)",
+    description: "Stripe USD → BNK8 línea Stripe (factura VES)",
   },
   paypal: {
     journalId: 46,                  // mismo BNK8
-    paymentMethodLineId: 87,        // "Pago manual" (Manual Payment)
+    paymentMethodLineId: 86,        // linea "PayPal" en BNK8 (Outstanding Receipts ya configurada)
     invoiceCurrencyId: 166,         // factura en VES
     paymentCurrencyId: 1,           // payment en USD
     currencyId: 1,
-    description: "PayPal USD → BNK8 Pagos Electronicos (factura VES)",
+    description: "PayPal USD → BNK8 línea PayPal (factura VES)",
   },
 };
 
