@@ -1902,25 +1902,59 @@ export async function findActiveSubscriptionForPartner(partnerId: number): Promi
   };
 }
 
+const MESES_ES = [
+  "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+  "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
+];
+
 /**
- * Calcula el campo `month_billed` (texto del mes en espanol) que Odoo
- * espera en facturas con `custom_month_billed=true`.
+ * Calcula el campo `month_billed` (texto del mes en español) para una factura
+ * de suscripción mensual de Wuipi, usando la `invoice_date_due` de la factura
+ * individual.
  *
- * Logica: a partir del `next_invoice_date` de la suscripcion, calcular
- * el midpoint del periodo cubierto por la factura draft actual y devolver
- * el nombre del mes correspondiente.
+ * Modelo de facturación Wuipi (validado contra producción 2026-05-14):
+ *  - Las facturas se generan ~1 mes antes del periodo de servicio.
+ *  - `invoice_date_due` marca el COMIENZO del periodo cubierto.
+ *  - El periodo es `[due, due + 1 mes - 1 día]`.
+ *  - `month_billed` es el nombre del mes del MIDPOINT del periodo.
  *
- * Ejemplo:
- *   next_invoice_date = "2026-05-27" (proxima factura)
- *   periodo cubierto = 2026-04-27 -> 2026-05-26
- *   midpoint = ~11 de mayo
- *   resultado = "Mayo"
+ * Ejemplos validados contra el `name` de la línea de producto en Odoo:
+ *   due=2026-04-27 → periodo 27-04→26-05 → midpoint mayo 11 → "Mayo"
+ *   due=2026-03-27 → periodo 27-03→26-04 → midpoint abril 11 → "Abril"
+ *   due=2026-01-28 → periodo 28-01→27-02 → midpoint feb 12 → "Febrero"
+ *
+ * Ventaja sobre el enfoque previo (next_invoice_date de la suscripción): usa
+ * la fecha INDIVIDUAL de cada factura, así un cliente con 3 drafts atrasadas
+ * recibe 3 meses distintos en lugar del mismo mes para todas (bug del flujo
+ * multi-factura descubierto al implementar el sync correcto el 2026-05-14).
  */
-export function computeMonthBilled(nextInvoiceDate: string): string {
+export function computeMonthBilled(invoiceDueDate: string): string {
+  const start = new Date(invoiceDueDate + "T12:00:00Z");
+  if (Number.isNaN(start.getTime())) return "";
+
+  // periodo cubierto = [due, due + 1 mes - 1 día]
+  const end = new Date(start);
+  end.setUTCMonth(end.getUTCMonth() + 1);
+  end.setUTCDate(end.getUTCDate() - 1);
+
+  // midpoint del periodo
+  const midpoint = new Date((start.getTime() + end.getTime()) / 2);
+
+  return MESES_ES[midpoint.getUTCMonth()];
+}
+
+/**
+ * Fallback histórico: calcula `month_billed` desde `next_invoice_date` de la
+ * suscripción cuando la factura no trae `invoice_date_due`. Asume que la draft
+ * cubre el periodo `[next - 1 mes, next - 1 día]` (el ciclo previo al próximo).
+ *
+ * Solo se usa cuando `invoice_date_due` viene vacío (caso raro). Para drafts
+ * normales, usar `computeMonthBilled(invoice.invoice_date_due)` directo.
+ */
+export function computeMonthBilledFromSubscription(nextInvoiceDate: string): string {
   const next = new Date(nextInvoiceDate + "T12:00:00Z");
   if (Number.isNaN(next.getTime())) return "";
 
-  // periodo = [next_invoice_date - 1 mes, next_invoice_date - 1 dia]
   const periodEnd = new Date(next);
   periodEnd.setUTCDate(periodEnd.getUTCDate() - 1);
 
@@ -1928,14 +1962,9 @@ export function computeMonthBilled(nextInvoiceDate: string): string {
   periodStart.setUTCMonth(periodStart.getUTCMonth() - 1);
   periodStart.setUTCDate(periodStart.getUTCDate() + 1);
 
-  // midpoint
   const midpoint = new Date((periodStart.getTime() + periodEnd.getTime()) / 2);
 
-  const meses = [
-    "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
-    "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
-  ];
-  return meses[midpoint.getUTCMonth()];
+  return MESES_ES[midpoint.getUTCMonth()];
 }
 
 /**
@@ -2146,49 +2175,66 @@ export async function previewInvoicePosting(
     total_ves: round2(invoice.amount_total * rate.bsPerUsd),
   };
 
-  // Resolver month_billed desde la suscripcion origen.
-  // Estrategia (en orden):
-  //  1) invoice.invoice_origin → getSubscriptionByName (caso normal)
-  //  2) Fallback: si origin viene vacío y el partner tiene UNA SOLA suscripción
-  //     activa (state=sale + subscription_state=3_progress), usar esa.
-  //     Cubre facturas creadas manualmente o prorrateadas sin origin.
-  //     Si hay varias activas, no asumimos — preferimos fallar a equivocarnos.
+  // Resolver month_billed.
+  // Estrategia (en orden de preferencia):
+  //  1) PRINCIPAL — invoice.invoice_date_due → computeMonthBilled directo.
+  //     Es el dato MÁS PRECISO porque corresponde al periodo de ESTA factura.
+  //     Crítico para clientes morosos con multi-draft de meses distintos: cada
+  //     factura recibe su propio mes (no el mismo para todas como hacía la
+  //     versión vieja basada en next_invoice_date de la suscripción).
+  //  2) Fallback A — sub.next_invoice_date via invoice_origin (si due vacío).
+  //  3) Fallback B — sub.next_invoice_date via única suscripción activa del
+  //     partner (cubre facturas creadas manualmente sin invoice_origin).
+  //     Si hay varias subs activas, no asumimos.
+  //
+  // Subscription se sigue resolviendo (cuando posible) para trazabilidad y
+  // para los fallbacks. NO se requiere para el cálculo cuando invoice_date_due
+  // está presente.
   let subscription: PreviewResult["subscription"] = null;
   let month_billed: string | null = null;
-  let resolvedVia: "origin" | "partner_fallback" | null = null;
+  let resolvedVia: "due" | "origin" | "partner_fallback" | null = null;
 
+  // Resolver subscription para trazabilidad (best-effort, no bloqueante)
   if (typeof invoice.invoice_origin === "string" && invoice.invoice_origin) {
     const sub = await getSubscriptionByName(invoice.invoice_origin);
     if (sub) {
       subscription = { id: sub.id, name: sub.name, next_invoice_date: sub.next_invoice_date };
-      if (typeof sub.next_invoice_date === "string" && sub.next_invoice_date) {
-        month_billed = computeMonthBilled(sub.next_invoice_date) || null;
-        if (month_billed) resolvedVia = "origin";
+    }
+  }
+  if (!subscription) {
+    const partnerId = invoice.partner_id?.[0];
+    if (partnerId) {
+      const fallbackSub = await findActiveSubscriptionForPartner(partnerId);
+      if (fallbackSub) {
+        subscription = { id: fallbackSub.id, name: fallbackSub.name, next_invoice_date: fallbackSub.next_invoice_date };
       }
     }
   }
 
-  if (!month_billed) {
-    const partnerId = invoice.partner_id?.[0];
-    if (partnerId) {
-      const fallbackSub = await findActiveSubscriptionForPartner(partnerId);
-      if (fallbackSub && typeof fallbackSub.next_invoice_date === "string" && fallbackSub.next_invoice_date) {
-        subscription = { id: fallbackSub.id, name: fallbackSub.name, next_invoice_date: fallbackSub.next_invoice_date };
-        month_billed = computeMonthBilled(fallbackSub.next_invoice_date) || null;
-        if (month_billed) resolvedVia = "partner_fallback";
-        // No empujamos warning acá — `ok` exige warnings.length===0. La traza
-        // del fallback va por console.warn más abajo + el campo `subscription`
-        // queda populado para que el caller pueda inspeccionarlo.
-      }
+  // 1) PRINCIPAL: usar invoice_date_due de la factura
+  if (typeof invoice.invoice_date_due === "string" && invoice.invoice_date_due) {
+    month_billed = computeMonthBilled(invoice.invoice_date_due) || null;
+    if (month_billed) resolvedVia = "due";
+  }
+
+  // 2) FALLBACK: derivar desde sub.next_invoice_date (cálculo viejo)
+  if (!month_billed && subscription && typeof subscription.next_invoice_date === "string" && subscription.next_invoice_date) {
+    month_billed = computeMonthBilledFromSubscription(subscription.next_invoice_date) || null;
+    if (month_billed) {
+      // Si llegamos acá es porque la factura no tenía invoice_date_due —
+      // distinguimos si la subscription vino del origin o del partner_fallback
+      // por si hay que diagnosticar.
+      resolvedVia = invoice.invoice_origin ? "origin" : "partner_fallback";
     }
   }
 
   validations.month_billed_resolved = !!month_billed;
   if (!month_billed) {
-    warnings.push("No se pudo resolver month_billed desde la suscripcion origen — sin esto el action_post puede quedarse silenciosamente en draft");
-  } else if (resolvedVia === "partner_fallback") {
-    // Log para que en runtime quede traza de cuándo se está usando el fallback.
-    console.warn(`[OdooSync] month_billed=${month_billed} resuelto via fallback partner para invoice ${invoiceId}`);
+    warnings.push("No se pudo resolver month_billed (sin invoice_date_due ni suscripcion con next_invoice_date) — sin esto el action_post puede quedarse silenciosamente en draft");
+  } else if (resolvedVia !== "due") {
+    // El cálculo PRECISO usa invoice_date_due. Si caímos al fallback de
+    // suscripción, dejá traza para detectar drafts mal configuradas.
+    console.warn(`[OdooSync] month_billed=${month_billed} resuelto via fallback ${resolvedVia} para invoice ${invoiceId} — esperabamos invoice_date_due`);
   }
 
   const ok = validations.invoice_exists && validations.invoice_is_draft &&
