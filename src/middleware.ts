@@ -1,5 +1,6 @@
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { getPortalSessionFromRequest } from "@/lib/auth/portal-session";
 
 export async function middleware(request: NextRequest) {
   // Public routes — skip auth entirely (no Supabase call, no cookie manipulation)
@@ -75,21 +76,43 @@ export async function middleware(request: NextRequest) {
   } = await supabase.auth.getSession();
   const user = session?.user ?? null;
 
-  // Redirect unauthenticated users to login
-  if (!user) {
+  // Sesión portal propia (cookie HMAC seteada por /i/[token] o /portal/invite/).
+  // Coexiste con Supabase Auth — solo se usa cuando el cliente entró por el
+  // flujo de invitación corto, no por Magic Link.
+  const portalSession = !user ? getPortalSessionFromRequest(request) : null;
+
+  // Sin ninguna sesión → /login. Los clientes portal sin sesión llegan acá
+  // si la cookie expiró o nunca pasaron por /i/.
+  if (!user && !portalSession) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     return NextResponse.redirect(url);
   }
 
-  // Block portal clients from accessing the dashboard
-  // Clients authenticated via Magic Link have role "cliente" in app_metadata
-  const role = session?.user?.app_metadata?.role;
-  const isDashboardRoute = !pathname.startsWith("/portal") && !pathname.startsWith("/api/portal") && !pathname.startsWith("/login");
-  if (role === "cliente" && isDashboardRoute) {
-    const url = request.nextUrl.clone();
-    url.pathname = "/portal/inicio";
-    return NextResponse.redirect(url);
+  // Restringir al portal cliente a rutas válidas. Tanto los autenticados por
+  // Magic Link Supabase (role=cliente) como los autenticados por cookie HMAC
+  // (portalSession) solo pueden tocar:
+  //   - /portal/*           el portal en sí
+  //   - /api/portal/*       endpoints del portal
+  //   - /api/odoo/clients/* su propia data en Odoo (el endpoint valida ownership)
+  //   - /api/cobranzas/bcv  tasa BCV pública
+  //   - /login              para cambiar de cuenta
+  // Cualquier otra ruta (dashboard) → redirect al portal.
+  const roleSupabase = session?.user?.app_metadata?.role;
+  const isPortalClient = !!portalSession || roleSupabase === "cliente";
+
+  if (isPortalClient) {
+    const allowedForPortal =
+      pathname.startsWith("/portal") ||
+      pathname.startsWith("/api/portal") ||
+      pathname.startsWith("/api/odoo/clients") ||
+      pathname === "/api/cobranzas/bcv" ||
+      pathname.startsWith("/login");
+    if (!allowedForPortal) {
+      const url = request.nextUrl.clone();
+      url.pathname = "/portal/inicio";
+      return NextResponse.redirect(url);
+    }
   }
 
   return response;
