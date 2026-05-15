@@ -32,6 +32,7 @@ interface OdooInvoiceInfo {
 interface PaymentData {
   token: string;
   customer_name: string;
+  customer_email?: string | null;
   invoice_number: string | null;
   concept: string | null;
   amount_usd: number;
@@ -39,6 +40,11 @@ interface PaymentData {
   payment_method: string | null;
   payment_reference: string | null;
   paid_at: string | null;
+  // URL para "Ir a mi portal" tras pago. portal_invite_url genera un Magic
+  // Link al click (1 sola interaccion). portal_login_url es el fallback con
+  // email pre-llenado cuando no podemos resolver el partnerId.
+  portal_invite_url?: string | null;
+  portal_login_url?: string | null;
   odoo_invoices?: OdooInvoiceInfo[] | null;
   currency?: string | null;
 }
@@ -1360,12 +1366,14 @@ function PaidConfirmation({ data, autoVerifiedMsg }: { data: PaymentData; autoVe
         >
           Volver a wuipi.net
         </a>
-        <a
-          href="https://api.wuipi.net/portal/inicio"
-          className="w-full py-3 rounded-xl border border-white/10 text-gray-300 text-sm font-medium hover:bg-white/[0.02] transition-colors"
-        >
-          Ir a mi portal
-        </a>
+        {(data.portal_invite_url || data.portal_login_url) && (
+          <a
+            href={data.portal_invite_url || data.portal_login_url || "#"}
+            className="w-full py-3 rounded-xl border border-white/10 text-gray-300 text-sm font-medium hover:bg-white/[0.02] transition-colors"
+          >
+            Ir a mi portal
+          </a>
+        )}
       </div>
     </div>
   );

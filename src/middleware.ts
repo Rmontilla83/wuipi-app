@@ -26,10 +26,18 @@ export async function middleware(request: NextRequest) {
     publicPaths.some((path) => pathname.startsWith(path)) ||
     pathname === "/api/mercantil"; // exact match — no abrir subrutas admin
 
-  if (isPublic) return NextResponse.next();
+  // Inject pathname into a header so server components/layouts can read it
+  // without needing client-side hooks. Used by /portal/layout.tsx to decide
+  // whether an unauthenticated visit should redirect to /portal/acceso.
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.set("x-pathname", pathname);
+
+  if (isPublic) {
+    return NextResponse.next({ request: { headers: requestHeaders } });
+  }
 
   let response = NextResponse.next({
-    request: { headers: request.headers },
+    request: { headers: requestHeaders },
   });
 
   const supabase = createServerClient(

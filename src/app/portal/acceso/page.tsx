@@ -1,15 +1,49 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Mail, RefreshCw, CheckCircle2, AlertCircle } from "lucide-react";
 
+// Map de codigos de error que vienen desde redirects automaticos
+// (/auth/confirm, /portal/auth/callback, /portal/invite/[token]) a mensajes
+// user-friendly. Si no esta mapeado, mostramos el codigo crudo.
+const ERROR_MESSAGES: Record<string, string> = {
+  auth: "El enlace de acceso expiró o ya fue usado. Pedí uno nuevo abajo.",
+  callback: "Hubo un problema al iniciar sesión. Probá de nuevo.",
+  invalid_token: "El enlace que usaste no es válido. Pedí una nueva invitación.",
+  partner_not_found: "No encontramos tu cuenta de cliente. Contacta a soporte.",
+  no_email: "Tu cuenta no tiene email registrado. Contacta a soporte para cargarlo.",
+  odoo_unavailable: "No pudimos verificar tu cuenta en este momento. Probá de nuevo.",
+  odoo_error: "Error temporal verificando tu cuenta. Probá de nuevo.",
+  create_user_failed: "Hubo un problema creando tu acceso. Contacta a soporte.",
+  magiclink_failed: "No pudimos enviar tu enlace de acceso. Probá ingresar tu email abajo.",
+  rate_limit: "Demasiados intentos. Esperá un momento y volvé a probar.",
+};
+
 export default function PortalLoginPage() {
-  const [email, setEmail] = useState("");
+  const searchParams = useSearchParams();
+  const prefilledEmail = searchParams.get("email") || "";
+  const errorCode = searchParams.get("error");
+
+  const [email, setEmail] = useState(prefilledEmail);
   const [step, setStep] = useState<"email" | "sent">("email");
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState(
+    errorCode ? (ERROR_MESSAGES[errorCode] || `Error: ${errorCode}`) : ""
+  );
   const [cooldown, setCooldown] = useState(0);
+
+  // Si el email viene pre-llenado (post-pago, invite con magiclink fallido,
+  // etc), mostramos un banner explicativo encima del form para que el cliente
+  // entienda que ya casi esta — solo falta confirmar el email.
+  const hasPrefill = !!prefilledEmail;
+
+  // Si la URL cambia (ej. user borra el query manualmente) sync el estado.
+  useEffect(() => {
+    if (prefilledEmail && !email) setEmail(prefilledEmail);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefilledEmail]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -84,6 +118,14 @@ export default function PortalLoginPage() {
 
           {step === "email" ? (
             <form onSubmit={handleSubmit} className="space-y-4">
+              {hasPrefill && !error && (
+                <div className="flex items-start gap-2 p-3 bg-emerald-500/5 border border-emerald-500/20 rounded-xl">
+                  <CheckCircle2 size={14} className="text-emerald-400 mt-0.5 shrink-0" />
+                  <p className="text-xs text-emerald-300">
+                    Casi listo. Confirmá tu email y te mandamos el enlace de acceso al instante.
+                  </p>
+                </div>
+              )}
               <div>
                 <label className="block text-sm text-gray-400 mb-1.5 font-medium">
                   Correo registrado en Wuipi

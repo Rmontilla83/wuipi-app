@@ -48,8 +48,14 @@ export interface SendCobranzasWAInput {
   customerName: string;
   /** Template a usar (key de WA_TEMPLATES_COBRANZAS) */
   template: WATemplateName;
-  /** Variables del template — se mapean a {{1}}, {{2}}, ... posicional */
+  /** Variables del template — se mapean a {{1}}, {{2}}, ... posicional en el body */
   params: Record<string, string>;
+  /**
+   * Parametros para botones URL dinamicos (Meta los pide aparte del body).
+   * El indice del array = indice del boton en el template (0 = primer boton URL).
+   * Solo necesario cuando el template tiene un boton URL con `{{N}}` en la URL.
+   */
+  buttonUrlParams?: string[];
   /** Que evento del riel disparo este mensaje */
   triggerEvent:
     | "payment_failure_case"
@@ -63,6 +69,7 @@ export interface SendCobranzasWAInput {
     | "collection_calendar_d20"
     | "collection_calendar_d38"
     | "manual_test"
+    | "portal_invite"
     | "bot_response";
   /** Vinculo opcional al item de cobro origen */
   collectionItemId?: string | null;
@@ -70,6 +77,13 @@ export interface SendCobranzasWAInput {
   crmCollectionId?: string | null;
   /** Forzar dry-run aunque la env diga otra cosa (para pruebas internas) */
   forceDryRun?: boolean;
+  /**
+   * Forzar envio REAL aunque la env COBRANZAS_WA_DRY_RUN este en true.
+   * Usado por flujos transaccionales (ej. invitacion al portal) que deben
+   * salir reales independiente del estado global del riel de cobranzas
+   * masivas. `forceDryRun` siempre gana sobre `forceLive`.
+   */
+  forceLive?: boolean;
 }
 
 export interface SendCobranzasWAResult {
@@ -83,8 +97,9 @@ export interface SendCobranzasWAResult {
 
 // ----- Helpers internos -------------------------------------------
 
-function isDryRunMode(force?: boolean): boolean {
-  if (force) return true;
+function isDryRunMode(forceDryRun?: boolean, forceLive?: boolean): boolean {
+  if (forceDryRun) return true;     // forceDryRun siempre gana
+  if (forceLive) return false;       // override de flujos transaccionales
   // Default = true. Solo cuando explicitamente se setea "false" se envia real.
   const v = (process.env.COBRANZAS_WA_DRY_RUN || "true").toLowerCase();
   return v !== "false";
@@ -108,11 +123,34 @@ function buildMetaPayload(opts: {
   lang: string;
   params: Record<string, string>;
   buttons?: { type: "url" | "quick_reply"; text: string; url?: string }[];
+  buttonUrlParams?: string[];
 }): Record<string, unknown> {
   // Meta usa parametros posicionales {{1}}, {{2}}, ... — los keys del objeto
-  // (1, 2, 3, ...) determinan el orden.
-  const orderedKeys = Object.keys(opts.params).sort((a, b) => Number(a) - Number(b));
+  // (1, 2, 3, ...) determinan el orden. Filtramos cualquier key no-numerico
+  // para que `portal_url` u otros pseudo-params del fallback no terminen
+  // mandados como variable del body en el template aprobado.
+  const orderedKeys = Object.keys(opts.params)
+    .filter(k => /^\d+$/.test(k))
+    .sort((a, b) => Number(a) - Number(b));
   const bodyParams = orderedKeys.map(k => ({ type: "text", text: opts.params[k] }));
+
+  const components: Record<string, unknown>[] = [
+    { type: "body", parameters: bodyParams },
+  ];
+
+  // Botones URL dinamicos — Meta exige un componente por boton, con
+  // sub_type=url e index 0,1,2... segun el orden en que se aprobaron en el
+  // template. El template `invitacion_portal` tiene 1 boton URL.
+  if (opts.buttonUrlParams && opts.buttonUrlParams.length > 0) {
+    opts.buttonUrlParams.forEach((value, idx) => {
+      components.push({
+        type: "button",
+        sub_type: "url",
+        index: String(idx),
+        parameters: [{ type: "text", text: value }],
+      });
+    });
+  }
 
   return {
     messaging_product: "whatsapp",
@@ -121,9 +159,7 @@ function buildMetaPayload(opts: {
     template: {
       name: opts.templateName,
       language: { code: opts.lang },
-      components: [
-        { type: "body", parameters: bodyParams },
-      ],
+      components,
     },
   };
 }
@@ -144,7 +180,7 @@ export async function sendCobranzasWA(
   input: SendCobranzasWAInput
 ): Promise<SendCobranzasWAResult> {
   const sb = createAdminSupabase();
-  const dryRun = isDryRunMode(input.forceDryRun);
+  const dryRun = isDryRunMode(input.forceDryRun, input.forceLive);
   const tpl = WA_TEMPLATES_COBRANZAS[input.template];
 
   if (!tpl) {
@@ -233,6 +269,7 @@ export async function sendCobranzasWA(
     lang: meta.lang,
     params: input.params,
     buttons: tpl.buttons,
+    buttonUrlParams: input.buttonUrlParams,
   });
 
   try {

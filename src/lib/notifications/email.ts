@@ -358,6 +358,200 @@ export async function sendCollectionEmail(params: SendEmailParams): Promise<void
   console.log(`[Email] Resend response:`, JSON.stringify(result));
 }
 
+// ── Portal invite email ──
+
+interface SendPortalInviteEmailParams {
+  email: string;
+  customerName: string;
+  inviteUrl: string;
+  totalDueUsd?: number; // Si > 0 mostramos el balance pendiente como hook
+}
+
+function buildPortalInviteEmailHtml(params: SendPortalInviteEmailParams): string {
+  const { customerName, inviteUrl, totalDueUsd } = params;
+  const firstName = customerName.split(" ")[0] || customerName;
+  const hasDebt = typeof totalDueUsd === "number" && totalDueUsd > 0.01;
+
+  // Banner contextual: si el cliente tiene deuda, lo enfatizamos en el hero
+  // para subir el CTR ("ya tenes algo pendiente, entra y resolvelo"). Si esta
+  // al dia, mensaje neutro de bienvenida.
+  const heroSubtitle = hasDebt
+    ? `Tienes <strong style="color:#fbbf24;">$${totalDueUsd!.toFixed(2)} USD</strong> pendiente. Resuélvelo en un clic.`
+    : `Tu cuenta, tus facturas y tu pago — todo en un solo lugar.`;
+
+  const inner = `
+    ${headerBlock("linear-gradient(135deg, #03318C 0%, #4B44D4 50%, #F46800 100%)")}
+    <!-- Hero -->
+    <tr>
+      <td style="padding:40px 40px 16px;text-align:center;" class="inner-pad">
+        <h1 style="margin:0 0 8px;font-family:${FONT_STACK};font-size:28px;color:#1f2937;font-weight:800;letter-spacing:-0.5px;">
+          Hola ${firstName} &#128075;
+        </h1>
+        <p style="margin:0;font-family:${FONT_STACK};font-size:16px;color:#4b5563;line-height:1.55;">
+          ${heroSubtitle}
+        </p>
+      </td>
+    </tr>
+
+    <!-- Features card -->
+    <tr>
+      <td style="padding:24px 40px 0;" class="inner-pad">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f8fafc;border-radius:14px;border:1px solid #e5e7eb;">
+          <tr>
+            <td style="padding:24px 28px;">
+              <p style="margin:0 0 18px;font-family:${FONT_STACK};font-size:12px;color:#6b7280;text-transform:uppercase;letter-spacing:1.5px;font-weight:600;">
+                Tu portal personal incluye
+              </p>
+              <!-- Feature 1 -->
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:14px;">
+                <tr>
+                  <td width="40" valign="top" style="padding-right:14px;">
+                    <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                      <tr><td style="width:36px;height:36px;background:#dbeafe;border-radius:10px;text-align:center;line-height:36px;font-size:18px;">&#128196;</td></tr>
+                    </table>
+                  </td>
+                  <td valign="top">
+                    <p style="margin:0 0 2px;font-family:${FONT_STACK};font-size:15px;color:#1f2937;font-weight:700;">
+                      Facturas y servicios
+                    </p>
+                    <p style="margin:0;font-family:${FONT_STACK};font-size:13px;color:#6b7280;line-height:1.5;">
+                      Ver lo que debes, lo que ya pagaste y el detalle de cada cobro.
+                    </p>
+                  </td>
+                </tr>
+              </table>
+              <!-- Feature 2 -->
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:14px;">
+                <tr>
+                  <td width="40" valign="top" style="padding-right:14px;">
+                    <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                      <tr><td style="width:36px;height:36px;background:#dcfce7;border-radius:10px;text-align:center;line-height:36px;font-size:18px;">&#128179;</td></tr>
+                    </table>
+                  </td>
+                  <td valign="top">
+                    <p style="margin:0 0 2px;font-family:${FONT_STACK};font-size:15px;color:#1f2937;font-weight:700;">
+                      Pago en 1 clic
+                    </p>
+                    <p style="margin:0;font-family:${FONT_STACK};font-size:13px;color:#6b7280;line-height:1.5;">
+                      En bolívares (Débito Inmediato, Transferencia) o en divisas (Tarjeta, PayPal).
+                    </p>
+                  </td>
+                </tr>
+              </table>
+              <!-- Feature 3 -->
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td width="40" valign="top" style="padding-right:14px;">
+                    <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                      <tr><td style="width:36px;height:36px;background:#ede9fe;border-radius:10px;text-align:center;line-height:36px;font-size:18px;">&#129302;</td></tr>
+                    </table>
+                  </td>
+                  <td valign="top">
+                    <p style="margin:0 0 2px;font-family:${FONT_STACK};font-size:15px;color:#1f2937;font-weight:700;">
+                      Soportín, tu asistente con IA
+                    </p>
+                    <p style="margin:0;font-family:${FONT_STACK};font-size:13px;color:#6b7280;line-height:1.5;">
+                      Conoce tu cuenta. Pregúntale por tus facturas, plan, o problemas de conexión.
+                    </p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+
+    <!-- CTA -->
+    <tr>
+      <td style="padding:32px 40px 0;" class="inner-pad">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+          <tr><td align="center">
+            <!--[if mso]><v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" href="${inviteUrl}" style="height:54px;v-text-anchor:middle;width:280px;" arcsize="16%" fillcolor="#F46800" stroke="f"><v:textbox inset="0,0,0,0"><center style="font-size:17px;font-weight:700;color:#ffffff;font-family:sans-serif;">Entrar a mi portal &rarr;</center></v:textbox></v:roundrect><![endif]-->
+            <!--[if !mso]><!-->
+            <a href="${inviteUrl}" target="_blank" style="display:inline-block;background:linear-gradient(135deg,#F46800 0%,#ff8534 100%);color:#ffffff;text-decoration:none;padding:16px 48px;border-radius:12px;font-family:${FONT_STACK};font-size:17px;font-weight:700;letter-spacing:-0.3px;mso-hide:all;box-shadow:0 4px 14px rgba(244,104,0,0.35);">
+              Entrar a mi portal &rarr;
+            </a>
+            <!--<![endif]-->
+          </td></tr>
+        </table>
+        <p style="margin:14px 0 0;font-family:${FONT_STACK};font-size:12px;color:#9ca3af;text-align:center;line-height:1.5;">
+          Sin contraseña. Sin descargar nada. El link te identifica automáticamente.
+        </p>
+      </td>
+    </tr>
+
+    <!-- Trust signals -->
+    <tr>
+      <td style="padding:32px 40px 0;" class="inner-pad">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-top:1px solid #f1f5f9;">
+          <tr><td style="padding-top:20px;">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+              <tr>
+                <td width="33%" align="center" style="padding:0 4px;">
+                  <p style="margin:0 0 4px;font-size:18px;line-height:1;">&#128274;</p>
+                  <p style="margin:0;font-family:${FONT_STACK};font-size:11px;color:#6b7280;line-height:1.3;">Conexión segura</p>
+                </td>
+                <td width="33%" align="center" style="padding:0 4px;">
+                  <p style="margin:0 0 4px;font-size:18px;line-height:1;">&#9889;</p>
+                  <p style="margin:0;font-family:${FONT_STACK};font-size:11px;color:#6b7280;line-height:1.3;">Acceso inmediato</p>
+                </td>
+                <td width="33%" align="center" style="padding:0 4px;">
+                  <p style="margin:0 0 4px;font-size:18px;line-height:1;">&#127757;</p>
+                  <p style="margin:0;font-family:${FONT_STACK};font-size:11px;color:#6b7280;line-height:1.3;">Desde cualquier dispositivo</p>
+                </td>
+              </tr>
+            </table>
+          </td></tr>
+        </table>
+      </td>
+    </tr>
+
+    <!-- Disclaimer -->
+    <tr>
+      <td style="padding:24px 40px 32px;" class="inner-pad">
+        <p style="margin:0;font-family:${FONT_STACK};font-size:12px;color:#9ca3af;text-align:center;line-height:1.55;">
+          Este link es personal y permanente — podes guardarlo para volver cuando quieras.
+        </p>
+      </td>
+    </tr>
+    ${FOOTER}`;
+
+  return wrapEmail("Tu Portal Wuipi te esta esperando", inner).replace("{{email}}", params.email);
+}
+
+export async function sendPortalInviteEmail(params: SendPortalInviteEmailParams): Promise<{ ok: boolean; id?: string; error?: string }> {
+  console.log(`[Email] sendPortalInviteEmail: to=${params.email} name=${params.customerName}`);
+
+  const resend = getResend();
+  if (!resend) {
+    console.warn("[Email] RESEND_API_KEY is EMPTY — skipping portal invite send.");
+    return { ok: false, error: "Resend not configured" };
+  }
+
+  const subject = typeof params.totalDueUsd === "number" && params.totalDueUsd > 0.01
+    ? `${params.customerName.split(" ")[0]}, tu Portal Wuipi te espera (saldo $${params.totalDueUsd.toFixed(2)})`
+    : `Te damos la bienvenida a tu Portal Wuipi`;
+
+  try {
+    const result = await resend.emails.send({
+      from: FROM_EMAIL,
+      to: params.email,
+      subject,
+      html: buildPortalInviteEmailHtml(params),
+    });
+    if (result.error) {
+      console.error("[Email] sendPortalInviteEmail Resend error:", result.error);
+      return { ok: false, error: result.error.message };
+    }
+    return { ok: true, id: result.data?.id };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "unknown";
+    console.error("[Email] sendPortalInviteEmail exception:", msg);
+    return { ok: false, error: msg };
+  }
+}
+
 export async function sendPaymentConfirmationEmail(params: {
   email: string;
   customerName: string;

@@ -6,6 +6,33 @@ import { apiSuccess, apiError, apiServerError } from "@/lib/api-helpers";
 import { getItemsByToken, updateItem } from "@/lib/dal/collection-campaigns";
 import { checkRateLimit, getClientIP } from "@/lib/utils/rate-limit";
 import { fetchBCVRate, convertUsdToBs } from "@/lib/integrations/bcv";
+import { searchRead, isOdooConfigured } from "@/lib/integrations/odoo";
+import { generatePortalInviteToken } from "@/lib/utils/portal-invite-token";
+
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://api.wuipi.net";
+
+/**
+ * Resolve the partnerId for a collection item so we can hand the customer a
+ * `/portal/invite/<token>` link after a successful payment. The DAL doesn't
+ * store odoo_partner_id directly, so we look it up by email (most reliable).
+ * Returns null if Odoo is unreachable, email is missing, or no match exists —
+ * the UI then falls back to `/portal/acceso?email=...` (pre-filled).
+ */
+async function resolvePartnerIdForItem(item: { customer_email?: string | null }): Promise<number | null> {
+  if (!isOdooConfigured()) return null;
+  const email = (item.customer_email || "").trim().toLowerCase();
+  if (!email) return null;
+  try {
+    const partners = await searchRead("res.partner", [
+      ["email", "=", email],
+      ["customer_rank", ">", 0],
+    ], { fields: ["id"], limit: 1 });
+    return partners[0]?.id || null;
+  } catch (err) {
+    console.warn("[cobranzas/[token]] Odoo partner lookup failed:", err);
+    return null;
+  }
+}
 
 export async function GET(
   request: NextRequest,
@@ -63,10 +90,28 @@ export async function GET(
     // Extract safe metadata for public display (invoice details only)
     const odooInvoices = item.metadata?.odoo_invoices || null;
 
+    // Portal access URLs for the post-payment confirmation screen.
+    // We prefer the permanent invite URL (one-click magic-link generation)
+    // but always supply the pre-filled login URL as a fallback in case the
+    // partner lookup fails. Only resolve once the payment is paid — saves
+    // an Odoo round-trip during the polling phase.
+    let portalInviteUrl: string | null = null;
+    let portalLoginUrl: string | null = null;
+    if (item.customer_email) {
+      portalLoginUrl = `${APP_URL}/portal/acceso?email=${encodeURIComponent(item.customer_email)}`;
+      if (item.status === "paid") {
+        const partnerId = await resolvePartnerIdForItem(item);
+        if (partnerId) {
+          portalInviteUrl = `${APP_URL}/portal/invite/${generatePortalInviteToken(partnerId)}`;
+        }
+      }
+    }
+
     // Return only safe public fields
     return apiSuccess({
       token: item.payment_token,
       customer_name: item.customer_name,
+      customer_email: item.customer_email,
       invoice_number: item.invoice_number,
       concept: item.concept,
       amount_usd: item.amount_usd,
@@ -74,6 +119,8 @@ export async function GET(
       payment_method: item.payment_method,
       payment_reference: item.payment_reference,
       paid_at: item.paid_at,
+      portal_invite_url: portalInviteUrl,
+      portal_login_url: portalLoginUrl,
       ...(odooInvoices ? { odoo_invoices: odooInvoices, currency: item.metadata?.currency } : {}),
     });
   } catch (error) {

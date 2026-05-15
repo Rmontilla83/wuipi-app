@@ -9,7 +9,7 @@ import {
   ChevronLeft, RefreshCw, Mail, Phone, MapPin, Building2,
   CreditCard, FileText, Receipt, Clock, Tag, Globe,
   AlertTriangle, CheckCircle2, Pause, Ban, Eye, Radio,
-  Send, X, MessageSquare,
+  Send, X, MessageSquare, UserPlus,
 } from "lucide-react";
 import Link from "next/link";
 import type { OdooClientDetail, OdooSubscription, OdooInvoiceDetail, OdooPayment, MikrotikService } from "@/types/odoo";
@@ -61,6 +61,7 @@ export default function ClienteDetailPage() {
   const [error, setError] = useState("");
   const [tab, setTab] = useState<Tab>("suscripciones");
   const [showSendModal, setShowSendModal] = useState(false);
+  const [showInviteModal, setShowInviteModal] = useState(false);
 
   const fetchDetail = useCallback(async () => {
     setLoading(true);
@@ -173,6 +174,13 @@ export default function ClienteDetailPage() {
             >
               <Send size={14} /> Enviar por WA
             </button>
+            <button
+              onClick={() => setShowInviteModal(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-cyan-500/30 bg-cyan-500/10 text-cyan-400 text-xs font-medium hover:bg-cyan-500/20 transition-colors"
+              title="Envía una invitación al portal por WhatsApp y email"
+            >
+              <UserPlus size={14} /> Invitar al portal
+            </button>
             <button onClick={fetchDetail} className="p-2 rounded-lg border border-wuipi-border text-gray-400 hover:text-white">
               <RefreshCw size={16} />
             </button>
@@ -235,7 +243,249 @@ export default function ClienteDetailPage() {
           onClose={() => setShowSendModal(false)}
         />
       )}
+
+      {showInviteModal && (
+        <InvitePortalModal
+          partnerId={data.id}
+          customerName={data.name}
+          phone={data.mobile || data.phone || ""}
+          email={data.email || ""}
+          onClose={() => setShowInviteModal(false)}
+        />
+      )}
     </>
+  );
+}
+
+// ── Modal: Invitar al portal (WA + Email) ──────────────────
+
+interface InvitePortalResult {
+  partnerId: number;
+  email_used: string;
+  phone_used: string | null;
+  invite_url: string;
+  whatsapp: { attempted: boolean; ok: boolean; outbox_id?: string; status?: string; error?: string; dry_run?: boolean } | null;
+  email: { attempted: boolean; ok: boolean; id?: string; error?: string } | null;
+}
+
+function InvitePortalModal({
+  partnerId, customerName, phone, email, onClose,
+}: {
+  partnerId: number;
+  customerName: string;
+  phone: string;
+  email: string;
+  onClose: () => void;
+}) {
+  const [sendWA, setSendWA] = useState(true);
+  const [sendEmail, setSendEmail] = useState(true);
+  const [overrideEmail, setOverrideEmail] = useState(email);
+  const [overridePhone, setOverridePhone] = useState(phone);
+  const [sending, setSending] = useState(false);
+  const [result, setResult] = useState<InvitePortalResult | null>(null);
+  const [error, setError] = useState<string>("");
+
+  const hasEmail = !!overrideEmail.trim() && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(overrideEmail.trim());
+  const hasPhone = !!overridePhone && overridePhone.replace(/\D/g, "").length >= 10;
+  const canSend = hasEmail && (sendWA || sendEmail) && (!sendWA || hasPhone);
+
+  const handleSend = async () => {
+    setSending(true);
+    setError("");
+    setResult(null);
+    try {
+      const channels: ("whatsapp" | "email")[] = [];
+      if (sendWA) channels.push("whatsapp");
+      if (sendEmail) channels.push("email");
+
+      const res = await fetch("/api/portal/invite", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          partnerId,
+          channels,
+          phoneOverride: overridePhone || undefined,
+          emailOverride: overrideEmail || undefined,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        throw new Error(json.error || `Error ${res.status}`);
+      }
+      // apiSuccess no envuelve en .data — los UIs leen json.X directo.
+      setResult(json as InvitePortalResult);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error desconocido");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()}
+        className="bg-wuipi-card border border-wuipi-border rounded-2xl w-full max-w-lg overflow-hidden">
+
+        <div className="border-b border-wuipi-border p-4 flex items-center justify-between">
+          <div>
+            <h2 className="text-base font-bold text-white flex items-center gap-2">
+              <UserPlus size={16} className="text-cyan-400" /> Invitar al portal
+            </h2>
+            <p className="text-xs text-gray-500 mt-0.5">A {customerName}</p>
+          </div>
+          <button onClick={onClose} className="text-gray-500 hover:text-white"><X size={20} /></button>
+        </div>
+
+        <div className="p-4 space-y-4 text-xs">
+          {/* Info */}
+          <div className="rounded-lg p-3 border border-cyan-500/30 bg-cyan-500/5 text-cyan-300 text-[11px] leading-relaxed">
+            El cliente recibirá un mensaje con un botón que lo lleva directo a su portal,
+            sin contraseña. El link es <strong>permanente</strong> — sirve hoy y dentro de meses.
+          </div>
+
+          {/* Email */}
+          <div>
+            <label className="text-gray-500 block mb-1 flex items-center justify-between">
+              <span>Email destino <span className="text-red-400">*</span></span>
+              <span className="flex items-center gap-1.5">
+                <input
+                  type="checkbox"
+                  checked={sendEmail}
+                  onChange={(e) => setSendEmail(e.target.checked)}
+                  className="accent-cyan-500"
+                />
+                <span className="text-cyan-400 text-[10px]">Enviar email</span>
+              </span>
+            </label>
+            <input
+              value={overrideEmail}
+              onChange={(e) => setOverrideEmail(e.target.value)}
+              placeholder="cliente@ejemplo.com"
+              className="w-full px-3 py-2 rounded-lg bg-wuipi-bg border border-wuipi-border text-white focus:outline-none focus:border-cyan-500/50"
+            />
+            {!email && (
+              <p className="text-amber-400 text-[10px] mt-1">
+                ⚠️ Este cliente no tenía email en Odoo. Cargalo manualmente para enviar la invitación.
+              </p>
+            )}
+            {email && overrideEmail !== email && (
+              <p className="text-gray-600 text-[10px] mt-1">
+                Original en Odoo: {email}
+              </p>
+            )}
+          </div>
+
+          {/* Teléfono */}
+          <div>
+            <label className="text-gray-500 block mb-1 flex items-center justify-between">
+              <span>Teléfono WhatsApp</span>
+              <span className="flex items-center gap-1.5">
+                <input
+                  type="checkbox"
+                  checked={sendWA}
+                  onChange={(e) => setSendWA(e.target.checked)}
+                  className="accent-cyan-500"
+                />
+                <span className="text-cyan-400 text-[10px]">Enviar WhatsApp</span>
+              </span>
+            </label>
+            <input
+              value={overridePhone}
+              onChange={(e) => setOverridePhone(e.target.value)}
+              placeholder="04XXXXXXXXX"
+              disabled={!sendWA}
+              className="w-full px-3 py-2 rounded-lg bg-wuipi-bg border border-wuipi-border text-white focus:outline-none focus:border-cyan-500/50 disabled:opacity-40"
+            />
+          </div>
+
+          {/* Preview */}
+          <details className="rounded-lg border border-wuipi-border p-3">
+            <summary className="text-gray-400 cursor-pointer text-[11px] font-medium select-none">
+              Preview del mensaje (qué verá el cliente)
+            </summary>
+            <div className="mt-3 space-y-3 text-[11px] leading-relaxed">
+              {sendWA && (
+                <div className="rounded-lg bg-[#075E54]/15 border border-[#25D366]/20 p-3 text-gray-200">
+                  <p className="text-[10px] text-[#25D366] font-semibold mb-1.5">WhatsApp</p>
+                  <p className="whitespace-pre-line">
+                    Hola {customerName.split(" ")[0]}, te damos la bienvenida a tu <strong>Portal Wuipi</strong> 🌐
+                    {"\n\n"}Desde tu portal podes:
+                    {"\n"}✅ Ver tus facturas y servicios
+                    {"\n"}✅ Pagar en bolivares o divisas en 1 clic
+                    {"\n"}✅ Chatear con Soportin, nuestro asistente con IA
+                    {"\n\n"}Toca el boton de abajo para entrar (sin contrasena).
+                  </p>
+                  <div className="mt-2 px-3 py-1.5 rounded-md bg-white/5 border border-white/10 text-center text-[10px] text-gray-300">
+                    🔗 Abrir mi portal
+                  </div>
+                </div>
+              )}
+              {sendEmail && (
+                <div className="rounded-lg bg-blue-500/5 border border-blue-500/20 p-3 text-gray-200">
+                  <p className="text-[10px] text-blue-400 font-semibold mb-1.5">Email</p>
+                  <p>
+                    <strong>Asunto:</strong> Te damos la bienvenida a tu Portal Wuipi
+                  </p>
+                  <p className="mt-1.5 text-gray-400">
+                    Email con diseño completo: hero gradiente, 3 features destacadas
+                    (facturas / pago 1 clic / Soportín IA), botón CTA &ldquo;Entrar a mi portal&rdquo;,
+                    indicadores de seguridad.
+                  </p>
+                </div>
+              )}
+            </div>
+          </details>
+
+          {/* Result */}
+          {result && (
+            <div className="rounded-lg p-3 border border-emerald-500/30 bg-emerald-500/5 space-y-1.5 text-[11px]">
+              <p className="text-emerald-300 font-semibold">Invitación enviada</p>
+              {result.whatsapp?.attempted && (
+                <p className={result.whatsapp.ok ? "text-emerald-300" : "text-red-300"}>
+                  WhatsApp: {result.whatsapp.ok
+                    ? (result.whatsapp.dry_run ? "dry-run (no llegó a Meta)" : `enviado (${result.whatsapp.status})`)
+                    : `error — ${result.whatsapp.error}`}
+                </p>
+              )}
+              {result.email?.attempted && (
+                <p className={result.email.ok ? "text-emerald-300" : "text-red-300"}>
+                  Email: {result.email.ok ? `enviado (${result.email.id?.slice(0, 8)}...)` : `error — ${result.email.error}`}
+                </p>
+              )}
+              <p className="text-gray-400 break-all pt-1">
+                Link generado: <span className="font-mono">{result.invite_url}</span>
+              </p>
+            </div>
+          )}
+
+          {error && (
+            <div className="rounded-lg p-3 border border-red-500/30 bg-red-500/5 text-red-300 text-[11px]">
+              <p className="font-semibold">Error</p>
+              <p className="mt-1">{error}</p>
+            </div>
+          )}
+        </div>
+
+        <div className="border-t border-wuipi-border p-3 flex justify-end gap-2">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 rounded-lg border border-wuipi-border text-gray-400 text-xs hover:text-white"
+          >
+            {result ? "Cerrar" : "Cancelar"}
+          </button>
+          {!result && (
+            <button
+              onClick={handleSend}
+              disabled={sending || !canSend}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-cyan-500 text-white text-xs font-medium hover:bg-cyan-400 disabled:opacity-50"
+            >
+              <Send size={14} />
+              {sending ? "Enviando..." : "Enviar invitación"}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 

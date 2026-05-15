@@ -1,60 +1,104 @@
 import { type EmailOtpType } from "@supabase/supabase-js";
 import { type NextRequest, NextResponse } from "next/server";
 import { createServerSupabase, createAdminSupabase } from "@/lib/supabase/server";
+import { searchRead } from "@/lib/integrations/odoo";
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const tokenHash = searchParams.get("token_hash");
   const type = searchParams.get("type") as EmailOtpType | null;
+  const nextParam = searchParams.get("next");
   const origin = request.nextUrl.origin;
 
-  if (tokenHash && type) {
-    const supabase = createServerSupabase();
+  // Only allow same-origin paths as "next" — prevents open redirect.
+  const safeNext = nextParam && nextParam.startsWith("/") && !nextParam.startsWith("//")
+    ? nextParam
+    : null;
+  const isPortalNext = safeNext?.startsWith("/portal");
+  const failureUrl = isPortalNext
+    ? `${origin}/portal/acceso?error=auth`
+    : `${origin}/login?error=auth`;
 
-    // verifyOtp exchanges the token_hash for a session (works for invite, email, magiclink, recovery)
-    const { data, error } = await supabase.auth.verifyOtp({
-      type,
-      token_hash: tokenHash,
-    });
-
-    if (!error && data?.session?.user) {
-      const user = data.session.user;
-
-      // Sync role from profiles to app_metadata
-      try {
-        const admin = createAdminSupabase();
-        const { data: profile } = await admin
-          .from("profiles")
-          .select("role")
-          .eq("id", user.id)
-          .single();
-
-        if (profile?.role && profile.role !== "cliente") {
-          await admin.auth.admin.updateUserById(user.id, {
-            app_metadata: {
-              ...user.app_metadata,
-              role: profile.role,
-            },
-          });
-        }
-      } catch (e) {
-        console.error("[Auth Confirm] Failed to sync role:", e);
-      }
-
-      // Re-read app_metadata to get the latest (including needs_password_setup)
-      const admin = createAdminSupabase();
-      const { data: freshUser } = await admin.auth.admin.getUserById(user.id);
-      const meta = freshUser?.user?.app_metadata ?? user.app_metadata;
-
-      // Invited users need to set their password
-      if (meta?.needs_password_setup) {
-        return NextResponse.redirect(`${origin}/setup-password`);
-      }
-
-      return NextResponse.redirect(`${origin}/comando`);
-    }
+  if (!tokenHash || !type) {
+    return NextResponse.redirect(failureUrl);
   }
 
-  // Token invalid or expired
-  return NextResponse.redirect(`${origin}/login?error=auth`);
+  const supabase = createServerSupabase();
+  const { data, error } = await supabase.auth.verifyOtp({
+    type,
+    token_hash: tokenHash,
+  });
+
+  if (error || !data?.session?.user) {
+    return NextResponse.redirect(failureUrl);
+  }
+
+  const user = data.session.user;
+  const admin = createAdminSupabase();
+
+  // Sync role + odoo_partner_id from authoritative sources into app_metadata.
+  // Order matters: read existing meta and dashboard profile first, then attach
+  // odoo_partner_id if the email matches a customer in Odoo. This mirrors what
+  // /portal/auth/callback (PKCE flow) does, so token_hash users land in the
+  // same shape regardless of which flow they came through.
+  try {
+    const { data: profile } = await admin
+      .from("profiles")
+      .select("role")
+      .eq("id", user.id)
+      .single();
+
+    const dashboardRole = profile?.role;
+    const isSystemUser = dashboardRole && dashboardRole !== "cliente";
+    const existingMeta = user.app_metadata || {};
+    const patch: Record<string, unknown> = { ...existingMeta };
+    let needsUpdate = false;
+
+    if (isSystemUser && existingMeta.role !== dashboardRole) {
+      patch.role = dashboardRole;
+      needsUpdate = true;
+    }
+
+    // Attach odoo_partner_id if missing — needed for portal access.
+    if (!existingMeta.odoo_partner_id && user.email) {
+      try {
+        const partners = await searchRead("res.partner", [
+          ["email", "=", user.email],
+          ["customer_rank", ">", 0],
+        ], { fields: ["id", "name"], limit: 1 });
+        if (partners.length > 0) {
+          patch.odoo_partner_id = partners[0].id;
+          patch.customer_name = partners[0].name;
+          if (!existingMeta.role) patch.role = "cliente";
+          needsUpdate = true;
+        }
+      } catch (e) {
+        console.warn("[Auth Confirm] Odoo lookup failed:", e);
+      }
+    }
+
+    if (needsUpdate) {
+      await admin.auth.admin.updateUserById(user.id, { app_metadata: patch });
+    }
+  } catch (e) {
+    console.error("[Auth Confirm] Failed to sync metadata:", e);
+  }
+
+  // Re-read app_metadata to honor needs_password_setup if it was set.
+  const { data: freshUser } = await admin.auth.admin.getUserById(user.id);
+  const meta = freshUser?.user?.app_metadata ?? user.app_metadata;
+
+  if (meta?.needs_password_setup) {
+    return NextResponse.redirect(`${origin}/setup-password`);
+  }
+
+  // Route: explicit `next` wins (validated above), otherwise pick by role.
+  // Portal clients → /portal/inicio. Dashboard users → /comando.
+  if (safeNext) {
+    return NextResponse.redirect(`${origin}${safeNext}`);
+  }
+  if (meta?.odoo_partner_id && meta?.role === "cliente") {
+    return NextResponse.redirect(`${origin}/portal/inicio`);
+  }
+  return NextResponse.redirect(`${origin}/comando`);
 }

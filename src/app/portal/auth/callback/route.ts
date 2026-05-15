@@ -7,7 +7,7 @@ export async function GET(request: NextRequest) {
   const code = searchParams.get("code");
 
   if (!code) {
-    return NextResponse.redirect(`${origin}/portal/login`);
+    return NextResponse.redirect(`${origin}/portal/acceso`);
   }
 
   try {
@@ -17,7 +17,7 @@ export async function GET(request: NextRequest) {
 
     if (error || !data.user) {
       console.error("[Portal Callback] Session exchange failed:", error?.message);
-      return NextResponse.redirect(`${origin}/portal/login`);
+      return NextResponse.redirect(`${origin}/portal/acceso?error=auth`);
     }
 
     const admin = createAdminSupabase();
@@ -62,6 +62,6 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(`${origin}/portal/inicio`);
   } catch (err) {
     console.error("[Portal Callback] Error:", err);
-    return NextResponse.redirect(`${origin}/portal/login`);
+    return NextResponse.redirect(`${origin}/portal/acceso?error=callback`);
   }
 }

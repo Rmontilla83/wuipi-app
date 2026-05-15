@@ -33,6 +33,38 @@ export interface WATemplateDef {
 // ----- Calendario mensual del riel ----------------------------
 
 export const WA_TEMPLATES_COBRANZAS: Record<string, WATemplateDef> = {
+  // Invitacion fria al portal — UTILITY. Body usa {{1}}=nombre. El boton
+  // URL es dinamico: la URL aprobada por Meta es
+  //   https://api.wuipi.net/portal/invite/{{1}}
+  // y al enviar pasamos como buttonUrlParams[0] el token HMAC del cliente
+  // (generado con generatePortalInviteToken). El token NO expira; cada uso
+  // del link consume un Magic Link fresco de Supabase.
+  invitacion_portal: {
+    name: "invitacion_portal",
+    lang: "es",
+    category: "utility",
+    description: "Invitacion fria al portal. Body=nombre. Boton URL dinamico con token de invitacion.",
+    body:
+      "Hola {{1}}, te damos la bienvenida a tu *Portal Wuipi* 🌐\n\n" +
+      "Desde tu portal podes:\n" +
+      "✅ Ver tus facturas y servicios\n" +
+      "✅ Pagar en bolivares o divisas en 1 clic\n" +
+      "✅ Chatear con Soportin, nuestro asistente con IA\n\n" +
+      "Toca el boton de abajo para entrar (sin contrasena, sin descargar nada).\n\n" +
+      "Dudas? Responde este mensaje y te ayudamos.",
+    buttons: [
+      { type: "url", text: "Abrir mi portal", url: "https://api.wuipi.net/portal/invite/{{1}}" },
+    ],
+    fallback: (p) =>
+      `Hola ${p["1"]}, te damos la bienvenida a tu Portal Wuipi.\n\n` +
+      `Desde tu portal podes:\n` +
+      `- Ver tus facturas y servicios\n` +
+      `- Pagar en bolivares o divisas en 1 clic\n` +
+      `- Chatear con Soportin, nuestro asistente con IA\n\n` +
+      `Entra acá (sin contrasena): ${p["portal_url"] || "https://api.wuipi.net/portal/acceso"}\n\n` +
+      `💜 WUIPI Telecomunicaciones`,
+  },
+
   // Caso especial: cliente tuvo fallo en pasarela (Stream A4)
   payment_failure_apology: {
     name: "cobranzas_falla_pasarela",

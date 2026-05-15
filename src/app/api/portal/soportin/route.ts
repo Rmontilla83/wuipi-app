@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getOdooClientDetail, getMikrotikServiceByPartner } from "@/lib/integrations/odoo";
-import { getPortalCaller } from "@/lib/auth/check-permission";
+import { getPortalCaller, getCallerProfile } from "@/lib/auth/check-permission";
 import { checkRateLimit } from "@/lib/utils/rate-limit";
 
 export const dynamic = "force-dynamic";
@@ -183,13 +183,24 @@ function buildClientContext(detail: any, services: any[]): string {
 
 export async function POST(request: NextRequest) {
   try {
-    const caller = await getPortalCaller();
-    if (!caller) {
+    // Accept two callers: portal clients (locked to their own partnerId) and
+    // dashboard admins (free to inspect any client via /portal/preview/[id]).
+    // Without the admin path the preview crashes Soportin with 403 — admins
+    // can never QA the assistant for a specific client.
+    const portalCaller = await getPortalCaller();
+    const adminCaller = !portalCaller ? await getCallerProfile() : null;
+    const isAdmin = !portalCaller && adminCaller && adminCaller.role !== "cliente";
+
+    if (!portalCaller && !isAdmin) {
       return NextResponse.json({ error: "No autenticado" }, { status: 401 });
     }
 
-    // Rate limit — 10 msgs/min per partner. Prevents economic DoS against Claude API.
-    const rl = checkRateLimit(`soportin:${caller.odoo_partner_id}`, 10, 60_000);
+    // Rate limit. Portal client → keyed by their own partnerId. Admin → keyed
+    // by their user id so heavy QA from one admin doesn't burn another admin's quota.
+    const rlKey = portalCaller
+      ? `soportin:client:${portalCaller.odoo_partner_id}`
+      : `soportin:admin:${adminCaller!.id}`;
+    const rl = checkRateLimit(rlKey, 10, 60_000);
     if (!rl.allowed) {
       return NextResponse.json(
         { error: "Estás enviando mensajes muy rápido. Esperá un momento." },
@@ -209,8 +220,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "message and partnerId required" }, { status: 400 });
     }
 
-    // Ensure portal user can only access their own data
-    if (Number(partnerId) !== caller.odoo_partner_id) {
+    // Portal clients are locked to their own partnerId. Admins can inspect any.
+    if (portalCaller && Number(partnerId) !== portalCaller.odoo_partner_id) {
       return NextResponse.json({ error: "Acceso denegado" }, { status: 403 });
     }
 
