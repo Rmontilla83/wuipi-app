@@ -139,6 +139,11 @@ export async function POST(
             total: inv.amount_total_usd,
             amount_due: inv.amount_total_usd,
             currency: "USD",
+            // products: [] explícito para que la página de pago no crashee
+            // con "Cannot read properties of undefined (reading 'length')"
+            // al intentar inv.products.length. El flow de segmentos no trae
+            // detalle de líneas (sería un Odoo round-trip por factura).
+            products: [],
             billed_month: inv.billed_month,
             subscription_id: inv.subscription_id,
           })),

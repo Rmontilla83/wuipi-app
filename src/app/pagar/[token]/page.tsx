@@ -26,7 +26,9 @@ interface OdooInvoiceInfo {
   total: number;
   amount_due: number;
   currency: string;
-  products: string[];
+  // Opcional: items creados via /api/cobranzas/segments/[id]/execute no
+  // setean este campo (la fuente Odoo en ese flow no trae products).
+  products?: string[];
 }
 
 interface PaymentData {
@@ -676,7 +678,9 @@ export default function PagarPage() {
                       <tr key={i} className="border-b border-white/5 last:border-0">
                         <td className="py-2 px-3 text-white font-mono">{inv.number}</td>
                         <td className="py-2 px-3 text-blue-200/80">
-                          {inv.products.length > 0
+                          {/* products puede no existir cuando el item viene del flow de segmentos
+                              (segments/execute no lo setea). Defensive optional chaining. */}
+                          {inv.products && inv.products.length > 0
                             ? inv.products.map(p => p.replace(/\[.*?\]\s*/, "")).join(", ")
                             : "—"}
                         </td>
