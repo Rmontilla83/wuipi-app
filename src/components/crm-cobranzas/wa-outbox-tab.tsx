@@ -112,31 +112,59 @@ export default function WAOutboxTab() {
 
   return (
     <div className="space-y-4">
-      {/* Indicador grande del modo */}
-      <Card className={`!p-4 ${mode === "live" ? "border-red-500/40 bg-red-500/5" : "border-violet-500/40 bg-violet-500/5"}`}>
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
+      {/* Disclaimer claro: este tab es del riel EXPERIMENTAL. Las campañas
+          de cobranza reales usan un sistema diferente (sendCollectionWhatsApp
+          → collection_notifications) que va directo a Meta sin dry-run.
+          El modo aquí solo afecta a pruebas manuales + el botón "Invitar al
+          portal" (que usa forceLive=true para ignorar el dry-run global). */}
+      <Card className="!p-4 border-amber-500/40 bg-amber-500/5">
+        <div className="flex items-start gap-3">
+          <AlertTriangle size={20} className="text-amber-400 mt-0.5 shrink-0" />
+          <div className="flex-1 text-xs leading-relaxed">
+            <p className="text-amber-300 font-bold uppercase tracking-wide mb-1">
+              Este tab muestra solo el riel experimental
+            </p>
+            <p className="text-gray-300">
+              Las <strong>campañas de cobranza reales</strong> usan otro sistema
+              (helper <code className="text-[10px] bg-black/30 px-1 rounded">sendCollectionWhatsApp</code>) y los WA salen directo a Meta — su tracking
+              vive en <strong>Cobranza → Campañas de Cobro → abrir campaña</strong>,
+              no acá.
+            </p>
+            <p className="text-gray-400 mt-1.5">
+              Acá solo hay: prueba manual de templates aprobados, mensajes del
+              botón &ldquo;Invitar al portal&rdquo; (siempre reales, ignora dry-run),
+              y eventos futuros del calendario D27/D1/D3/D5/D7/D8/D15/D20/D38
+              (en construcción).
+            </p>
+          </div>
+        </div>
+      </Card>
+
+      {/* Indicador del modo del riel experimental — más chico que antes */}
+      <Card className={`!p-3 ${mode === "live" ? "border-red-500/30 bg-red-500/5" : "border-violet-500/30 bg-violet-500/5"}`}>
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-2.5">
             {mode === "live" ? (
-              <ShieldAlert className="text-red-400" size={24} />
+              <ShieldAlert className="text-red-400 shrink-0" size={18} />
             ) : (
-              <EyeOff className="text-violet-400" size={24} />
+              <EyeOff className="text-violet-400 shrink-0" size={18} />
             )}
             <div>
-              <p className={`text-sm font-bold uppercase tracking-wider ${mode === "live" ? "text-red-400" : "text-violet-400"}`}>
-                {mode === "live" ? "MODO REAL — los mensajes llegan a clientes" : "MODO DRY-RUN — los mensajes NO llegan a Meta"}
+              <p className={`text-xs font-bold uppercase tracking-wider ${mode === "live" ? "text-red-400" : "text-violet-400"}`}>
+                Riel experimental: {mode === "live" ? "MODO REAL" : "MODO DRY-RUN"}
               </p>
-              <p className="text-xs text-gray-500 mt-1">
+              <p className="text-[11px] text-gray-500 mt-0.5">
                 {mode === "live"
-                  ? "COBRANZAS_WA_DRY_RUN=false. Cada send va a Meta API."
-                  : "Default. Activar enviando real: vercel env set COBRANZAS_WA_DRY_RUN=false"}
+                  ? "COBRANZAS_WA_DRY_RUN=false. Pruebas manuales van a Meta."
+                  : "Pruebas manuales solo se registran acá, no llegan al cliente."}
               </p>
             </div>
           </div>
           <button
             onClick={() => setShowTestModal(true)}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-amber-500 text-white text-sm font-medium hover:bg-amber-500/90 transition-colors"
+            className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-amber-500 text-white text-xs font-medium hover:bg-amber-500/90 transition-colors"
           >
-            <Send size={14} /> Enviar prueba
+            <Send size={12} /> Enviar prueba
           </button>
         </div>
       </Card>

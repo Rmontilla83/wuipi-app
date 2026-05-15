@@ -983,6 +983,35 @@ function CampaignDetailView({
   const [sendProgress, setSendProgress] = useState<{ sent: number; total: number } | null>(null);
   const [cashItem, setCashItem] = useState<CampaignItem | null>(null);
 
+  // Tracking detallado: notificaciones por canal (WA / Email) y breakdown
+  // de items por status. Lo que ya teníamos solo mostraba Total / Pagados /
+  // Pendientes — sin distinguir si los pendientes habían recibido WA o no.
+  // Sin saber eso era imposible diagnosticar campañas que dicen "active"
+  // pero nunca dispararon envío (caso real del 2026-05-15 con campaña
+  // ea3d8f4e: status active, 27 items pending, 0 notificaciones).
+  interface CampaignTracking {
+    total_items: number;
+    items_breakdown: {
+      pending: number; sent: number; viewed: number; paid: number;
+      failed: number; expired: number; conciliating: number;
+    };
+    notifications: {
+      whatsapp: { sent: number; failed: number; pending: number; total: number };
+      email:    { sent: number; failed: number; pending: number; total: number };
+    };
+  }
+  const [tracking, setTracking] = useState<CampaignTracking | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/cobranzas/campaigns/${campaign.id}/tracking`, { cache: "no-store" })
+      .then((r) => r.json())
+      .then((d: CampaignTracking & { error?: string }) => {
+        if (!cancelled && !d.error) setTracking(d);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [campaign.id, items.length]);
+
   const st = statusConfig[campaign.status] || statusConfig.draft;
   const pct =
     campaign.total_items > 0
@@ -1125,7 +1154,12 @@ function CampaignDetailView({
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {campaign.status === "draft" && (
+          {/* Mostrar "Enviar cobros" cuando hay items que aún no se enviaron.
+              Antes solo se mostraba si campaign.status === 'draft', pero hay
+              campañas atascadas en 'active' con items pending (caso
+              ea3d8f4e del 2026-05-15: bug del execute marcaba active sin
+              disparar envío). Permitir disparar el envío en ese caso también. */}
+          {(campaign.status === "draft" || (tracking && tracking.items_breakdown.pending > 0)) && (
             <button
               onClick={handleSend}
               disabled={sending}
@@ -1139,7 +1173,7 @@ function CampaignDetailView({
               Enviar cobros
             </button>
           )}
-          {campaign.status === "active" && (
+          {campaign.status === "active" && tracking && tracking.items_breakdown.pending === 0 && (
             <button
               onClick={handleRemind}
               disabled={reminding}
@@ -1281,7 +1315,7 @@ function CampaignDetailView({
         );
       })()}
 
-      {/* Stats */}
+      {/* Stats — fila 1: progreso del cobro */}
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
         <Card className="!p-3 text-center">
           <p className="text-xs text-gray-500">Total</p>
@@ -1306,6 +1340,45 @@ function CampaignDetailView({
         <Card className="!p-3 text-center">
           <p className="text-xs text-gray-500">Progreso</p>
           <p className="text-xl font-bold text-[#F46800]">{pct}%</p>
+        </Card>
+      </div>
+
+      {/* Stats — fila 2: notificaciones (WA + Email) + breakdown de items.
+          Esta fila es nueva (2026-05-15): permite ver si una campaña 'active'
+          realmente disparó envíos o quedó vacía. Si WA y Email están en 0
+          pero items > 0 → algo en /api/cobranzas/send falló sin avisar y
+          conviene mirar portal_invite_logs con action='send:*'. */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <Card className="!p-3 border-[#25D366]/30">
+          <p className="text-xs text-gray-500 mb-1">WhatsApp enviados</p>
+          <div className="flex items-baseline gap-2">
+            <p className="text-xl font-bold text-[#25D366]">{tracking?.notifications.whatsapp.sent ?? "—"}</p>
+            {tracking && tracking.notifications.whatsapp.failed > 0 && (
+              <p className="text-xs text-red-400">+{tracking.notifications.whatsapp.failed} fallidos</p>
+            )}
+          </div>
+        </Card>
+        <Card className="!p-3 border-blue-500/30">
+          <p className="text-xs text-gray-500 mb-1">Emails enviados</p>
+          <div className="flex items-baseline gap-2">
+            <p className="text-xl font-bold text-blue-400">{tracking?.notifications.email.sent ?? "—"}</p>
+            {tracking && tracking.notifications.email.failed > 0 && (
+              <p className="text-xs text-red-400">+{tracking.notifications.email.failed} fallidos</p>
+            )}
+          </div>
+        </Card>
+        <Card className="!p-3 border-violet-500/30">
+          <p className="text-xs text-gray-500 mb-1">Vistos por cliente</p>
+          <p className="text-xl font-bold text-violet-400">{tracking?.items_breakdown.viewed ?? "—"}</p>
+        </Card>
+        <Card className="!p-3 border-gray-500/30">
+          <p className="text-xs text-gray-500 mb-1">Sin enviar aún</p>
+          <p className="text-xl font-bold text-gray-300">{tracking?.items_breakdown.pending ?? "—"}</p>
+          {tracking && tracking.items_breakdown.pending > 0 && campaign.status === "active" && (
+            <p className="text-[10px] text-amber-400 mt-1">
+              ⚠️ Hay items pendientes. Toca &ldquo;Enviar cobros&rdquo; si la campaña ya estaba marcada activa por error.
+            </p>
+          )}
         </Card>
       </div>
 

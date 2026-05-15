@@ -14,6 +14,42 @@ import {
 import { sendCollectionWhatsApp } from "@/lib/notifications/whatsapp";
 import { sendCollectionEmail } from "@/lib/notifications/email";
 import { requirePermission } from "@/lib/auth/check-permission";
+import { createAdminSupabase } from "@/lib/supabase/server";
+import { getClientIP } from "@/lib/utils/rate-limit";
+
+// Fire-and-forget audit del envío. Sin esto, una campaña que falla
+// (timeout, error de red, batch sin items procesables) se vuelve invisible
+// — los items quedan en pending y nadie sabe por qué. Cada llamada al
+// endpoint deja una row en portal_invite_logs (reutilizada como tabla
+// genérica de debug) con el batch processado, cuántos items sent/failed,
+// y el campaign_id para correlacionar.
+async function logSendCall(input: {
+  request: NextRequest;
+  action: string;
+  campaignId?: string | null;
+  statusCode: number;
+  meta?: Record<string, unknown>;
+  error?: string;
+}): Promise<void> {
+  try {
+    const sb = createAdminSupabase();
+    await sb.from("portal_invite_logs").insert({
+      method: "POST",
+      path: "/api/cobranzas/send",
+      token_prefix: input.campaignId?.slice(0, 8) ?? null,
+      partner_id: null,
+      action: `send:${input.action}`,
+      status_code: input.statusCode,
+      user_agent: input.request.headers.get("user-agent") || null,
+      ip: getClientIP(input.request.headers) || null,
+      referer: input.request.headers.get("referer") || null,
+      error_message: input.error || null,
+      meta: input.meta || null,
+    });
+  } catch {
+    // No bloquear el envío real si el log falla.
+  }
+}
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://api.wuipi.net";
 const DEFAULT_BATCH_SIZE = 25; // Process 25 items per request to avoid Vercel timeout
@@ -29,14 +65,27 @@ interface ItemResult {
 export async function POST(request: NextRequest) {
   try {
     const caller = await requirePermission("cobranzas", "send");
-    if (!caller) return apiError("No tienes permiso para enviar cobros", 403);
+    if (!caller) {
+      await logSendCall({ request, action: "no_permission", statusCode: 403 });
+      return apiError("No tienes permiso para enviar cobros", 403);
+    }
 
     const { campaign_id, batch_size, offset: batchOffset } = await request.json();
-    if (!campaign_id) return apiError("campaign_id requerido", 400);
+    if (!campaign_id) {
+      await logSendCall({ request, action: "missing_campaign_id", statusCode: 400 });
+      return apiError("campaign_id requerido", 400);
+    }
 
     const campaign = await getCampaign(campaign_id);
-    if (!campaign) return apiError("Campaña no encontrada", 404);
+    if (!campaign) {
+      await logSendCall({ request, action: "campaign_not_found", statusCode: 404, campaignId: campaign_id });
+      return apiError("Campaña no encontrada", 404);
+    }
     if (!["draft", "active", "sending"].includes(campaign.status)) {
+      await logSendCall({
+        request, action: "invalid_status", statusCode: 400, campaignId: campaign_id,
+        meta: { campaign_status: campaign.status },
+      });
       return apiError("La campaña no está en estado válido para enviar", 400);
     }
 
@@ -52,6 +101,17 @@ export async function POST(request: NextRequest) {
     const size = Math.min(batch_size || DEFAULT_BATCH_SIZE, 50);
     const start = batchOffset || 0;
     const batch = sendable.slice(start, start + size);
+
+    await logSendCall({
+      request, action: "batch_start", statusCode: 200, campaignId: campaign_id,
+      meta: {
+        total_items: allItems.length,
+        sendable: sendable.length,
+        batch_offset: start,
+        batch_size: batch.length,
+        campaign_status_before: campaign.status,
+      },
+    });
 
     let sent = 0;
     let failed = 0;
@@ -138,6 +198,12 @@ export async function POST(request: NextRequest) {
       await updateCampaign(campaign_id, { status: "active" });
     }
 
+    await logSendCall({
+      request, action: hasMore ? "batch_complete" : "campaign_complete",
+      statusCode: 200, campaignId: campaign_id,
+      meta: { sent, failed, batch_size: batch.length, has_more: hasMore, next_offset: hasMore ? nextOffset : null },
+    });
+
     return apiSuccess({
       campaign_id,
       sent,
@@ -147,6 +213,10 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     console.error("[send] UNHANDLED ERROR:", error);
+    await logSendCall({
+      request, action: "unhandled_error", statusCode: 500,
+      error: error instanceof Error ? error.message : String(error),
+    });
     return apiServerError(error);
   }
 }
