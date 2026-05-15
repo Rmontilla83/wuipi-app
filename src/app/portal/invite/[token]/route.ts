@@ -26,6 +26,43 @@ import { verifyPortalInviteToken } from "@/lib/utils/portal-invite-token";
 import { searchRead, isOdooConfigured } from "@/lib/integrations/odoo";
 import { checkRateLimit, getClientIP } from "@/lib/utils/rate-limit";
 import { setPortalSessionOnResponse } from "@/lib/auth/portal-session";
+import { createAdminSupabase } from "@/lib/supabase/server";
+
+/**
+ * Fire-and-forget audit row to portal_invite_logs. Used to diagnose why the
+ * WhatsApp webview keeps showing the "expired" page despite curl tests
+ * proving the flow works end-to-end. Each request to this route writes a
+ * row; we then read the table to see the actual request sequence.
+ */
+async function logHit(input: {
+  method: string;
+  request: NextRequest;
+  token: string;
+  action: string;
+  statusCode: number;
+  partnerId?: number | null;
+  error?: string;
+  meta?: Record<string, unknown>;
+}): Promise<void> {
+  try {
+    const sb = createAdminSupabase();
+    await sb.from("portal_invite_logs").insert({
+      method: input.method,
+      path: input.request.nextUrl.pathname,
+      token_prefix: input.token.slice(0, 8),
+      partner_id: input.partnerId ?? null,
+      action: input.action,
+      status_code: input.statusCode,
+      user_agent: input.request.headers.get("user-agent") || null,
+      ip: getClientIP(input.request.headers) || null,
+      referer: input.request.headers.get("referer") || null,
+      error_message: input.error || null,
+      meta: input.meta || null,
+    });
+  } catch {
+    // Don't let logging break the auth flow.
+  }
+}
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://api.wuipi.net";
 
@@ -134,8 +171,16 @@ export async function GET(
   const origin = request.nextUrl.origin;
   const partnerId = verifyPortalInviteToken(params.token);
   if (!partnerId) {
+    await logHit({
+      method: "GET", request, token: params.token,
+      action: "interstitial_invalid_token", statusCode: 307,
+    });
     return errorRedirect(origin, "invalid_token");
   }
+  await logHit({
+    method: "GET", request, token: params.token,
+    action: "interstitial_served", statusCode: 200, partnerId,
+  });
   return interstitialPage(params.token);
 }
 
@@ -163,15 +208,27 @@ export async function POST(
   const ip = getClientIP(request.headers);
   const rl = checkRateLimit(`portal-invite-go:${ip}`, 20, 60_000);
   if (!rl.allowed) {
+    await logHit({
+      method: "POST", request, token: params.token,
+      action: "rate_limited", statusCode: 307,
+    });
     return errorRedirect(origin, "rate_limit");
   }
 
   const partnerId = verifyPortalInviteToken(params.token);
   if (!partnerId) {
+    await logHit({
+      method: "POST", request, token: params.token,
+      action: "invalid_token", statusCode: 307,
+    });
     return errorRedirect(origin, "invalid_token");
   }
 
   if (!isOdooConfigured()) {
+    await logHit({
+      method: "POST", request, token: params.token,
+      action: "odoo_unavailable", statusCode: 307, partnerId,
+    });
     return errorRedirect(origin, "odoo_unavailable");
   }
 
@@ -186,11 +243,20 @@ export async function POST(
       partner = partners[0] as { id: number; name: string; email: string };
     }
   } catch (err) {
+    await logHit({
+      method: "POST", request, token: params.token,
+      action: "odoo_error", statusCode: 307, partnerId,
+      error: err instanceof Error ? err.message : String(err),
+    });
     console.error("[Portal Invite POST] Odoo lookup failed:", err);
     return errorRedirect(origin, "odoo_error");
   }
 
   if (!partner) {
+    await logHit({
+      method: "POST", request, token: params.token,
+      action: "partner_not_found", statusCode: 307, partnerId,
+    });
     return errorRedirect(origin, "partner_not_found");
   }
 
@@ -201,6 +267,10 @@ export async function POST(
   // /api/portal/invite (que también falla si no hay email).
   const email = (partner.email || "").trim();
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    await logHit({
+      method: "POST", request, token: params.token,
+      action: "no_email", statusCode: 307, partnerId,
+    });
     return errorRedirect(origin, "no_email");
   }
 
@@ -219,6 +289,12 @@ export async function POST(
   // No-cache: vital para que el webview de WA no sirva esta respuesta
   // cacheada en futuros clicks del mismo botón.
   for (const [k, v] of Object.entries(NO_CACHE_HEADERS)) res.headers.set(k, v);
+
+  await logHit({
+    method: "POST", request, token: params.token,
+    action: "session_set_and_redirect", statusCode: 303, partnerId,
+    meta: { redirect_to: portalUrl.toString() },
+  });
 
   return res;
 }
