@@ -29,10 +29,23 @@ import { checkRateLimit, getClientIP } from "@/lib/utils/rate-limit";
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://api.wuipi.net";
 
+// Header set agresivo para CUALQUIER respuesta del flujo de invitacion.
+// Sin esto, WhatsApp/iOS/Android webviews cachean redirects 307 y muestran
+// resultados viejos sin re-hitear el server — exactamente el bug que vimos
+// en produccion: usuario veia "enlace expirado" porque el webview tenia
+// cacheado el redirect a /portal/acceso?error=auth de un intento previo.
+const NO_CACHE_HEADERS = {
+  "Cache-Control": "private, no-store, no-cache, must-revalidate, max-age=0",
+  "Pragma": "no-cache",
+  "Expires": "0",
+};
+
 function errorRedirect(origin: string, code: string) {
   const url = new URL("/portal/acceso", origin);
   url.searchParams.set("error", code);
-  return NextResponse.redirect(url);
+  const res = NextResponse.redirect(url);
+  for (const [k, v] of Object.entries(NO_CACHE_HEADERS)) res.headers.set(k, v);
+  return res;
 }
 
 /**
@@ -103,10 +116,8 @@ function interstitialPage(token: string): NextResponse {
     status: 200,
     headers: {
       "Content-Type": "text/html; charset=utf-8",
-      "Cache-Control": "private, no-store, no-cache, must-revalidate",
-      // Defensive: HTTP-level hints to discourage prefetch from clients that
-      // honor these (Chrome, some webviews).
       "X-Robots-Tag": "noindex, nofollow",
+      ...NO_CACHE_HEADERS,
     },
   });
 }
@@ -233,5 +244,7 @@ export async function POST(
 
   // 303 See Other: tells the browser to follow the redirect with GET, which
   // is what /auth/confirm expects. Prevents the browser from re-POSTing.
-  return NextResponse.redirect(confirmUrl, 303);
+  const res = NextResponse.redirect(confirmUrl, 303);
+  for (const [k, v] of Object.entries(NO_CACHE_HEADERS)) res.headers.set(k, v);
+  return res;
 }
