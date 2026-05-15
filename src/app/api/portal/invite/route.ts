@@ -104,7 +104,17 @@ export async function POST(request: NextRequest) {
     // email CTA. The customer never sees this string directly — it's all
     // hidden behind the button label.
     const inviteToken = generatePortalInviteToken(partnerId);
-    const inviteUrl = `${APP_URL}/portal/invite/${inviteToken}`;
+
+    // Cache-buster contra w.meta.me (proxy anti-phishing de WhatsApp).
+    // Sin esto, w.meta.me cachea la respuesta del PRIMER scan del URL
+    // (que en el bug original era un redirect a /portal/acceso?error=auth)
+    // y la sirve a TODOS los clicks posteriores del MISMO usuario sin
+    // volver a hitear nuestro server. Logs confirmaron tabla vacía pese a
+    // múltiples taps del usuario. Cambiar query param en cada envío =
+    // URL única = w.meta.me no puede tener cache hit.
+    const cacheBuster = Math.random().toString(36).slice(2, 8);
+    const tokenWithBuster = `${inviteToken}?cb=${cacheBuster}`;
+    const inviteUrl = `${APP_URL}/portal/invite/${tokenWithBuster}`;
 
     const result: {
       partnerId: number;
@@ -141,7 +151,9 @@ export async function POST(request: NextRequest) {
             // because buildMetaPayload filters non-numeric keys.
             portal_url: inviteUrl,
           },
-          buttonUrlParams: [inviteToken],
+          // El cache-buster va en la variable de URL del botón. Meta sustituye
+          // literalmente — la URL final que ve el browser/proxy es única.
+          buttonUrlParams: [tokenWithBuster],
           triggerEvent: "portal_invite",
           // Transactional: siempre real, independiente de COBRANZAS_WA_DRY_RUN.
           // El riel masivo de cobranzas sigue su propio rollout cuando vos
