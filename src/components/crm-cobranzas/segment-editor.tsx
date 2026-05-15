@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Card } from "@/components/ui/card";
-import { ChevronLeft, RefreshCw, Save, Send, Eye } from "lucide-react";
+import { ChevronLeft, RefreshCw, Save, Send, Eye, Search, Users, Mail, Phone, AlertCircle } from "lucide-react";
 
 const fmtUSD = (n: number) => `$${(n || 0).toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -44,6 +44,7 @@ interface PreviewResult {
     customer_name: string;
     customer_cedula_rif: string;
     customer_email: string;
+    customer_phone: string;
     is_company: boolean;
     city: string;
     invoice_count: number;
@@ -73,6 +74,7 @@ export function SegmentEditor({
   const [preview, setPreview] = useState<PreviewResult | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const previewTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const [listSearch, setListSearch] = useState("");
 
   // Cargar segmento existente
   useEffect(() => {
@@ -91,7 +93,9 @@ export function SegmentEditor({
       .finally(() => setLoading(false));
   }, [segmentId]);
 
-  // Preview live debounced
+  // Preview live debounced. Subimos sample_size a 200 para que la sección
+  // "Lista completa" muestre la mayoría del universo. Si count > 200,
+  // mostramos un aviso de que solo se ven los primeros 200.
   const runPreview = useCallback(async (currentFilters: Filters, excludeDays: number) => {
     setPreviewLoading(true);
     try {
@@ -99,7 +103,7 @@ export function SegmentEditor({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         cache: "no-store",
-        body: JSON.stringify({ filters: currentFilters, exclude_recent_days: excludeDays }),
+        body: JSON.stringify({ filters: currentFilters, exclude_recent_days: excludeDays, sample_size: 200 }),
       });
       const json = await res.json();
       if (res.ok) setPreview(json);
@@ -489,6 +493,109 @@ export function SegmentEditor({
           </Card>
         </div>
       </div>
+
+      {/* Lista completa de clientes que cumplen el segmento */}
+      {preview && preview.sample.length > 0 && (
+        <Card className="!p-0 overflow-hidden">
+          <div className="px-4 py-3 border-b border-wuipi-border flex items-center justify-between gap-3 flex-wrap">
+            <div className="flex items-center gap-2">
+              <Users size={16} className="text-[#F46800]" />
+              <h4 className="text-sm font-semibold text-white">
+                Clientes que cumplen ({preview.count})
+              </h4>
+              {preview.count > preview.sample.length && (
+                <span className="text-[10px] text-amber-400 bg-amber-400/10 px-2 py-0.5 rounded-full">
+                  <AlertCircle size={9} className="inline mr-0.5" />
+                  Mostrando primeros {preview.sample.length} de {preview.count}
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="relative">
+                <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-500" />
+                <input
+                  value={listSearch}
+                  onChange={(e) => setListSearch(e.target.value)}
+                  placeholder="Buscar nombre / cédula / email"
+                  className="pl-8 pr-3 py-1.5 rounded-lg bg-wuipi-bg border border-wuipi-border text-xs text-white placeholder-gray-600 focus:border-[#F46800]/50 focus:outline-none w-64"
+                />
+              </div>
+            </div>
+          </div>
+          <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
+            <table className="w-full text-xs">
+              <thead className="sticky top-0 bg-wuipi-card z-10">
+                <tr className="text-gray-500 border-b border-wuipi-border">
+                  <th className="text-left p-2 pl-3 font-medium">Cliente</th>
+                  <th className="text-left p-2 font-medium">Cédula/RIF</th>
+                  <th className="text-center p-2 font-medium">Tipo</th>
+                  <th className="text-left p-2 font-medium">Contacto</th>
+                  <th className="text-left p-2 font-medium">Ciudad</th>
+                  <th className="text-center p-2 font-medium">Drafts</th>
+                  <th className="text-right p-2 font-medium">Total USD</th>
+                  <th className="text-center p-2 font-medium">Vencido más viejo</th>
+                  <th className="text-right p-2 pr-3 font-medium">Días mora</th>
+                </tr>
+              </thead>
+              <tbody>
+                {preview.sample
+                  .filter((c) => {
+                    if (!listSearch.trim()) return true;
+                    const q = listSearch.toLowerCase();
+                    return (
+                      c.customer_name.toLowerCase().includes(q) ||
+                      c.customer_cedula_rif.toLowerCase().includes(q) ||
+                      (c.customer_email && c.customer_email.toLowerCase().includes(q))
+                    );
+                  })
+                  .map((c) => (
+                    <tr key={c.odoo_partner_id} className="border-b border-wuipi-border/50 hover:bg-wuipi-card-hover">
+                      <td className="p-2 pl-3 text-white">{c.customer_name}</td>
+                      <td className="p-2 text-gray-300 font-mono">{c.customer_cedula_rif || "—"}</td>
+                      <td className="p-2 text-center">
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded ${c.is_company ? "bg-purple-400/10 text-purple-400" : "bg-blue-400/10 text-blue-400"}`}>
+                          {c.is_company ? "Empresa" : "Persona"}
+                        </span>
+                      </td>
+                      <td className="p-2 text-gray-400">
+                        <div className="flex items-center gap-2">
+                          {c.customer_email && (
+                            <span title={c.customer_email}><Mail size={11} className="text-emerald-500" /></span>
+                          )}
+                          {c.customer_phone && (
+                            <span title={c.customer_phone}><Phone size={11} className="text-emerald-500" /></span>
+                          )}
+                          {!c.customer_email && !c.customer_phone && (
+                            <span className="text-gray-600">sin contacto</span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="p-2 text-gray-400 text-[11px]">{c.city || "—"}</td>
+                      <td className="p-2 text-center text-gray-300">{c.invoice_count}</td>
+                      <td className="p-2 text-right text-emerald-400 font-medium">{fmtUSD(c.total_due_usd)}</td>
+                      <td className="p-2 text-center text-gray-400 text-[11px]">{c.oldest_due_date || "—"}</td>
+                      <td className="p-2 pr-3 text-right">
+                        <span className={`font-medium ${c.overdue_days >= 60 ? "text-red-400" : c.overdue_days >= 30 ? "text-amber-400" : "text-gray-400"}`}>
+                          {c.overdue_days}d
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </div>
+          {listSearch && (
+            <div className="px-4 py-2 border-t border-wuipi-border text-[10px] text-gray-500">
+              Filtrado local — {preview.sample.filter((c) => {
+                const q = listSearch.toLowerCase();
+                return c.customer_name.toLowerCase().includes(q) ||
+                  c.customer_cedula_rif.toLowerCase().includes(q) ||
+                  (c.customer_email && c.customer_email.toLowerCase().includes(q));
+              }).length} resultados
+            </div>
+          )}
+        </Card>
+      )}
     </div>
   );
 }
