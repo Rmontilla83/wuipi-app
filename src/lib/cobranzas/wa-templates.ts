@@ -46,7 +46,7 @@ export const WA_TEMPLATES_COBRANZAS: Record<string, WATemplateDef> = {
     description: "Invitacion fria al portal. Body=nombre. Boton URL dinamico con token de invitacion.",
     body:
       "Hola {{1}}, te damos la bienvenida a tu *Portal Wuipi* 🌐\n\n" +
-      "Desde tu portal podes:\n" +
+      "Desde tu portal puedes:\n" +
       "✅ Ver tus facturas y servicios\n" +
       "✅ Pagar en bolivares o divisas en 1 clic\n" +
       "✅ Chatear con Soportin, nuestro asistente con IA\n\n" +
@@ -57,11 +57,11 @@ export const WA_TEMPLATES_COBRANZAS: Record<string, WATemplateDef> = {
     ],
     fallback: (p) =>
       `Hola ${p["1"]}, te damos la bienvenida a tu Portal Wuipi.\n\n` +
-      `Desde tu portal podes:\n` +
+      `Desde tu portal puedes:\n` +
       `- Ver tus facturas y servicios\n` +
-      `- Pagar en bolivares o divisas en 1 clic\n` +
-      `- Chatear con Soportin, nuestro asistente con IA\n\n` +
-      `Entra acá (sin contrasena): ${p["portal_url"] || "https://api.wuipi.net/portal/acceso"}\n\n` +
+      `- Pagar en bolívares o divisas en 1 clic\n` +
+      `- Chatear con Soportín, nuestro asistente con IA\n\n` +
+      `Entra aquí (sin contraseña): ${p["portal_url"] || "https://api.wuipi.net/portal/acceso"}\n\n` +
       `💜 WUIPI Telecomunicaciones`,
   },
 

@@ -409,11 +409,11 @@ function InvitePortalModal({
                   <p className="text-[10px] text-[#25D366] font-semibold mb-1.5">WhatsApp</p>
                   <p className="whitespace-pre-line">
                     Hola {customerName.split(" ")[0]}, te damos la bienvenida a tu <strong>Portal Wuipi</strong> 🌐
-                    {"\n\n"}Desde tu portal podes:
+                    {"\n\n"}Desde tu portal puedes:
                     {"\n"}✅ Ver tus facturas y servicios
                     {"\n"}✅ Pagar en bolivares o divisas en 1 clic
                     {"\n"}✅ Chatear con Soportin, nuestro asistente con IA
-                    {"\n\n"}Toca el boton de abajo para entrar (sin contrasena).
+                    {"\n\n"}Toca el botón de abajo para entrar (sin contraseña).
                   </p>
                   <div className="mt-2 px-3 py-1.5 rounded-md bg-white/5 border border-white/10 text-center text-[10px] text-gray-300">
                     🔗 Abrir mi portal

@@ -28,11 +28,81 @@ function errorRedirect(origin: string, code: string) {
   return NextResponse.redirect(url);
 }
 
+// User-Agents que pre-cargan URLs para generar link previews. Cuando WhatsApp
+// recibe un mensaje con un boton URL, su backend (y a veces el cliente)
+// pre-fetcha la URL para generar preview/anti-phishing. Si dejamos que ese
+// pre-fetch corra el flujo completo, consume el Magic Link de Supabase
+// (single-use) y cuando el usuario REAL hace clic, el token ya esta usado
+// → "El enlace de acceso expiro o ya fue usado".
+//
+// Para esos User-Agents devolvemos una pagina HTML minima sin generar el
+// Magic Link. La URL final que ve el bot es la misma que la del usuario, asi
+// que el preview se ve igual, pero el token no se quema.
+const BOT_USER_AGENTS = [
+  "whatsapp",
+  "facebookexternalhit",
+  "facebookcatalog",
+  "instagram",
+  "telegrambot",
+  "twitterbot",
+  "slackbot",
+  "discordbot",
+  "linkedinbot",
+  "googlebot",
+  "bingbot",
+  "yandexbot",
+  "skypeuripreview",
+];
+
+function isBotPrefetch(userAgent: string | null): boolean {
+  if (!userAgent) return false;
+  const ua = userAgent.toLowerCase();
+  return BOT_USER_AGENTS.some((bot) => ua.includes(bot));
+}
+
+function botPreviewPage(): NextResponse {
+  // HTML minimo que sirve para preview: titulo + descripcion + nada de
+  // JavaScript ni autoredirect. El bot extrae meta tags para mostrarlas en el
+  // mensaje; el usuario humano nunca ve este HTML porque siempre llega con
+  // un User-Agent de browser real y entra al flujo del Magic Link.
+  const html = `<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Portal Wuipi</title>
+<meta name="description" content="Tu portal de cliente Wuipi — facturas, servicios y pago en un solo lugar.">
+<meta property="og:title" content="Portal Wuipi">
+<meta property="og:description" content="Accede a tu cuenta Wuipi sin contraseña. Toca el botón para entrar.">
+<meta property="og:type" content="website">
+</head>
+<body>
+<h1>Portal Wuipi</h1>
+<p>Tu portal personal de cliente. Toca el botón en tu WhatsApp o correo para entrar.</p>
+</body>
+</html>`;
+  return new NextResponse(html, {
+    status: 200,
+    headers: {
+      "Content-Type": "text/html; charset=utf-8",
+      // Importante: no-store evita que la pagina del bot llegue al cache CDN
+      // y se sirva al usuario real cuando hace clic.
+      "Cache-Control": "private, no-store, no-cache, must-revalidate",
+    },
+  });
+}
+
 export async function GET(
   request: NextRequest,
   { params }: { params: { token: string } }
 ) {
   const origin = request.nextUrl.origin;
+
+  // Bot pre-fetch guard: si el User-Agent es un crawler de link preview,
+  // devolvemos una pagina simple sin generar el Magic Link. Esto evita que
+  // el OTP single-use se queme antes de que el usuario haga clic.
+  if (isBotPrefetch(request.headers.get("user-agent"))) {
+    return botPreviewPage();
+  }
 
   // Rate limit: 20 redemptions/min per IP. Generous so the legitimate user
   // who hammers the button a few times isn't blocked, but stops scrapers

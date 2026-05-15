@@ -1,12 +1,15 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import { usePortal } from "@/lib/portal/context";
 import { Card } from "@/components/ui/card";
-import {
-  RefreshCw, Headphones, Send, Bot, Clock, CheckCircle2,
-  AlertCircle, MessageSquare, ChevronDown,
-} from "lucide-react";
+import { Send, Bot } from "lucide-react";
+
+// Página de Soporte del portal. Por ahora SOLO chat con Soportín — la creación
+// de tickets quedó oculta hasta que el CRM interno pase a producción. Soportín
+// ya escala al WhatsApp del departamento correcto (soporte/cuentas/ventas)
+// según la consulta del cliente, así que no se pierde ningún caso por no tener
+// el botón de "Crear ticket".
 
 interface WhatsAppHandoff {
   department: string;
@@ -22,50 +25,16 @@ interface ChatMessage {
   whatsapp?: WhatsAppHandoff | null;
 }
 
-interface PortalTicket {
-  id: string;
-  subject: string;
-  description: string | null;
-  category: string;
-  status: string;
-  created_at: string;
-}
-
-const CATEGORIES = [
-  { value: "soporte_tecnico", label: "Soporte Tecnico" },
-  { value: "facturacion", label: "Facturacion" },
-  { value: "cambio_plan", label: "Cambio de plan" },
-  { value: "general", label: "Consulta general" },
-];
-
 const SUGGESTED = [
-  "Cuanto debo actualmente?",
-  "Explicame mis facturas pendientes",
-  "Que plan tengo contratado?",
+  "¿Cuánto debo actualmente?",
+  "Explícame mis facturas pendientes",
+  "¿Qué plan tengo contratado?",
   "Tengo problemas con mi internet",
   "Quiero cambiar de plan",
 ];
 
-function StatusBadge({ status }: { status: string }) {
-  const cfg: Record<string, { label: string; color: string }> = {
-    open: { label: "Abierto", color: "text-blue-400 bg-blue-400/10" },
-    in_progress: { label: "En proceso", color: "text-amber-400 bg-amber-400/10" },
-    resolved: { label: "Resuelto", color: "text-emerald-400 bg-emerald-400/10" },
-    closed: { label: "Cerrado", color: "text-gray-400 bg-gray-400/10" },
-  };
-  const c = cfg[status] || { label: status, color: "text-gray-400 bg-gray-400/10" };
-  return <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-medium ${c.color}`}>{c.label}</span>;
-}
-
 export default function PortalSoporte() {
-  const { partnerId, customerName, email } = usePortal();
-  const [tickets, setTickets] = useState<PortalTicket[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [showForm, setShowForm] = useState(false);
-  const [category, setCategory] = useState("general");
-  const [subject, setSubject] = useState("");
-  const [description, setDescription] = useState("");
-  const [sending, setSending] = useState(false);
+  const { partnerId, customerName } = usePortal();
 
   // Chat state
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
@@ -76,22 +45,6 @@ export default function PortalSoporte() {
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chatMessages, isTyping]);
-
-  const fetchTickets = useCallback(async () => {
-    try {
-      const res = await fetch(`/api/portal/tickets?partner_id=${partnerId}`);
-      if (res.ok) {
-        const data = await res.json();
-        setTickets(data.tickets || []);
-      }
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  }, [partnerId]);
-
-  useEffect(() => { fetchTickets(); }, [fetchTickets]);
 
   const handleSend = async (text?: string) => {
     const msg = text || chatInput;
@@ -121,7 +74,7 @@ export default function PortalSoporte() {
       setChatMessages(prev => [...prev, {
         id: `a-${Date.now()}`,
         role: "assistant",
-        content: data.content || "Lo siento, hubo un error. Intenta de nuevo.",
+        content: data.content || "Lo siento, hubo un error. Inténtalo de nuevo.",
         timestamp: new Date().toISOString(),
         whatsapp: data.whatsapp || null,
       }]);
@@ -129,7 +82,7 @@ export default function PortalSoporte() {
       setChatMessages(prev => [...prev, {
         id: `e-${Date.now()}`,
         role: "assistant",
-        content: "No pude conectar con el asistente. Intenta de nuevo en un momento.",
+        content: "No pude conectar con el asistente. Inténtalo de nuevo en un momento.",
         timestamp: new Date().toISOString(),
       }]);
     } finally {
@@ -137,49 +90,13 @@ export default function PortalSoporte() {
     }
   };
 
-  const handleCreate = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!subject.trim()) return;
-    setSending(true);
-    try {
-      const res = await fetch("/api/portal/tickets", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          odoo_partner_id: partnerId,
-          customer_email: email,
-          customer_name: customerName,
-          subject: subject.trim(),
-          description: description.trim() || null,
-          category,
-        }),
-      });
-      if (res.ok) {
-        setShowForm(false);
-        setSubject("");
-        setDescription("");
-        setCategory("general");
-        fetchTickets();
-      }
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setSending(false);
-    }
-  };
-
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div>
         <h2 className="text-lg font-bold text-white">Soporte</h2>
-        {!showForm && (
-          <button
-            onClick={() => setShowForm(true)}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-wuipi-accent text-white text-sm font-medium hover:opacity-90"
-          >
-            <MessageSquare size={14} /> Crear ticket
-          </button>
-        )}
+        <p className="text-xs text-gray-500 mt-0.5">
+          Chatea con Soportín o te derivamos al departamento correcto por WhatsApp.
+        </p>
       </div>
 
       {/* Soportin Chat */}
@@ -190,23 +107,23 @@ export default function PortalSoporte() {
             <Bot size={18} className="text-[#0F71F2]" />
           </div>
           <div className="flex-1">
-            <p className="text-white text-sm font-bold">Soportin IA</p>
+            <p className="text-white text-sm font-bold">Soportín IA</p>
             <p className="text-gray-400 text-[10px]">Asistente virtual 24/7 — conoce tu cuenta y servicios</p>
           </div>
           <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium text-emerald-400 bg-emerald-400/10">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-            En linea
+            En línea
           </span>
         </div>
 
         {/* Messages */}
-        <div className="h-[350px] overflow-auto p-4 space-y-3">
+        <div className="h-[420px] overflow-auto p-4 space-y-3">
           {chatMessages.length === 0 && (
             <div className="text-center py-6">
               <Bot size={40} className="mx-auto mb-3 text-[#0F71F2]/40" />
-              <p className="text-sm font-medium text-white mb-1">Hola {customerName?.split(" ")[0] || ""}! Soy Soportin</p>
+              <p className="text-sm font-medium text-white mb-1">¡Hola {customerName?.split(" ")[0] || ""}! Soy Soportín</p>
               <p className="text-xs text-gray-500 mb-4">
-                Tengo acceso a tu cuenta, facturas y servicios. Preguntame lo que necesites.
+                Tengo acceso a tu cuenta, facturas y servicios. Pregúntame lo que necesites.
               </p>
               <div className="flex flex-wrap gap-2 justify-center">
                 {SUGGESTED.map(q => (
@@ -229,7 +146,7 @@ export default function PortalSoporte() {
                 {msg.role === "assistant" && (
                   <div className="flex items-center gap-1.5 mb-1">
                     <Bot size={12} className="text-[#0F71F2]" />
-                    <span className="text-[10px] text-[#0F71F2] font-medium">Soportin</span>
+                    <span className="text-[10px] text-[#0F71F2] font-medium">Soportín</span>
                   </div>
                 )}
                 <p className="text-sm text-gray-200 whitespace-pre-wrap leading-relaxed">{msg.content}</p>
@@ -285,86 +202,6 @@ export default function PortalSoporte() {
       </Card>
 
       <style>{`@keyframes soportinPulse { 0%,100%{opacity:.3;transform:scale(.8)} 50%{opacity:1;transform:scale(1.1)} }`}</style>
-
-      {/* Create ticket form */}
-      {showForm && (
-        <Card className="!p-4">
-          <h3 className="text-sm font-semibold text-white mb-3">Nuevo ticket</h3>
-          <form onSubmit={handleCreate} className="space-y-3">
-            <div>
-              <label className="text-xs text-gray-400 block mb-1">Categoria</label>
-              <div className="relative">
-                <select
-                  value={category}
-                  onChange={(e) => setCategory(e.target.value)}
-                  className="appearance-none w-full px-3 py-2 pr-8 rounded-lg bg-wuipi-bg border border-wuipi-border text-sm text-white focus:border-wuipi-accent/50 focus:outline-none"
-                >
-                  {CATEGORIES.map((c) => (
-                    <option key={c.value} value={c.value}>{c.label}</option>
-                  ))}
-                </select>
-                <ChevronDown size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" />
-              </div>
-            </div>
-            <div>
-              <label className="text-xs text-gray-400 block mb-1">Asunto *</label>
-              <input
-                value={subject}
-                onChange={(e) => setSubject(e.target.value)}
-                required
-                placeholder="Describe brevemente tu problema"
-                className="w-full px-3 py-2 rounded-lg bg-wuipi-bg border border-wuipi-border text-sm text-white placeholder-gray-600 focus:border-wuipi-accent/50 focus:outline-none"
-              />
-            </div>
-            <div>
-              <label className="text-xs text-gray-400 block mb-1">Descripcion (opcional)</label>
-              <textarea
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                rows={3}
-                placeholder="Detalla tu situacion..."
-                className="w-full px-3 py-2 rounded-lg bg-wuipi-bg border border-wuipi-border text-sm text-white placeholder-gray-600 focus:border-wuipi-accent/50 focus:outline-none resize-none"
-              />
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                type="submit"
-                disabled={sending || !subject.trim()}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-wuipi-accent text-white text-sm font-medium hover:opacity-90 disabled:opacity-50"
-              >
-                {sending ? <RefreshCw size={14} className="animate-spin" /> : <Send size={14} />}
-                Enviar
-              </button>
-              <button type="button" onClick={() => setShowForm(false)} className="text-xs text-gray-500 hover:text-gray-300">
-                Cancelar
-              </button>
-            </div>
-          </form>
-        </Card>
-      )}
-
-      {/* Tickets list */}
-      {loading ? (
-        <div className="flex justify-center py-12"><RefreshCw size={20} className="animate-spin text-gray-500" /></div>
-      ) : tickets.length > 0 && (
-        <div className="space-y-2">
-          <h3 className="text-sm font-medium text-gray-400">Tickets anteriores</h3>
-          {tickets.map((t) => (
-            <Card key={t.id} className="!p-4">
-              <div className="flex items-start justify-between">
-                <div>
-                  <p className="text-white text-sm font-medium">{t.subject}</p>
-                  <p className="text-gray-500 text-[10px] mt-0.5">
-                    {CATEGORIES.find((c) => c.value === t.category)?.label || t.category} — {new Date(t.created_at).toLocaleDateString("es-VE")}
-                  </p>
-                  {t.description && <p className="text-gray-400 text-xs mt-1 line-clamp-2">{t.description}</p>}
-                </div>
-                <StatusBadge status={t.status} />
-              </div>
-            </Card>
-          ))}
-        </div>
-      )}
     </div>
   );
 }

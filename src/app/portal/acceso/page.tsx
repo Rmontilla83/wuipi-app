@@ -9,16 +9,16 @@ import { Mail, RefreshCw, CheckCircle2, AlertCircle } from "lucide-react";
 // (/auth/confirm, /portal/auth/callback, /portal/invite/[token]) a mensajes
 // user-friendly. Si no esta mapeado, mostramos el codigo crudo.
 const ERROR_MESSAGES: Record<string, string> = {
-  auth: "El enlace de acceso expiró o ya fue usado. Pedí uno nuevo abajo.",
-  callback: "Hubo un problema al iniciar sesión. Probá de nuevo.",
-  invalid_token: "El enlace que usaste no es válido. Pedí una nueva invitación.",
+  auth: "El enlace de acceso expiró o ya fue usado. Pide uno nuevo abajo.",
+  callback: "Hubo un problema al iniciar sesión. Inténtalo de nuevo.",
+  invalid_token: "El enlace que usaste no es válido. Pide una nueva invitación.",
   partner_not_found: "No encontramos tu cuenta de cliente. Contacta a soporte.",
   no_email: "Tu cuenta no tiene email registrado. Contacta a soporte para cargarlo.",
-  odoo_unavailable: "No pudimos verificar tu cuenta en este momento. Probá de nuevo.",
-  odoo_error: "Error temporal verificando tu cuenta. Probá de nuevo.",
+  odoo_unavailable: "No pudimos verificar tu cuenta en este momento. Inténtalo de nuevo.",
+  odoo_error: "Error temporal verificando tu cuenta. Inténtalo de nuevo.",
   create_user_failed: "Hubo un problema creando tu acceso. Contacta a soporte.",
-  magiclink_failed: "No pudimos enviar tu enlace de acceso. Probá ingresar tu email abajo.",
-  rate_limit: "Demasiados intentos. Esperá un momento y volvé a probar.",
+  magiclink_failed: "No pudimos enviar tu enlace de acceso. Intenta ingresar tu email abajo.",
+  rate_limit: "Demasiados intentos. Espera un momento y vuelve a intentar.",
 };
 
 export default function PortalLoginPage() {
@@ -122,7 +122,7 @@ export default function PortalLoginPage() {
                 <div className="flex items-start gap-2 p-3 bg-emerald-500/5 border border-emerald-500/20 rounded-xl">
                   <CheckCircle2 size={14} className="text-emerald-400 mt-0.5 shrink-0" />
                   <p className="text-xs text-emerald-300">
-                    Casi listo. Confirmá tu email y te mandamos el enlace de acceso al instante.
+                    Casi listo. Confirma tu email y te enviamos el enlace de acceso al instante.
                   </p>
                 </div>
               )}

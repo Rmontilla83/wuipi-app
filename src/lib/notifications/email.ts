@@ -511,7 +511,7 @@ function buildPortalInviteEmailHtml(params: SendPortalInviteEmailParams): string
     <tr>
       <td style="padding:24px 40px 32px;" class="inner-pad">
         <p style="margin:0;font-family:${FONT_STACK};font-size:12px;color:#9ca3af;text-align:center;line-height:1.55;">
-          Este link es personal y permanente — podes guardarlo para volver cuando quieras.
+          Este link es personal y permanente — puedes guardarlo para volver cuando quieras.
         </p>
       </td>
     </tr>
