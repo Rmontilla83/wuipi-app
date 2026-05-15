@@ -39,7 +39,7 @@ export const WA_TEMPLATES_COBRANZAS: Record<string, WATemplateDef> = {
   // Al enviar pasamos como buttonUrlParams[0] el token HMAC del cliente
   // (generado con generatePortalInviteToken) + un cache-buster.
   invitacion_portal: {
-    name: "invitacion_portal_v2",
+    name: "invitacion_portal_v3",
     lang: "es",
     category: "utility",
     description: "Invitacion al portal (path /i nuevo). Body=nombre. Boton URL dinamico con token + cache buster.",
