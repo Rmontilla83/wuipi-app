@@ -18,6 +18,7 @@ export async function middleware(request: NextRequest) {
     "/api/pagar/",              // Public client payment endpoints
     "/pagar/cliente/",          // Public client payment page
     "/portal/",                 // Customer portal (own auth at layout level)
+    "/i/",                      // Short-path invite alias (sets wpi_session cookie)
     "/api/portal/verify-email", // Pre-login email check (must be public)
     "/api/kommo/ventas/webhook", // Kommo sales bot webhook (external)
   ];
