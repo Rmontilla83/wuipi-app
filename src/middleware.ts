@@ -29,6 +29,9 @@ export async function middleware(request: NextRequest) {
     // Mismo razonamiento: /api/odoo/clients/[id] tiene dual auth interno
     // que valida ownership (portal client solo ve su propio data).
     "/api/odoo/clients/",
+    // Endpoint público para logs de errores client-side desde global-error
+    // y /pagar/error boundaries. Sin auth — solo escribe a portal_invite_logs.
+    "/api/log-client-error",
     "/api/kommo/ventas/webhook", // Kommo sales bot webhook (external)
   ];
   const { pathname } = request.nextUrl;
