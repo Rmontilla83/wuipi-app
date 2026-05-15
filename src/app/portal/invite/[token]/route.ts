@@ -23,9 +23,9 @@ export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from "next/server";
 import { verifyPortalInviteToken } from "@/lib/utils/portal-invite-token";
-import { createAdminSupabase } from "@/lib/supabase/server";
 import { searchRead, isOdooConfigured } from "@/lib/integrations/odoo";
 import { checkRateLimit, getClientIP } from "@/lib/utils/rate-limit";
+import { setPortalSessionOnResponse } from "@/lib/auth/portal-session";
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://api.wuipi.net";
 
@@ -140,11 +140,18 @@ export async function GET(
 }
 
 /**
- * POST: the actual auth path. Triggered by the JS auto-submit in the
- * interstitial. Validates the token, looks up the partner in Odoo, generates
- * a fresh Supabase Magic Link, and redirects to /auth/confirm. Returns 303
- * (See Other) so the browser follows the redirect with a clean GET to
- * /auth/confirm — proper RFC behavior after POST.
+ * POST: triggered by the JS auto-submit in the interstitial. Validates the
+ * token, looks up the partner in Odoo, and **sets a portal-session cookie
+ * directly** (HttpOnly + Secure + SameSite=Lax, HMAC-signed, 30-day TTL).
+ *
+ * We DELIBERATELY skip Supabase Auth here. The Magic Link / verifyOtp flow
+ * was fragile inside WhatsApp's webview (cookies didn't persist across the
+ * 303→307 redirect chain, cached responses defeated server-side fixes, etc.).
+ * Our own HMAC cookie eliminates every variable: one request, one
+ * Set-Cookie, redirect to /portal/inicio. The portal layout + getPortalCaller
+ * read this cookie as an authoritative session source.
+ *
+ * Returns 303 (See Other) so the browser follows with a clean GET.
  */
 export async function POST(
   request: NextRequest,
@@ -168,7 +175,8 @@ export async function POST(
     return errorRedirect(origin, "odoo_unavailable");
   }
 
-  // Lookup partner email from Odoo (source of truth — token only carries id).
+  // Lookup partner from Odoo. Caching name/email in the cookie avoids extra
+  // Odoo round-trips on every portal page load.
   let partner: { id: number; name: string; email: string } | null = null;
   try {
     const partners = await searchRead("res.partner", [
@@ -186,65 +194,31 @@ export async function POST(
     return errorRedirect(origin, "partner_not_found");
   }
 
+  // Email no es estrictamente requerido para la cookie de sesión, pero la UX
+  // del portal (logout, soportin con email visible, etc.) lo asume. Si no hay
+  // email registrado, no completamos el flujo — el admin debe agregarlo
+  // primero. Esto mantiene consistencia con la regla del endpoint
+  // /api/portal/invite (que también falla si no hay email).
   const email = (partner.email || "").trim();
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return errorRedirect(origin, "no_email");
   }
 
-  const admin = createAdminSupabase();
+  const portalUrl = new URL("/portal/inicio", APP_URL);
+  const res = NextResponse.redirect(portalUrl, 303);
 
-  let linkResult = await admin.auth.admin.generateLink({
-    type: "magiclink",
+  // Setear la cookie HMAC. El browser la mandará en el GET inmediato a
+  // /portal/inicio que viene del 303, y a partir de ahí en TODOS los
+  // requests al portal y a /api/portal/*.
+  setPortalSessionOnResponse(res, {
+    pid: partner.id,
+    name: partner.name,
     email,
   });
 
-  // Create the user on first use, then retry the magic link generation once.
-  if (linkResult.error) {
-    const msg = (linkResult.error.message || "").toLowerCase();
-    const looksLikeMissingUser = msg.includes("not found")
-      || msg.includes("does not exist")
-      || msg.includes("invalid login credentials");
-
-    if (looksLikeMissingUser) {
-      const createResult = await admin.auth.admin.createUser({
-        email,
-        email_confirm: true,
-        app_metadata: {
-          odoo_partner_id: partner.id,
-          customer_name: partner.name,
-          role: "cliente",
-        },
-      });
-      if (createResult.error) {
-        console.error("[Portal Invite POST] createUser failed:", createResult.error.message);
-        return errorRedirect(origin, "create_user_failed");
-      }
-      linkResult = await admin.auth.admin.generateLink({
-        type: "magiclink",
-        email,
-      });
-    }
-
-    if (linkResult.error) {
-      console.error("[Portal Invite POST] generateLink failed:", linkResult.error.message);
-      return errorRedirect(origin, "magiclink_failed");
-    }
-  }
-
-  const hashedToken = linkResult.data?.properties?.hashed_token;
-  if (!hashedToken) {
-    console.error("[Portal Invite POST] generateLink returned no hashed_token");
-    return errorRedirect(origin, "no_token");
-  }
-
-  const confirmUrl = new URL("/auth/confirm", APP_URL);
-  confirmUrl.searchParams.set("token_hash", hashedToken);
-  confirmUrl.searchParams.set("type", "magiclink");
-  confirmUrl.searchParams.set("next", "/portal/inicio");
-
-  // 303 See Other: tells the browser to follow the redirect with GET, which
-  // is what /auth/confirm expects. Prevents the browser from re-POSTing.
-  const res = NextResponse.redirect(confirmUrl, 303);
+  // No-cache: vital para que el webview de WA no sirva esta respuesta
+  // cacheada en futuros clicks del mismo botón.
   for (const [k, v] of Object.entries(NO_CACHE_HEADERS)) res.headers.set(k, v);
+
   return res;
 }

@@ -5,13 +5,27 @@ import { PortalProvider } from "@/lib/portal/context";
 import { PortalHeader } from "@/components/portal/header";
 import { PortalNav } from "@/components/portal/nav";
 import { QueryProvider } from "@/components/layout/query-provider";
+import { getPortalSessionFromCookieJar } from "@/lib/auth/portal-session";
 
 export default async function PortalLayout({ children }: { children: React.ReactNode }) {
+  // Dos fuentes de auth para el portal:
+  // 1. Cookie wpi_session (HMAC propio, seteada por /portal/invite/[token]).
+  //    Es el camino primario para clientes que llegan desde WA/email — no
+  //    depende de Supabase ni del webview ejecutando el flujo OTP correcto.
+  // 2. Sesión Supabase (Magic Link via /portal/acceso). Camino legacy para
+  //    clientes que escriben su email manualmente o admins que entran como
+  //    super_admin con app_metadata.odoo_partner_id.
+  // Si CUALQUIERA está presente, el cliente está autenticado.
+  const portalSession = getPortalSessionFromCookieJar();
+
   const supabase = createServerSupabase();
   const { data: { user } } = await supabase.auth.getUser();
 
-  const partnerId = user?.app_metadata?.odoo_partner_id;
-  const customerName = user?.app_metadata?.customer_name || "";
+  // partnerId/customerName priorizando la sesión Supabase (puede tener admin
+  // role override más rico) y cayendo a la cookie propia.
+  const partnerId = user?.app_metadata?.odoo_partner_id ?? portalSession?.pid;
+  const customerName = user?.app_metadata?.customer_name || portalSession?.name || "";
+  const email = user?.email || portalSession?.email || "";
 
   // Routes that intentionally render WITHOUT a portal session:
   //   - /portal/acceso         → magic-link login page
@@ -28,7 +42,10 @@ export default async function PortalLayout({ children }: { children: React.React
     pathname.startsWith("/portal/invite") ||
     pathname.startsWith("/portal/preview");
 
-  if (!user || !partnerId) {
+  // Sin sesión válida (ninguna de las dos) → redirect a /portal/acceso para
+  // que pida Magic Link manualmente.
+  const isAuthenticated = !!partnerId;
+  if (!isAuthenticated) {
     if (!isPublicPortalRoute) {
       redirect("/portal/acceso");
     }
@@ -39,7 +56,7 @@ export default async function PortalLayout({ children }: { children: React.React
 
   return (
     <QueryProvider>
-      <PortalProvider partnerId={partnerId} customerName={customerName} email={user.email || ""}>
+      <PortalProvider partnerId={partnerId} customerName={customerName} email={email}>
         <div className="min-h-screen bg-wuipi-bg flex flex-col">
           <PortalHeader />
           <PortalNav />

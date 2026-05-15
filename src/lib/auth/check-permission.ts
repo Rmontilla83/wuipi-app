@@ -2,6 +2,7 @@
 import { createServerSupabase, createAdminSupabase } from "@/lib/supabase/server";
 import { can } from "@/lib/auth/permissions";
 import { getPermissionsForRole } from "@/lib/dal/permissions";
+import { getPortalSessionFromCookieJar } from "@/lib/auth/portal-session";
 import type { Module, Action } from "@/lib/auth/permissions";
 import type { UserRole } from "@/types";
 
@@ -41,11 +42,35 @@ export async function getCallerProfile(): Promise<CallerInfo | null> {
 }
 
 /**
- * Get the current portal user (cliente) from Supabase session.
- * Verifies JWT server-side and extracts odoo_partner_id from app_metadata.
- * Returns null if not authenticated or not a portal client.
+ * Get the current portal user (cliente) from Supabase session OR from the
+ * HMAC `wpi_session` cookie set by /portal/invite/[token].
+ *
+ * The two sources coexist intentionally:
+ *  - `wpi_session` is the primary path for customers arriving from WA/email
+ *    invitations. It avoids Supabase Auth entirely, sidestepping all the
+ *    webview/cookie/cache fragility we hit in production.
+ *  - Supabase session is the legacy path for clients who log in by typing
+ *    their email at /portal/acceso and clicking the Magic Link from the
+ *    email itself, plus for admins (super_admin) who are inspecting a
+ *    customer view.
+ *
+ * Returns null only if NEITHER source identifies a portal client.
  */
 export async function getPortalCaller(): Promise<PortalCallerInfo | null> {
+  // 1. Cookie HMAC propia (preferida — no toca Supabase).
+  const session = getPortalSessionFromCookieJar();
+  if (session && session.pid > 0) {
+    return {
+      // Sin user.id real de Supabase, derivamos uno determinístico desde el
+      // partnerId. Mantiene shape consistente con la rama Supabase.
+      id: `portal-session:${session.pid}`,
+      email: session.email || "",
+      role: "cliente",
+      odoo_partner_id: session.pid,
+    };
+  }
+
+  // 2. Sesión Supabase clásica.
   const sb = createServerSupabase();
   const { data: { user }, error } = await sb.auth.getUser();
   if (error || !user) return null;

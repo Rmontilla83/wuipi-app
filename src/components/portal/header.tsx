@@ -1,7 +1,6 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
 import { LogOut, User } from "lucide-react";
 import { usePortal } from "@/lib/portal/context";
 
@@ -10,9 +9,19 @@ export function PortalHeader() {
   const { customerName } = usePortal();
 
   const handleLogout = async () => {
-    const supabase = createClient();
-    await supabase.auth.signOut();
+    // El endpoint /api/portal/logout limpia AMBAS sesiones: la cookie HMAC
+    // propia (wpi_session) que setea /portal/invite, y la sesión Supabase
+    // del Magic Link clásico. Esto es lo correcto porque el portal acepta
+    // cualquiera de las dos como autoridad — limpiar solo una dejaría al
+    // cliente sesión-parcial que confunde al usuario.
+    try {
+      await fetch("/api/portal/logout", { method: "POST", cache: "no-store" });
+    } catch {
+      // Ignorar — el redirect a /portal/acceso de todas formas pone al user
+      // fuera del portal; si la cookie quedó, expira sola en 30 días.
+    }
     router.push("/portal/acceso");
+    router.refresh();
   };
 
   return (
