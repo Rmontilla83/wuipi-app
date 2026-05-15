@@ -120,6 +120,10 @@ export async function POST(
       template: templateKey,
       params: waParams,
       triggerEvent: "manual_test",  // se puede agregar trigger nuevo "manual_send_link" si lo querermos distinguir
+      // Acción manual del admin desde la tarjeta del cliente — siempre real,
+      // independiente de COBRANZAS_WA_DRY_RUN. Sin esto el envío quedaba
+      // como dry-run y el admin veía "Enviado" pero el cliente nunca recibía.
+      forceLive: true,
     });
 
     return apiSuccess({
