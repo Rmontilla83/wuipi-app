@@ -30,7 +30,10 @@ export default function CobranzasPage() {
   return (
     <>
       <TopBar title="Cobranzas" subtitle="Gestión de cobranzas, pagos y observabilidad" />
-      <div className="p-4 md:p-6">
+      {/* flex-1 + overflow-auto: el dashboard layout pone overflow-hidden en
+          <main> y delega el scroll al contenido de cada página. Sin esto, tabs
+          con contenido alto (ej. segmentos editor) se cortan sin scroll. */}
+      <div className="flex-1 overflow-auto p-4 md:p-6">
         {/* Tabs */}
         <div className="flex items-center gap-1 mb-4 border-b border-wuipi-border overflow-x-auto">
           {tabs.map((t) => (
