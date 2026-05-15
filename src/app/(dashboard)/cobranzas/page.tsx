@@ -4,25 +4,27 @@ import { useState } from "react";
 import { TopBar } from "@/components/layout/topbar";
 import CRMCobranzasTab from "@/components/crm-cobranzas/crm-cobranzas-tab";
 import CampaignsTab from "@/components/crm-cobranzas/campaigns-tab";
+import SegmentsTab from "@/components/crm-cobranzas/segments-tab";
 import CarteraTab from "@/components/crm-cobranzas/cartera-tab";
 import PaymentsReceivedTab from "@/components/crm-cobranzas/payments-received-tab";
 import GatewayLogsTab from "@/components/crm-cobranzas/gateway-logs-tab";
 import SyncOdooTab from "@/components/crm-cobranzas/sync-odoo-tab";
 import WAOutboxTab from "@/components/crm-cobranzas/wa-outbox-tab";
 
-type Tab = "cartera" | "campanas" | "casos" | "pagos" | "logs" | "sync" | "wa";
+type Tab = "cartera" | "segmentos" | "campanas" | "casos" | "pagos" | "logs" | "sync" | "wa";
 
 export default function CobranzasPage() {
   const [tab, setTab] = useState<Tab>("cartera");
 
   const tabs: { id: Tab; label: string }[] = [
-    { id: "cartera",  label: "Cartera" },
-    { id: "campanas", label: "Campañas de Cobro" },
-    { id: "casos",    label: "Gestión de Casos" },
-    { id: "pagos",    label: "Pagos Recibidos" },
-    { id: "logs",     label: "Logs Pasarelas" },
-    { id: "sync",     label: "Sync Odoo" },
-    { id: "wa",       label: "WA Outbox" },
+    { id: "cartera",   label: "Cartera" },
+    { id: "segmentos", label: "Segmentos" },
+    { id: "campanas",  label: "Campañas de Cobro" },
+    { id: "casos",     label: "Gestión de Casos" },
+    { id: "pagos",     label: "Pagos Recibidos" },
+    { id: "logs",      label: "Logs Pasarelas" },
+    { id: "sync",      label: "Sync Odoo" },
+    { id: "wa",        label: "WA Outbox" },
   ];
 
   return (
@@ -49,6 +51,7 @@ export default function CobranzasPage() {
         {tab === "cartera" && (
           <CarteraTab onCampaignCreated={() => setTab("campanas")} />
         )}
+        {tab === "segmentos" && <SegmentsTab />}
         {tab === "campanas" && <CampaignsTab />}
         {tab === "casos" && <CRMCobranzasTab />}
         {tab === "pagos" && <PaymentsReceivedTab />}
