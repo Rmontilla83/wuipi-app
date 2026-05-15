@@ -191,6 +191,8 @@ const PARTNER_FIELDS = [
   "phone",
   "vat",              // RIF/Cedula
   "credit",           // Receivable balance (negative = client has credit in favor)
+  "is_company",       // True para personas jurídicas
+  "city",             // Para filtros geográficos
 ] as const;
 
 export interface OdooInvoice {
