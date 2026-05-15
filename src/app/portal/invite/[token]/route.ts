@@ -1,16 +1,23 @@
-// GET /portal/invite/[token]
+// /portal/invite/[token]
 //
 // Public endpoint that consumes a permanent portal-invite token (HMAC of
-// partnerId) and redirects the customer to a freshly-generated Supabase
-// Magic Link. This is the "front door" of the portal for customers who:
-//   - Got invited from the admin's "Invitar al portal" button (WA + email)
-//   - Clicked "Ir a mi portal" after paying via /pagar/[token]
-//   - Followed a long-lived link from an email campaign
+// partnerId) and authenticates the customer into the portal.
 //
-// The invite token itself is permanent (HMAC, no expiry). The Supabase OTP
-// it generates expires in 24h, but the customer doesn't care — they just
-// re-click the same WA button and get another fresh OTP. This is how we
-// work around Supabase's 24h cap on OTP expiration for our 30-day campaigns.
+// CRITICAL: This route handles GET and POST DIFFERENTLY by design.
+//
+// GET → renders a minimal HTML interstitial that auto-submits a POST via JS.
+//       The Magic Link is NOT generated on GET. This is the fix for the bug
+//       where Meta/WhatsApp/email previewers pre-fetch the URL to build link
+//       cards, consuming the single-use Supabase Magic Link before the real
+//       user clicks. With the interstitial, prefetchers see a static page and
+//       cannot trigger auth (they don't execute JS).
+//
+// POST → generates a fresh Magic Link via Supabase Admin and redirects to
+//        /auth/confirm. Only real users with JS reach this handler.
+//
+// The token itself is permanent (HMAC, no expiry). The Supabase OTP generated
+// in the POST expires in 24h, but the customer doesn't care — they just
+// re-click the same WA/email button and get another fresh OTP.
 
 export const dynamic = "force-dynamic";
 
@@ -28,87 +35,115 @@ function errorRedirect(origin: string, code: string) {
   return NextResponse.redirect(url);
 }
 
-// User-Agents que pre-cargan URLs para generar link previews. Cuando WhatsApp
-// recibe un mensaje con un boton URL, su backend (y a veces el cliente)
-// pre-fetcha la URL para generar preview/anti-phishing. Si dejamos que ese
-// pre-fetch corra el flujo completo, consume el Magic Link de Supabase
-// (single-use) y cuando el usuario REAL hace clic, el token ya esta usado
-// → "El enlace de acceso expiro o ya fue usado".
-//
-// Para esos User-Agents devolvemos una pagina HTML minima sin generar el
-// Magic Link. La URL final que ve el bot es la misma que la del usuario, asi
-// que el preview se ve igual, pero el token no se quema.
-const BOT_USER_AGENTS = [
-  "whatsapp",
-  "facebookexternalhit",
-  "facebookcatalog",
-  "instagram",
-  "telegrambot",
-  "twitterbot",
-  "slackbot",
-  "discordbot",
-  "linkedinbot",
-  "googlebot",
-  "bingbot",
-  "yandexbot",
-  "skypeuripreview",
-];
-
-function isBotPrefetch(userAgent: string | null): boolean {
-  if (!userAgent) return false;
-  const ua = userAgent.toLowerCase();
-  return BOT_USER_AGENTS.some((bot) => ua.includes(bot));
-}
-
-function botPreviewPage(): NextResponse {
-  // HTML minimo que sirve para preview: titulo + descripcion + nada de
-  // JavaScript ni autoredirect. El bot extrae meta tags para mostrarlas en el
-  // mensaje; el usuario humano nunca ve este HTML porque siempre llega con
-  // un User-Agent de browser real y entra al flujo del Magic Link.
+/**
+ * Interstitial HTML. Validates the token superficially in the URL (server-side)
+ * but never touches Supabase. JS auto-submits a POST that does the real auth.
+ * The <noscript> fallback sends users without JS to /portal/acceso with email
+ * pre-filled (they can request a fresh magic link manually).
+ */
+function interstitialPage(token: string): NextResponse {
   const html = `<!DOCTYPE html>
 <html lang="es">
 <head>
 <meta charset="utf-8">
-<title>Portal Wuipi</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Entrando a tu Portal Wuipi…</title>
+<meta name="robots" content="noindex, nofollow">
 <meta name="description" content="Tu portal de cliente Wuipi — facturas, servicios y pago en un solo lugar.">
 <meta property="og:title" content="Portal Wuipi">
 <meta property="og:description" content="Accede a tu cuenta Wuipi sin contraseña. Toca el botón para entrar.">
 <meta property="og:type" content="website">
+<meta http-equiv="cache-control" content="no-cache, no-store, must-revalidate">
+<style>
+  body { margin: 0; min-height: 100vh; background: #0a0a1a; color: #fff;
+         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+         display: flex; align-items: center; justify-content: center; padding: 20px; }
+  .card { text-align: center; max-width: 360px; }
+  .logo { width: 100px; margin: 0 auto 24px; opacity: 0.95; }
+  h1 { font-size: 20px; font-weight: 700; margin: 0 0 8px; }
+  p { color: #9ca3af; font-size: 14px; margin: 0 0 24px; line-height: 1.5; }
+  .spinner { width: 32px; height: 32px; margin: 0 auto;
+             border: 3px solid rgba(244,104,0,0.2); border-top-color: #F46800;
+             border-radius: 50%; animation: spin 0.8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .manual { margin-top: 24px; }
+  .manual a { display: inline-block; background: #F46800; color: #fff;
+              text-decoration: none; padding: 12px 24px; border-radius: 10px;
+              font-weight: 600; font-size: 14px; }
+</style>
 </head>
 <body>
-<h1>Portal Wuipi</h1>
-<p>Tu portal personal de cliente. Toca el botón en tu WhatsApp o correo para entrar.</p>
+<div class="card">
+  <img class="logo" src="${APP_URL}/img/wuipi-logo.webp" alt="Wuipi" />
+  <h1>Entrando a tu portal…</h1>
+  <p>Estamos preparando tu acceso seguro. Esto tomará solo un segundo.</p>
+  <div class="spinner" aria-hidden="true"></div>
+  <noscript>
+    <p style="margin-top:24px;">Tu navegador no permite redirección automática.</p>
+    <div class="manual">
+      <a href="${APP_URL}/portal/acceso">Continuar manualmente</a>
+    </div>
+  </noscript>
+  <form id="goForm" method="POST" action="${APP_URL}/portal/invite/${token}" style="display:none;">
+    <button type="submit">Entrar</button>
+  </form>
+</div>
+<script>
+  // Auto-submit el POST que dispara la generacion del Magic Link.
+  // Solo navegadores reales con JS llegan aca; los previewers (Meta,
+  // WhatsApp link preview, etc.) renderizan el HTML pero no ejecutan JS,
+  // asi que no consumen el token de Supabase.
+  (function() {
+    try { document.getElementById('goForm').submit(); } catch (e) {}
+  })();
+</script>
 </body>
 </html>`;
   return new NextResponse(html, {
     status: 200,
     headers: {
       "Content-Type": "text/html; charset=utf-8",
-      // Importante: no-store evita que la pagina del bot llegue al cache CDN
-      // y se sirva al usuario real cuando hace clic.
       "Cache-Control": "private, no-store, no-cache, must-revalidate",
+      // Defensive: HTTP-level hints to discourage prefetch from clients that
+      // honor these (Chrome, some webviews).
+      "X-Robots-Tag": "noindex, nofollow",
     },
   });
 }
 
+/**
+ * GET: render the interstitial. Validates the HMAC token only — never
+ * generates a Magic Link. If the token is malformed/tampered, fall through
+ * to /portal/acceso with an error message instead of rendering the page.
+ */
 export async function GET(
   request: NextRequest,
   { params }: { params: { token: string } }
 ) {
   const origin = request.nextUrl.origin;
-
-  // Bot pre-fetch guard: si el User-Agent es un crawler de link preview,
-  // devolvemos una pagina simple sin generar el Magic Link. Esto evita que
-  // el OTP single-use se queme antes de que el usuario haga clic.
-  if (isBotPrefetch(request.headers.get("user-agent"))) {
-    return botPreviewPage();
+  const partnerId = verifyPortalInviteToken(params.token);
+  if (!partnerId) {
+    return errorRedirect(origin, "invalid_token");
   }
+  return interstitialPage(params.token);
+}
 
-  // Rate limit: 20 redemptions/min per IP. Generous so the legitimate user
-  // who hammers the button a few times isn't blocked, but stops scrapers
-  // from enumerating tokens.
+/**
+ * POST: the actual auth path. Triggered by the JS auto-submit in the
+ * interstitial. Validates the token, looks up the partner in Odoo, generates
+ * a fresh Supabase Magic Link, and redirects to /auth/confirm. Returns 303
+ * (See Other) so the browser follows the redirect with a clean GET to
+ * /auth/confirm — proper RFC behavior after POST.
+ */
+export async function POST(
+  request: NextRequest,
+  { params }: { params: { token: string } }
+) {
+  const origin = request.nextUrl.origin;
+
+  // Rate limit per-IP. Generous; only triggers on abuse (token enumeration).
   const ip = getClientIP(request.headers);
-  const rl = checkRateLimit(`portal-invite:${ip}`, 20, 60_000);
+  const rl = checkRateLimit(`portal-invite-go:${ip}`, 20, 60_000);
   if (!rl.allowed) {
     return errorRedirect(origin, "rate_limit");
   }
@@ -122,8 +157,7 @@ export async function GET(
     return errorRedirect(origin, "odoo_unavailable");
   }
 
-  // Lookup partner email in Odoo. We don't trust any input — the partnerId
-  // came from a signed token, but the email of record lives in Odoo.
+  // Lookup partner email from Odoo (source of truth — token only carries id).
   let partner: { id: number; name: string; email: string } | null = null;
   try {
     const partners = await searchRead("res.partner", [
@@ -133,7 +167,7 @@ export async function GET(
       partner = partners[0] as { id: number; name: string; email: string };
     }
   } catch (err) {
-    console.error("[Portal Invite] Odoo lookup failed:", err);
+    console.error("[Portal Invite POST] Odoo lookup failed:", err);
     return errorRedirect(origin, "odoo_error");
   }
 
@@ -146,9 +180,6 @@ export async function GET(
     return errorRedirect(origin, "no_email");
   }
 
-  // Generate Magic Link. If the user doesn't exist yet in Supabase Auth,
-  // create them first with the right app_metadata so /auth/confirm doesn't
-  // have to do another Odoo lookup.
   const admin = createAdminSupabase();
 
   let linkResult = await admin.auth.admin.generateLink({
@@ -156,10 +187,7 @@ export async function GET(
     email,
   });
 
-  // Supabase returns an error with "User not found" (or similar) when the
-  // email isn't registered yet. Create the user and retry once. We pre-fill
-  // app_metadata so the customer lands in the portal directly without an
-  // Odoo lookup round-trip in /auth/confirm.
+  // Create the user on first use, then retry the magic link generation once.
   if (linkResult.error) {
     const msg = (linkResult.error.message || "").toLowerCase();
     const looksLikeMissingUser = msg.includes("not found")
@@ -177,7 +205,7 @@ export async function GET(
         },
       });
       if (createResult.error) {
-        console.error("[Portal Invite] createUser failed:", createResult.error.message);
+        console.error("[Portal Invite POST] createUser failed:", createResult.error.message);
         return errorRedirect(origin, "create_user_failed");
       }
       linkResult = await admin.auth.admin.generateLink({
@@ -187,26 +215,23 @@ export async function GET(
     }
 
     if (linkResult.error) {
-      console.error("[Portal Invite] generateLink failed:", linkResult.error.message);
+      console.error("[Portal Invite POST] generateLink failed:", linkResult.error.message);
       return errorRedirect(origin, "magiclink_failed");
     }
   }
 
-  // properties.hashed_token is what /auth/confirm will exchange for a session
-  // via supabase.auth.verifyOtp({ type: 'magiclink', token_hash }).
   const hashedToken = linkResult.data?.properties?.hashed_token;
   if (!hashedToken) {
-    console.error("[Portal Invite] generateLink returned no hashed_token");
+    console.error("[Portal Invite POST] generateLink returned no hashed_token");
     return errorRedirect(origin, "no_token");
   }
 
-  // Send the customer through /auth/confirm so the session cookie gets set
-  // on OUR domain (not Supabase's project URL). That route knows to redirect
-  // to /portal/inicio when next is a portal route.
   const confirmUrl = new URL("/auth/confirm", APP_URL);
   confirmUrl.searchParams.set("token_hash", hashedToken);
   confirmUrl.searchParams.set("type", "magiclink");
   confirmUrl.searchParams.set("next", "/portal/inicio");
 
-  return NextResponse.redirect(confirmUrl);
+  // 303 See Other: tells the browser to follow the redirect with GET, which
+  // is what /auth/confirm expects. Prevents the browser from re-POSTing.
+  return NextResponse.redirect(confirmUrl, 303);
 }
