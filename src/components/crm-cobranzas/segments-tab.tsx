@@ -33,6 +33,12 @@ export default function SegmentsTab() {
   const [showArchived, setShowArchived] = useState(false);
   const [executingId, setExecutingId] = useState<string | null>(null);
   const [executeResult, setExecuteResult] = useState<{ campaign_id: string; items: number; total: number } | null>(null);
+  // Estado para el envío directo desde el banner de éxito tras crear campaña.
+  // Sin este botón, el user creaba la campaña y la veía "active" en la
+  // pestaña Campañas sin entender que faltaba disparar los envíos.
+  const [sendingFromBanner, setSendingFromBanner] = useState(false);
+  const [bannerSendProgress, setBannerSendProgress] = useState<{ sent: number; total: number } | null>(null);
+  const [bannerSendDone, setBannerSendDone] = useState<{ sent: number; failed: number } | null>(null);
 
   const fetchSegments = useCallback(async () => {
     setLoading(true);
@@ -73,9 +79,11 @@ export default function SegmentsTab() {
   };
 
   const handleExecute = async (segment: Segment) => {
-    if (!confirm(`¿Lanzar campaña con segmento "${segment.name}"?\n\nVa a crear ${segment.preview_count ?? "?"} items materializados al estado actual de Odoo.`)) return;
+    if (!confirm(`¿Lanzar campaña con segmento "${segment.name}"?\n\nVa a crear ${segment.preview_count ?? "?"} items en estado pendiente. Después confirma el envío.`)) return;
     setExecutingId(segment.id);
     setExecuteResult(null);
+    setBannerSendDone(null);
+    setBannerSendProgress(null);
     try {
       const res = await fetch(`/api/cobranzas/segments/${segment.id}/execute`, {
         method: "POST",
@@ -93,6 +101,42 @@ export default function SegmentsTab() {
       alert(err instanceof Error ? err.message : "Error");
     } finally {
       setExecutingId(null);
+    }
+  };
+
+  // Envía la campaña recién creada en batches. Vivimos en el banner para que
+  // el flow "crear segmento → enviar campaña" ocurra en un solo lugar.
+  const handleSendFromBanner = async () => {
+    if (!executeResult) return;
+    if (!confirm(`¿Enviar WhatsApp + Email a los ${executeResult.items} clientes ahora?`)) return;
+    setSendingFromBanner(true);
+    setBannerSendDone(null);
+    setBannerSendProgress(null);
+    let offset = 0;
+    let totalSent = 0;
+    let totalFailed = 0;
+    try {
+      while (true) {
+        const res = await fetch("/api/cobranzas/send", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ campaign_id: executeResult.campaign_id, batch_size: 25, offset }),
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || "Error en envío");
+        totalSent += json.sent || 0;
+        totalFailed += json.failed || 0;
+        const total = json.batch?.total || totalSent;
+        setBannerSendProgress({ sent: totalSent, total });
+        if (!json.batch?.has_more) break;
+        offset = json.batch.next_offset;
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+      setBannerSendDone({ sent: totalSent, failed: totalFailed });
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Error enviando");
+    } finally {
+      setSendingFromBanner(false);
     }
   };
 
@@ -140,13 +184,46 @@ export default function SegmentsTab() {
       {/* Result banner tras ejecución exitosa */}
       {executeResult && (
         <Card className="!p-4 border-emerald-500/30 bg-emerald-500/5">
-          <div className="flex items-center gap-3">
-            <CheckCircle2 size={20} className="text-emerald-400" />
-            <div className="flex-1">
-              <p className="text-emerald-400 font-medium text-sm">Campaña creada — {executeResult.items} items / {fmtUSD(executeResult.total)}</p>
-              <p className="text-emerald-300/60 text-xs mt-0.5">Va a la pestaña &ldquo;Campañas de Cobro&rdquo; para enviarla.</p>
+          <div className="flex items-start gap-3">
+            <CheckCircle2 size={20} className="text-emerald-400 mt-0.5 shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-emerald-400 font-medium text-sm">
+                Campaña creada — {executeResult.items} items / {fmtUSD(executeResult.total)}
+              </p>
+              {!bannerSendDone && !sendingFromBanner && (
+                <p className="text-emerald-300/60 text-xs mt-0.5">
+                  Los items están en estado <strong>pendiente</strong>. Toca &ldquo;Enviar ahora&rdquo; para disparar WhatsApp + Email, o ve a la pestaña Campañas para revisarla primero.
+                </p>
+              )}
+              {sendingFromBanner && bannerSendProgress && (
+                <p className="text-emerald-300/80 text-xs mt-1">
+                  Enviando… {bannerSendProgress.sent} de {bannerSendProgress.total}
+                </p>
+              )}
+              {bannerSendDone && (
+                <p className="text-emerald-300 text-xs mt-1 font-medium">
+                  ✓ Envío completo: {bannerSendDone.sent} enviados, {bannerSendDone.failed} con error
+                </p>
+              )}
             </div>
-            <button onClick={() => setExecuteResult(null)} className="text-emerald-400 hover:text-white text-xs">Cerrar</button>
+            <div className="flex items-center gap-2 shrink-0">
+              {!bannerSendDone && (
+                <button
+                  onClick={handleSendFromBanner}
+                  disabled={sendingFromBanner}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500 text-white text-xs font-medium hover:bg-emerald-500/90 disabled:opacity-50"
+                >
+                  <Send size={12} />
+                  {sendingFromBanner ? "Enviando…" : "Enviar ahora"}
+                </button>
+              )}
+              <button
+                onClick={() => { setExecuteResult(null); setBannerSendDone(null); setBannerSendProgress(null); }}
+                className="text-emerald-400 hover:text-white text-xs"
+              >
+                Cerrar
+              </button>
+            </div>
           </div>
         </Card>
       )}

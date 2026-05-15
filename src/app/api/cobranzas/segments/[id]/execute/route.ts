@@ -100,7 +100,11 @@ export async function POST(
         snapshot_filters: segment.filters,
         executed_at: new Date().toISOString(),
         scheduled_for: scheduledFor,
-        status: scheduledFor ? "draft" : "active",
+        // Siempre "draft" al crear desde un segmento. La campaña pasa a
+        // "sending" cuando /api/cobranzas/send empieza a procesar batches,
+        // y a "active" cuando termina. Estaba quedando "active" sin haber
+        // enviado nada, lo que hacía pensar al user que el envío ya ocurrió.
+        status: "draft",
         created_by: caller.id,
       })
       .select()
