@@ -64,7 +64,9 @@ export async function POST(request: NextRequest) {
     const result = await previewSegment({
       filters,
       excludePartnerIdsFromRecent: excludeRecent,
-      sampleSize: Number.isInteger(body.sample_size) && body.sample_size > 0 && body.sample_size <= 100
+      // Cap a 1000 para cubrir el universo completo de drafts (~640 hoy)
+      // sin saturar el response. El editor pide 200 por default.
+      sampleSize: Number.isInteger(body.sample_size) && body.sample_size > 0 && body.sample_size <= 1000
         ? body.sample_size
         : 20,
     });
