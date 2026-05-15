@@ -105,16 +105,15 @@ export async function POST(request: NextRequest) {
     // hidden behind the button label.
     const inviteToken = generatePortalInviteToken(partnerId);
 
-    // Cache-buster contra w.meta.me (proxy anti-phishing de WhatsApp).
-    // Sin esto, w.meta.me cachea la respuesta del PRIMER scan del URL
-    // (que en el bug original era un redirect a /portal/acceso?error=auth)
-    // y la sirve a TODOS los clicks posteriores del MISMO usuario sin
-    // volver a hitear nuestro server. Logs confirmaron tabla vacía pese a
-    // múltiples taps del usuario. Cambiar query param en cada envío =
-    // URL única = w.meta.me no puede tener cache hit.
+    // Cache-buster: WhatsApp/Meta proxy y CDNs intermedios cachean por URL
+    // completa. Cada envío con cb único garantiza URL nunca antes vista.
     const cacheBuster = Math.random().toString(36).slice(2, 8);
     const tokenWithBuster = `${inviteToken}?cb=${cacheBuster}`;
-    const inviteUrl = `${APP_URL}/portal/invite/${tokenWithBuster}`;
+    // Path /i/ (NUEVO) — reemplazó al envenenado /portal/invite/ tras la
+    // re-aprobación del template invitacion_portal_v2 en Meta. WhatsApp
+    // nunca vio /i/* antes, así que no hay cache pre-existente que pueda
+    // servir un resultado fallido del bug original.
+    const inviteUrl = `${APP_URL}/i/${tokenWithBuster}`;
 
     const result: {
       partnerId: number;
