@@ -68,6 +68,29 @@ function errorRedirect(origin: string, code: string) {
   return res;
 }
 
+/**
+ * Defensive token sanitization. Cuando un template Meta tiene su URL del
+ * botón configurada como ESTÁTICA en vez de DINÁMICA, Meta no sustituye
+ * el `{{1}}` y nuestro server recibe el path `/i/{{1}}<token>` con el
+ * literal pegado al frente. Los logs confirmaron este patrón en 2026-05-15.
+ *
+ * Como defensa, si el token empieza con `{{` (con o sin URL-encoding),
+ * strippeamos esa parte y procesamos el resto. Esto deja que el flujo
+ * funcione incluso si el template Meta vuelve a romperse, y se loguea
+ * el evento para que el admin sepa que tiene que arreglar Meta.
+ */
+function sanitizeToken(raw: string): { token: string; recovered: boolean } {
+  // Patrón observado: {{1}}, %7B%7B1%7D%7D (URL-encoded), %7b%7b1%7d%7d
+  const decoded = (() => {
+    try { return decodeURIComponent(raw); } catch { return raw; }
+  })();
+  const match = decoded.match(/^\{\{[^}]+\}\}(.+)$/);
+  if (match && match[1]) {
+    return { token: match[1], recovered: true };
+  }
+  return { token: raw, recovered: false };
+}
+
 function interstitialPage(token: string): NextResponse {
   const html = `<!DOCTYPE html>
 <html lang="es">
@@ -137,19 +160,26 @@ export async function GET(
   { params }: { params: { token: string } }
 ) {
   const origin = request.nextUrl.origin;
-  const partnerId = verifyPortalInviteToken(params.token);
+
+  // Defensa contra template Meta mal configurado (URL estática con {{1}}
+  // literal). Si el token llegó con `{{N}}` al inicio, lo strippeamos.
+  const { token: cleanToken, recovered } = sanitizeToken(params.token);
+
+  const partnerId = verifyPortalInviteToken(cleanToken);
   if (!partnerId) {
     await logHit({
       method: "GET", request, token: params.token,
       action: "interstitial_invalid_token", statusCode: 307,
+      meta: recovered ? { recovered_from_literal: true } : undefined,
     });
     return errorRedirect(origin, "invalid_token");
   }
   await logHit({
     method: "GET", request, token: params.token,
     action: "interstitial_served", statusCode: 200, partnerId,
+    meta: recovered ? { recovered_from_literal: true, clean_token_prefix: cleanToken.slice(0, 8) } : undefined,
   });
-  return interstitialPage(params.token);
+  return interstitialPage(cleanToken);
 }
 
 export async function POST(
@@ -165,7 +195,11 @@ export async function POST(
     return errorRedirect(origin, "rate_limit");
   }
 
-  const partnerId = verifyPortalInviteToken(params.token);
+  // Misma defensa que en GET — el form-POST hereda el path del GET, así que
+  // si el GET sobrevivió con sanitización, el POST tiene que aplicarla igual.
+  const { token: cleanToken } = sanitizeToken(params.token);
+
+  const partnerId = verifyPortalInviteToken(cleanToken);
   if (!partnerId) {
     await logHit({ method: "POST", request, token: params.token, action: "invalid_token", statusCode: 307 });
     return errorRedirect(origin, "invalid_token");
