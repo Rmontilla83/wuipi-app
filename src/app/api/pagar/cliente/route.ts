@@ -3,8 +3,30 @@ import { apiSuccess, apiError, apiServerError } from "@/lib/api-helpers";
 import { verifyClientPaymentToken } from "@/lib/utils/payment-token";
 import { isOdooConfigured, searchRead, read } from "@/lib/integrations/odoo";
 import { checkRateLimit, getClientIP } from "@/lib/utils/rate-limit";
+import { createAdminSupabase } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
+
+// Log fire-and-forget para diagnóstico del flow de pago desde el portal.
+// El user reportó "no entra a las pasarelas, llega a pantalla error"
+// pero payment_gateway_logs sólo captura el último paso (/api/cobranzas/pay)
+// y queda vacío. Estos logs muestran si /api/pagar/cliente respondió bien
+// y por qué.
+async function logFlow(action: string, request: NextRequest, extra: Record<string, unknown> = {}) {
+  try {
+    const sb = createAdminSupabase();
+    await sb.from("portal_invite_logs").insert({
+      method: "GET",
+      path: "/api/pagar/cliente",
+      action: `pay_flow:${action}`,
+      status_code: extra.status_code as number ?? 200,
+      user_agent: request.headers.get("user-agent") || null,
+      ip: getClientIP(request.headers) || null,
+      referer: request.headers.get("referer") || null,
+      meta: extra,
+    });
+  } catch {}
+}
 
 /**
  * GET /api/pagar/cliente?token=XXXX
@@ -14,15 +36,28 @@ export async function GET(request: NextRequest) {
   try {
     const ip = getClientIP(request.headers);
     const rl = checkRateLimit(`pagar-cliente:${ip}`, 20, 60_000);
-    if (!rl.allowed) return apiError("Demasiadas solicitudes", 429);
+    if (!rl.allowed) {
+      await logFlow("rate_limited", request, { status_code: 429 });
+      return apiError("Demasiadas solicitudes", 429);
+    }
 
-    if (!isOdooConfigured()) return apiError("Sistema no disponible", 503);
+    if (!isOdooConfigured()) {
+      await logFlow("odoo_unavailable", request, { status_code: 503 });
+      return apiError("Sistema no disponible", 503);
+    }
 
     const token = new URL(request.url).searchParams.get("token");
-    if (!token || token.length > 100) return apiError("Token requerido", 400);
+    if (!token || token.length > 100) {
+      await logFlow("invalid_token_param", request, { status_code: 400 });
+      return apiError("Token requerido", 400);
+    }
 
     const partnerId = verifyClientPaymentToken(token);
-    if (!partnerId) return apiError("Enlace de pago no valido", 400);
+    if (!partnerId) {
+      await logFlow("hmac_failed", request, { status_code: 400, token_prefix: token.slice(0, 8) });
+      return apiError("Enlace de pago no valido", 400);
+    }
+    await logFlow("validated_ok", request, { partner_id: partnerId, token_prefix: token.slice(0, 8) });
 
     // Fetch partner basic info
     const [partner] = await read("res.partner", [partnerId], ["name", "email", "vat", "mobile", "credit"]);
