@@ -2310,9 +2310,13 @@ export async function postInvoiceInVes(
         errors: ["month_billed no resuelto — abort para no quedar silenciosamente en draft"],
       };
     }
+    // Odoo NUEVO (módulo wuipi_unidigital):
+    // - custom_month_billed: boolean (toggle)
+    // - custom_month_billed_text: char (texto "Junio", "Julio", ...)
+    // En el Odoo viejo el campo era `month_billed`. Renombrado en el módulo SENIAT del nuevo.
     await odooWrite("account.move", [invoiceId], {
       custom_month_billed: true,
-      month_billed: preview.month_billed,
+      custom_month_billed_text: preview.month_billed,
     });
 
     // 3. action_post
