@@ -53,7 +53,9 @@ interface InvoiceRaw {
 function toDomain(raw: InvoiceRaw): OdooInvoice {
   return {
     id: raw.id,
-    name: nullable<string>(raw.name) ?? `move,${raw.id}`,
+    // Para drafts, Odoo no asigna sequence todavía (raw.name=false). Mostramos
+    // "Borrador #ID" en vez de "move,ID" para que el cliente vea algo legible.
+    name: nullable<string>(raw.name) ?? `Borrador #${raw.id}`,
     partnerId: m2oId(raw.partner_id) ?? 0,
     partnerName: m2oName(raw.partner_id) ?? "",
     state: raw.state,
