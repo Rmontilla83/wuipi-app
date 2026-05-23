@@ -38,8 +38,10 @@ export async function POST(request: NextRequest) {
     // Por seguridad (no enumeration), siempre respondemos 200. Pero solo
     // disparamos el email si existe el partner Y tiene cuenta Supabase.
     if (partner && user) {
-      const origin = request.headers.get("origin") || process.env.NEXT_PUBLIC_APP_URL || "https://api.wuipi.net";
-      const redirectTo = `${origin}/portal/reset-password`;
+      // Usar el origin del request actual — robusto contra deploys de preview
+      // (donde NEXT_PUBLIC_APP_URL puede apuntar a producción). request.nextUrl.origin
+      // siempre devuelve el dominio del deploy que está procesando este request.
+      const redirectTo = `${request.nextUrl.origin}/portal/reset-password`;
       const result = await requestPortalPasswordReset({ email, redirectTo });
       if (!result.ok) {
         // No-op para el cliente, pero log el error real
