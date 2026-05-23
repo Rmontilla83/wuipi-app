@@ -53,9 +53,12 @@ export default function PortalDashboard() {
 
   return (
     <div className="space-y-6">
-      {/* Welcome */}
+      {/* Welcome — usa data.name del fetch (siempre fresco del Odoo) y
+          cae a customerName del cookie HMAC si el fetch falló. */}
       <div>
-        <h1 className="text-2xl font-bold text-white">Hola, {(customerName || "").split(" ")[0] || "cliente"}</h1>
+        <h1 className="text-2xl font-bold text-white">
+          Hola, {((data?.name || customerName || "").split(" ")[0]) || "cliente"}
+        </h1>
         <p className="text-sm text-gray-500">Bienvenido a tu portal de cliente WUIPI</p>
       </div>
 
