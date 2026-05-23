@@ -13,12 +13,26 @@ export default function PortalDashboard() {
   const { partnerId, customerName } = usePortal();
   const [data, setData] = useState<OdooClientDetail | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch(`/api/odoo/clients/${partnerId}`)
-      .then((r) => r.json())
+    if (!partnerId) {
+      setLoading(false);
+      return;
+    }
+    fetch(`/api/odoo/clients/${partnerId}`, { cache: "no-store" })
+      .then(async (r) => {
+        if (!r.ok) {
+          const errBody = await r.json().catch(() => ({}));
+          throw new Error(errBody?.error || `HTTP ${r.status}`);
+        }
+        return r.json();
+      })
       .then(setData)
-      .catch(console.error)
+      .catch((e) => {
+        console.error("portal/inicio fetch failed:", e);
+        setError(e instanceof Error ? e.message : "Error al cargar datos");
+      })
       .finally(() => setLoading(false));
   }, [partnerId]);
 
@@ -30,17 +44,27 @@ export default function PortalDashboard() {
     );
   }
 
-  const activeSubs = data?.subscriptions.filter((s) => s.state === "3_progress").length || 0;
-  const pendingInvoices = data?.invoices.filter((i) => i.amount_due > 0).length || 0;
+  // Defensive: campos opcionales si el adapter devuelve shape parcial.
+  const subscriptions = Array.isArray(data?.subscriptions) ? data!.subscriptions : [];
+  const invoices = Array.isArray(data?.invoices) ? data!.invoices : [];
+  const activeSubs = subscriptions.filter((s) => s.state === "3_progress").length;
+  const pendingInvoices = invoices.filter((i) => i.amount_due > 0).length;
   const totalDue = data?.credit || 0;
 
   return (
     <div className="space-y-6">
       {/* Welcome */}
       <div>
-        <h1 className="text-2xl font-bold text-white">Hola, {customerName.split(" ")[0]}</h1>
+        <h1 className="text-2xl font-bold text-white">Hola, {(customerName || "").split(" ")[0] || "cliente"}</h1>
         <p className="text-sm text-gray-500">Bienvenido a tu portal de cliente WUIPI</p>
       </div>
+
+      {error && (
+        <div className="flex items-start gap-2 p-3 bg-amber-500/5 border border-amber-500/20 rounded-xl">
+          <AlertTriangle size={14} className="text-amber-400 mt-0.5 shrink-0" />
+          <p className="text-xs text-amber-300">No pudimos cargar todos tus datos: {error}. Algunas secciones pueden estar incompletas.</p>
+        </div>
+      )}
 
       {/* KPIs */}
       <div className="grid grid-cols-3 gap-3">
