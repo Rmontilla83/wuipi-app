@@ -1850,19 +1850,21 @@ export async function getSubscriptionByName(name: string): Promise<{
   name: string;
   next_invoice_date: string | false;
 } | null> {
-  const list = await searchRead("sale.order",
+  // Odoo NUEVO: suscripciones son contract.contract (no sale.order).
+  // El campo equivalente a next_invoice_date es recurring_next_date.
+  const list = await searchRead("contract.contract",
     [["name", "=", name]],
     {
-      fields: ["id", "name", "next_invoice_date", "is_subscription"],
+      fields: ["id", "name", "recurring_next_date"],
       limit: 1,
     }
   );
   if (!list[0]) return null;
-  const so = list[0];
+  const c = list[0];
   return {
-    id: so.id,
-    name: so.name,
-    next_invoice_date: so.next_invoice_date,
+    id: c.id,
+    name: c.name,
+    next_invoice_date: c.recurring_next_date,
   };
 }
 
@@ -1880,27 +1882,26 @@ export async function findActiveSubscriptionForPartner(partnerId: number): Promi
   name: string;
   next_invoice_date: string | false;
 } | null> {
-  const list = await searchRead("sale.order",
+  // Odoo NUEVO: contract.contract con wuipi_subscription_state='3_progress'.
+  const list = await searchRead("contract.contract",
     [
       ["partner_id", "=", partnerId],
-      ["is_subscription", "=", true],
-      ["subscription_state", "=", "3_progress"],
-      ["state", "=", "sale"],
+      ["wuipi_subscription_state", "=", "3_progress"],
     ],
     {
-      fields: ["id", "name", "next_invoice_date"],
+      fields: ["id", "name", "recurring_next_date"],
       limit: 5,
     }
   );
-  // Solo confiamos cuando es UNÍVOCA. Si hay varias, no podemos elegir bien.
-  const withDate = list.filter((s: { next_invoice_date: string | false }) =>
-    typeof s.next_invoice_date === "string" && s.next_invoice_date
+  // Solo confiamos cuando es UNÍVOCA.
+  const withDate = list.filter((c: { recurring_next_date: string | false }) =>
+    typeof c.recurring_next_date === "string" && c.recurring_next_date
   );
   if (withDate.length !== 1) return null;
   return {
     id: withDate[0].id,
     name: withDate[0].name,
-    next_invoice_date: withDate[0].next_invoice_date,
+    next_invoice_date: withDate[0].recurring_next_date,
   };
 }
 
