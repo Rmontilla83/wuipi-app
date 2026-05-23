@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { usePortal } from "@/lib/portal/context";
 import { Card } from "@/components/ui/card";
-import { RefreshCw, FileText, ChevronDown, ChevronUp, CreditCard } from "lucide-react";
+import { RefreshCw, FileText, ChevronDown, ChevronUp, CreditCard, ExternalLink } from "lucide-react";
 import type { OdooClientDetail, OdooInvoiceDetail, OdooPayment } from "@/types/odoo";
 
 const fmtAmount = (n: number, currency: string) =>
@@ -103,6 +103,24 @@ function InvoiceCard({ inv, defaultExpanded }: { inv: OdooInvoiceDetail; default
                   <span className="text-gray-500 font-mono text-[10px]">{pay.ref || "—"}</span>
                 </div>
               ))}
+            </div>
+          )}
+          {/* Factura electrónica SENIAT — link al PDF de Unidigital cuando ya fue
+              confirmada por la imprenta digital. */}
+          {inv.seniat_pdf_url && inv.unidigital_state === "confirmed" && (
+            <div className="mt-3 pt-2 border-t border-wuipi-border/30">
+              <a
+                href={inv.seniat_pdf_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 text-xs text-wuipi-accent hover:underline"
+              >
+                <ExternalLink size={12} />
+                Ver factura SENIAT
+                {inv.control_number && (
+                  <span className="text-gray-500 font-mono">({inv.control_number})</span>
+                )}
+              </a>
             </div>
           )}
         </div>

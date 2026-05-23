@@ -28,6 +28,13 @@ export interface OdooInvoiceDetail {
   lines: OdooInvoiceLineDetail[];
   ref: string;
   payments: OdooInvoicePayment[];
+  /** URL del PDF emitido por Unidigital (facturación electrónica SENIAT). Null
+   *  si la factura aún no se transmitió o falló. */
+  seniat_pdf_url?: string | null;
+  /** Número de control SENIAT (formato "00-00001333"). */
+  control_number?: string | null;
+  /** Estado del envío a Unidigital: "draft" | "pending" | "confirmed" | "error" | "annulled" */
+  unidigital_state?: string | null;
 }
 
 export interface OdooCustomerBalance {

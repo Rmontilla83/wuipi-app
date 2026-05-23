@@ -28,6 +28,8 @@ const INVOICE_FIELDS = [
   "custom_month_billed_text",
   "l10n_ve_control_number",
   "l10n_ve_invoice_date",
+  "wuipi_unidigital_pdf_url",
+  "wuipi_unidigital_state",
 ] as const;
 
 interface InvoiceRaw {
@@ -48,6 +50,8 @@ interface InvoiceRaw {
   custom_month_billed_text: string | false;
   l10n_ve_control_number: string | false;
   l10n_ve_invoice_date: string | false;
+  wuipi_unidigital_pdf_url: string | false;
+  wuipi_unidigital_state: string | false;
 }
 
 function toDomain(raw: InvoiceRaw): OdooInvoice {
@@ -73,6 +77,8 @@ function toDomain(raw: InvoiceRaw): OdooInvoice {
     customMonthBilledText: nullable<string>(raw.custom_month_billed_text),
     controlNumber: nullable<string>(raw.l10n_ve_control_number),
     fiscalDate: nullable<string>(raw.l10n_ve_invoice_date),
+    unidigitalPdfUrl: nullable<string>(raw.wuipi_unidigital_pdf_url),
+    unidigitalState: nullable<string>(raw.wuipi_unidigital_state),
   };
 }
 

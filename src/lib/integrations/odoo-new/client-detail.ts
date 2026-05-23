@@ -121,6 +121,9 @@ export async function getClientDetailNew(partnerId: number): Promise<OdooClientD
       lines,
       ref: "",
       payments: [],
+      seniat_pdf_url: inv.unidigitalPdfUrl,
+      control_number: inv.controlNumber,
+      unidigital_state: inv.unidigitalState,
     };
   }
 

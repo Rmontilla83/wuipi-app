@@ -122,4 +122,8 @@ export interface OdooInvoice {
   controlNumber: string | null;
   /** SENIAT — fecha/hora fiscal */
   fiscalDate: string | null;
+  /** URL del PDF emitido por Unidigital (facturación electrónica SENIAT). */
+  unidigitalPdfUrl: string | null;
+  /** Estado del envío Unidigital: draft|pending|confirmed|error|annulled */
+  unidigitalState: string | null;
 }
