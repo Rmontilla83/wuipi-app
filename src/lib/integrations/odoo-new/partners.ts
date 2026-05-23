@@ -88,14 +88,29 @@ export async function listPartners(
   return { items: rows.map(toDomain), total };
 }
 
-/** Busca por email exacto. Retorna el primer match o null. */
-export async function findPartnerByEmail(email: string): Promise<OdooPartner | null> {
+export interface FindByEmailOptions {
+  /** Match estricto (`=`, case-sensitive) vs fuzzy (`=ilike`). Default: estricto. */
+  fuzzy?: boolean;
+  /** Si true, restringe a partners con customer_rank > 0. Default: false. */
+  customersOnly?: boolean;
+}
+
+/** Busca un partner por email. Retorna el primer match o null. */
+export async function findPartnerByEmail(
+  email: string,
+  opts: FindByEmailOptions = {},
+): Promise<OdooPartner | null> {
   if (!email) return null;
   const cleaned = sanitizeSearch(email, 120);
   if (!cleaned) return null;
+  const op = opts.fuzzy ? "=ilike" : "=";
+  const domain: unknown[] = [["email", op, cleaned]];
+  if (opts.customersOnly) {
+    domain.push(["customer_rank", ">", 0]);
+  }
   const rows = await searchRead<PartnerRaw>(
     "res.partner",
-    [["email", "=ilike", cleaned]],
+    domain,
     { fields: [...PARTNER_FIELDS], limit: 1 },
   );
   if (rows.length === 0) return null;

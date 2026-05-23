@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { apiSuccess, apiError, apiServerError } from "@/lib/api-helpers";
-import { isOdooConfigured, searchRead } from "@/lib/integrations/odoo";
+import { isConfigured, findPartnerByEmail } from "@/lib/integrations/odoo-new";
 import { checkRateLimit, getClientIP } from "@/lib/utils/rate-limit";
 
 export const dynamic = "force-dynamic";
@@ -26,7 +26,7 @@ export async function POST(request: NextRequest) {
       return minTime(Promise.resolve(apiError("Demasiados intentos. Esperá unos minutos.", 429)), MIN_RESPONSE_MS);
     }
 
-    if (!isOdooConfigured()) {
+    if (!isConfigured()) {
       return apiError("Sistema no disponible", 503);
     }
 
@@ -43,20 +43,14 @@ export async function POST(request: NextRequest) {
       return minTime(Promise.resolve(apiError("Demasiados intentos. Esperá unos minutos.", 429)), MIN_RESPONSE_MS);
     }
 
-    const partners = await searchRead("res.partner", [
-      ["email", "=", email],
-      ["customer_rank", ">", 0],
-    ], {
-      fields: ["id", "name"],
-      limit: 1,
-    });
+    const partner = await findPartnerByEmail(email, { customersOnly: true });
 
     // Pad response to MIN_RESPONSE_MS so a hit and a miss look identical on the wire.
     const elapsed = Date.now() - started;
     const pad = Math.max(0, MIN_RESPONSE_MS - elapsed);
     if (pad > 0) await new Promise(r => setTimeout(r, pad));
 
-    if (partners.length === 0) {
+    if (!partner) {
       // Never leak "email not found" — return shape identical to success.
       // Client treats absence of partner_id as "not registered" without exposing
       // the customer's name to pre-auth callers.
@@ -67,7 +61,7 @@ export async function POST(request: NextRequest) {
     // Full name is only visible post-authentication.
     return apiSuccess({
       exists: true,
-      partner_id: partners[0].id,
+      partner_id: partner.id,
     });
   } catch (error) {
     return apiServerError(error);
