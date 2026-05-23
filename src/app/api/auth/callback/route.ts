@@ -32,10 +32,10 @@ async function syncRoleAndCheckSetup(userId: string, appMetadata: Record<string,
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get("code");
-  const rawNext = searchParams.get("next") ?? "/comando";
+  const rawNext = searchParams.get("next") ?? "/portal/inicio";
 
   // Validate redirect target — must be a relative path, no protocol or external domain
-  const next = /^\/[a-zA-Z0-9\-_/]*$/.test(rawNext) ? rawNext : "/comando";
+  const next = /^\/[a-zA-Z0-9\-_/]*$/.test(rawNext) ? rawNext : "/portal/inicio";
 
   const supabase = createServerSupabase();
 

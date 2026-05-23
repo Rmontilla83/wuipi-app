@@ -37,7 +37,7 @@ function LoginForm() {
       return;
     }
 
-    router.push("/comando");
+    router.push("/portal/acceso");
     router.refresh();
   };
 
