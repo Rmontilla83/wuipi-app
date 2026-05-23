@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getOdooClientDetail, getMikrotikServiceByPartner } from "@/lib/integrations/odoo";
+import { getClientDetailNew, getMikrotikServicesForPartnerNew } from "@/lib/integrations/odoo-new/client-detail";
 import { getPortalCaller, getCallerProfile } from "@/lib/auth/check-permission";
 import { checkRateLimit } from "@/lib/utils/rate-limit";
 
@@ -234,10 +234,12 @@ export async function POST(request: NextRequest) {
     let clientContext = "No se pudieron cargar los datos del cliente.";
     try {
       const [detail, mkServices] = await Promise.all([
-        getOdooClientDetail(partnerId),
-        getMikrotikServiceByPartner(partnerId).catch(() => []),
+        getClientDetailNew(partnerId),
+        getMikrotikServicesForPartnerNew(partnerId).catch(() => []),
       ]);
-      clientContext = buildClientContext(detail, mkServices);
+      if (detail) {
+        clientContext = buildClientContext(detail, mkServices);
+      }
     } catch (err) {
       console.error("[Soportin] Error fetching client data:", err);
     }

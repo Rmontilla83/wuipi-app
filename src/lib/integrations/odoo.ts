@@ -2406,69 +2406,77 @@ export interface PaymentMethodMapping {
  *      en el reconcile contra el diario USD 9021).
  */
 export const PAYMENT_METHOD_MAPPING: Record<string, PaymentMethodMapping> = {
+  // === Odoo NUEVO (erp.wuipi.net) — actualizado 2026-05-23 ===
+  // VED currency_id: 171 (era 166 en el viejo)
+  // Journals: BNK1=6 (genérico), BNK6=13 (Mercantil USD), BNK8=15 (Pagos Electrónicos USD)
+  //           CSH1=7 (Cash genérico), IGTF=19
+  // Payment method lines: cada journal tiene solo "Manual Payment" inbound id paris.
+  // Stripe/PayPal queda con "Manual Payment" línea — el provider real se identifica
+  // por payment_reference y el journal name. Pendiente: crear líneas Stripe/PayPal
+  // en BNK8 del Odoo nuevo si querés tracking nativo por payment.method.line.
   debito_inmediato: {
-    journalId: 29,                  // BNK1 "Bank" -> cuenta 1102002 BANCO MERCANTIL 3031
-    paymentMethodLineId: 47,        // "Pago manual" del journal Bank
-    invoiceCurrencyId: 166,         // VED
-    paymentCurrencyId: 166,         // VED
-    currencyId: 166,
-    description: "Mercantil Bs (cuenta 3031)",
+    journalId: 6,                   // BNK1 "Bank" (genérico, acepta VED)
+    paymentMethodLineId: 1,         // Manual Payment inbound BNK1
+    invoiceCurrencyId: 171,         // VED nuevo
+    paymentCurrencyId: 171,
+    currencyId: 171,
+    description: "Mercantil Bs (BNK1)",
   },
   c2p: {
-    journalId: 29,                  // mismo journal Mercantil Bs
-    paymentMethodLineId: 47,
-    invoiceCurrencyId: 166,
-    paymentCurrencyId: 166,
-    currencyId: 166,
-    description: "Mercantil Bs (cuenta 3031) — Pago Movil C2P",
+    journalId: 6,
+    paymentMethodLineId: 1,
+    invoiceCurrencyId: 171,
+    paymentCurrencyId: 171,
+    currencyId: 171,
+    description: "Mercantil Bs (BNK1) — Pago Movil C2P",
   },
   transferencia: {
-    journalId: 29,                  // default Mercantil Bs (todas las transferencias entran ahi)
-    paymentMethodLineId: 47,
-    invoiceCurrencyId: 166,
-    paymentCurrencyId: 166,
-    currencyId: 166,
-    description: "Mercantil Bs (cuenta 3031) — Transferencia",
+    journalId: 6,
+    paymentMethodLineId: 1,
+    invoiceCurrencyId: 171,
+    paymentCurrencyId: 171,
+    currencyId: 171,
+    description: "Mercantil Bs (BNK1) — Transferencia",
   },
-  cash: {                            // Cash en VES (efectivo en Bs)
-    journalId: 38,                  // CSH2 "Efectivo Bs"
-    paymentMethodLineId: 69,
-    invoiceCurrencyId: 166,
-    paymentCurrencyId: 166,
-    currencyId: 166,
+  cash: {                            // Cash en VES
+    journalId: 7,                   // CSH1 "Cash" (genérico)
+    paymentMethodLineId: 3,         // Manual Payment inbound CSH1
+    invoiceCurrencyId: 171,
+    paymentCurrencyId: 171,
+    currencyId: 171,
     description: "Efectivo Bs",
   },
-  cash_ves: {                        // alias explicito
-    journalId: 38,
-    paymentMethodLineId: 69,
-    invoiceCurrencyId: 166,
-    paymentCurrencyId: 166,
-    currencyId: 166,
+  cash_ves: {
+    journalId: 7,
+    paymentMethodLineId: 3,
+    invoiceCurrencyId: 171,
+    paymentCurrencyId: 171,
+    currencyId: 171,
     description: "Efectivo Bs",
   },
-  cash_usd: {                        // Cash en USD (oficina PLC/Lecheria)
-    journalId: 30,                  // CSH1 "Cash" (USD)
-    paymentMethodLineId: 72,
-    invoiceCurrencyId: 1,           // factura permanece USD (cash USD se cobró en USD reales)
+  cash_usd: {                        // Cash USD
+    journalId: 7,                   // CSH1 (mismo journal, currency override)
+    paymentMethodLineId: 3,
+    invoiceCurrencyId: 1,           // USD
     paymentCurrencyId: 1,
     currencyId: 1,
     description: "Cash USD",
   },
   stripe: {
-    journalId: 46,                  // BNK8 "Banco Mercantil 9021" (USD)
-    paymentMethodLineId: 119,       // linea "Stripe" en BNK8 (Outstanding Receipts ya configurada)
-    invoiceCurrencyId: 166,         // factura en VES (igual que los otros métodos)
-    paymentCurrencyId: 1,           // payment en USD (Stripe es USD nativo)
+    journalId: 15,                  // BNK8 "Pagos Electronicos" (USD)
+    paymentMethodLineId: 17,        // Manual Payment inbound BNK8
+    invoiceCurrencyId: 171,         // factura en VES
+    paymentCurrencyId: 1,           // payment en USD (Stripe nativo)
     currencyId: 1,
-    description: "Stripe USD → BNK8 línea Stripe (factura VES)",
+    description: "Stripe USD → BNK8 (factura VES)",
   },
   paypal: {
-    journalId: 46,                  // mismo BNK8
-    paymentMethodLineId: 86,        // linea "PayPal" en BNK8 (Outstanding Receipts ya configurada)
-    invoiceCurrencyId: 166,         // factura en VES
-    paymentCurrencyId: 1,           // payment en USD
+    journalId: 15,
+    paymentMethodLineId: 17,
+    invoiceCurrencyId: 171,
+    paymentCurrencyId: 1,
     currencyId: 1,
-    description: "PayPal USD → BNK8 línea PayPal (factura VES)",
+    description: "PayPal USD → BNK8 (factura VES)",
   },
 };
 
