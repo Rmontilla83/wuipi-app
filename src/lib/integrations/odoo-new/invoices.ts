@@ -19,6 +19,8 @@ const INVOICE_FIELDS = [
   "invoice_date",
   "invoice_date_due",
   "amount_total",
+  "amount_untaxed",
+  "amount_tax",
   "amount_residual",
   "currency_id",
   "invoice_origin",
@@ -37,6 +39,8 @@ interface InvoiceRaw {
   invoice_date: string | false;
   invoice_date_due: string | false;
   amount_total: number;
+  amount_untaxed: number;
+  amount_tax: number;
   amount_residual: number;
   currency_id: [number, string] | false;
   invoice_origin: string | false;
@@ -57,6 +61,8 @@ function toDomain(raw: InvoiceRaw): OdooInvoice {
     invoiceDate: nullable<string>(raw.invoice_date),
     invoiceDateDue: nullable<string>(raw.invoice_date_due),
     amountTotal: raw.amount_total ?? 0,
+    amountUntaxed: raw.amount_untaxed ?? 0,
+    amountTax: raw.amount_tax ?? 0,
     amountResidual: raw.amount_residual ?? 0,
     currencyId: m2oId(raw.currency_id) ?? 0,
     currencyCode: mapCurrencyCode(raw.currency_id),

@@ -51,6 +51,8 @@ export interface OdooSubscription {
   invoicePartnerId: number;
   state: LifecycleState;
   subscriptionState: SubscriptionState;
+  /** Raw Odoo selection value (ej. "3_progress") — preserva para filtrado en frontend legacy. */
+  subscriptionStateRaw: string;
   recurringNextDate: string | null;  // ISO YYYY-MM-DD
   recurringInterval: number;
   recurringRuleType: string;          // "monthly" | "yearly" | ...
@@ -106,6 +108,8 @@ export interface OdooInvoice {
   invoiceDate: string | null;
   invoiceDateDue: string | null;
   amountTotal: number;
+  amountUntaxed: number;
+  amountTax: number;
   amountResidual: number;
   currencyId: number;
   currencyCode: CurrencyCode | null;

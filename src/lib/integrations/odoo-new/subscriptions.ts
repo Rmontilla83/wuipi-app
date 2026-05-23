@@ -64,6 +64,7 @@ function toDomain(raw: ContractRaw): OdooSubscription {
     invoicePartnerId: m2oId(raw.invoice_partner_id) ?? m2oId(raw.partner_id) ?? 0,
     state: mapLifecycleState(raw.wuipi_state),
     subscriptionState: mapSubscriptionState(raw.wuipi_subscription_state),
+    subscriptionStateRaw: typeof raw.wuipi_subscription_state === "string" ? raw.wuipi_subscription_state : "",
     recurringNextDate: nullable<string>(raw.recurring_next_date),
     recurringInterval: raw.recurring_interval ?? 1,
     recurringRuleType: nullable<string>(raw.recurring_rule_type) ?? "monthly",
@@ -105,6 +106,66 @@ export async function listSubscriptionsForPartner(
     { fields: [...CONTRACT_FIELDS], limit: 50, order: "date_start desc" },
   );
   return rows.map(toDomain);
+}
+
+// ─── contract.line ────────────────────────────────────────────
+
+export interface ContractLine {
+  id: number;
+  contractId: number;
+  productCode: string;
+  productName: string;
+  quantity: number;
+  priceUnit: number;
+  priceSubtotal: number;
+  discount: number;
+  /** Estado nativo de la línea (active, suspended, terminated...). Best-effort. */
+  state: string;
+}
+
+const LINE_FIELDS = [
+  "id",
+  "contract_id",
+  "product_id",
+  "name",
+  "quantity",
+  "price_unit",
+  "price_subtotal",
+  "discount",
+  "is_canceled",
+] as const;
+
+export async function listContractLines(contractIds: number[]): Promise<ContractLine[]> {
+  if (contractIds.length === 0) return [];
+  const rows = await searchRead<{
+    id: number;
+    contract_id: [number, string] | false;
+    product_id: [number, string] | false;
+    name: string;
+    quantity: number;
+    price_unit: number;
+    price_subtotal: number;
+    discount: number;
+    is_canceled: boolean;
+  }>(
+    "contract.line",
+    [["contract_id", "in", contractIds]],
+    { fields: [...LINE_FIELDS], limit: 500, order: "contract_id, sequence" },
+  );
+  return rows.map((r) => {
+    const fullName = (Array.isArray(r.product_id) ? r.product_id[1] : "") || r.name || "";
+    return {
+      id: r.id,
+      contractId: Array.isArray(r.contract_id) ? r.contract_id[0] : 0,
+      productCode: fullName.match(/\[([^\]]+)\]/)?.[1] ?? "",
+      productName: fullName.replace(/\[.*?\]\s*/, ""),
+      quantity: r.quantity ?? 1,
+      priceUnit: r.price_unit ?? 0,
+      priceSubtotal: r.price_subtotal ?? 0,
+      discount: r.discount ?? 0,
+      state: r.is_canceled ? "closed" : "progress",
+    };
+  });
 }
 
 /**

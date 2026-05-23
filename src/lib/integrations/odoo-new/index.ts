@@ -32,6 +32,8 @@ export {
   getSubscriptionByReference,
   listSubscriptionsForPartner,
   findActiveSubscriptionForPartner,
+  listContractLines,
+  type ContractLine,
 } from "./subscriptions";
 
 export {
