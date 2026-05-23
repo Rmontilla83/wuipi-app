@@ -6,32 +6,8 @@ import { apiSuccess, apiError, apiServerError } from "@/lib/api-helpers";
 import { getItemsByToken, updateItem } from "@/lib/dal/collection-campaigns";
 import { checkRateLimit, getClientIP } from "@/lib/utils/rate-limit";
 import { fetchBCVRate, convertUsdToBs } from "@/lib/integrations/bcv";
-import { searchRead, isOdooConfigured } from "@/lib/integrations/odoo";
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://api.wuipi.net";
-
-/**
- * Resolve the partnerId for a collection item so we can hand the customer a
- * `/portal/invite/<token>` link after a successful payment. The DAL doesn't
- * store odoo_partner_id directly, so we look it up by email (most reliable).
- * Returns null if Odoo is unreachable, email is missing, or no match exists —
- * the UI then falls back to `/portal/acceso?email=...` (pre-filled).
- */
-async function resolvePartnerIdForItem(item: { customer_email?: string | null }): Promise<number | null> {
-  if (!isOdooConfigured()) return null;
-  const email = (item.customer_email || "").trim().toLowerCase();
-  if (!email) return null;
-  try {
-    const partners = await searchRead("res.partner", [
-      ["email", "=", email],
-      ["customer_rank", ">", 0],
-    ], { fields: ["id"], limit: 1 });
-    return partners[0]?.id || null;
-  } catch (err) {
-    console.warn("[cobranzas/[token]] Odoo partner lookup failed:", err);
-    return null;
-  }
-}
 
 export async function GET(
   request: NextRequest,
@@ -90,8 +66,8 @@ export async function GET(
     const odooInvoices = item.metadata?.odoo_invoices || null;
 
     // Portal access URL for the post-payment confirmation screen.
-    // Email pre-filled so el cliente solo ingresa su contraseña (o la crea
-    // si es primera vez). Sin magic link.
+    // Email pre-filled — el cliente solo ingresa contraseña (o la crea si es
+    // primera vez). Sin Magic Link.
     let portalLoginUrl: string | null = null;
     if (item.customer_email) {
       portalLoginUrl = `${APP_URL}/portal/acceso?email=${encodeURIComponent(item.customer_email)}`;
