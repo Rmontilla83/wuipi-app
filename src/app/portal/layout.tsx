@@ -1,6 +1,5 @@
 import { redirect } from "next/navigation";
 import { headers } from "next/headers";
-import { createServerSupabase } from "@/lib/supabase/server";
 import { PortalProvider } from "@/lib/portal/context";
 import { PortalHeader } from "@/components/portal/header";
 import { PortalNav } from "@/components/portal/nav";
@@ -8,49 +7,35 @@ import { QueryProvider } from "@/components/layout/query-provider";
 import { getPortalSessionFromCookieJar } from "@/lib/auth/portal-session";
 
 export default async function PortalLayout({ children }: { children: React.ReactNode }) {
-  // Dos fuentes de auth para el portal:
-  // 1. Cookie wpi_session (HMAC propio, seteada por /portal/invite/[token]).
-  //    Es el camino primario para clientes que llegan desde WA/email — no
-  //    depende de Supabase ni del webview ejecutando el flujo OTP correcto.
-  // 2. Sesión Supabase (Magic Link via /portal/acceso). Camino legacy para
-  //    clientes que escriben su email manualmente o admins que entran como
-  //    super_admin con app_metadata.odoo_partner_id.
-  // Si CUALQUIERA está presente, el cliente está autenticado.
+  // Auth del portal: cookie HMAC `wpi_session` seteada por /api/portal/login
+  // (y signup, reset-password/confirm). El password storage lo maneja
+  // Supabase Auth pero la sesión real es nuestra cookie HMAC porque el
+  // webview de WhatsApp no propaga cookies de Supabase confiablemente.
   const portalSession = getPortalSessionFromCookieJar();
 
-  const supabase = createServerSupabase();
-  const { data: { user } } = await supabase.auth.getUser();
+  const partnerId = portalSession?.pid;
+  const customerName = portalSession?.name || "";
+  const email = portalSession?.email || "";
 
-  // partnerId/customerName priorizando la sesión Supabase (puede tener admin
-  // role override más rico) y cayendo a la cookie propia.
-  const partnerId = user?.app_metadata?.odoo_partner_id ?? portalSession?.pid;
-  const customerName = user?.app_metadata?.customer_name || portalSession?.name || "";
-  const email = user?.email || portalSession?.email || "";
-
-  // Routes that intentionally render WITHOUT a portal session:
-  //   - /portal/acceso         → magic-link login page
-  //   - /portal/auth/*         → callback handlers
-  //   - /portal/invite/*       → consumes invite token, generates magic link
-  //   - /portal/preview/*      → admin viewing a client's portal
-  // Anything else (inicio, facturas, suscripciones, mi-conexion, ayuda) is a
-  // customer-area route and MUST require a session, otherwise usePortal()
-  // crashes the page and the user sees the error boundary.
+  // Rutas del portal que se renderizan SIN sesión:
+  //   - /portal/acceso          → login / signup / olvidé contraseña
+  //   - /portal/reset-password  → cliente llega del email para resetear
+  //   - /portal/preview/*       → admin viendo un cliente (requirePermission)
+  // El resto (inicio, facturas, suscripciones, mi-conexion, ayuda) son rutas
+  // del área cliente y requieren sesión, sino usePortal() crashea.
   const pathname = headers().get("x-pathname") || "";
   const isPublicPortalRoute =
     pathname.startsWith("/portal/acceso") ||
-    pathname.startsWith("/portal/auth") ||
-    pathname.startsWith("/portal/invite") ||
+    pathname.startsWith("/portal/reset-password") ||
     pathname.startsWith("/portal/preview");
 
-  // Sin sesión válida (ninguna de las dos) → redirect a /portal/acceso para
-  // que pida Magic Link manualmente.
   const isAuthenticated = !!partnerId;
   if (!isAuthenticated) {
     if (!isPublicPortalRoute) {
       redirect("/portal/acceso");
     }
-    // Public portal routes (login, preview, invite) keep their own auth model
-    // and still need QueryProvider for child components that use useQuery.
+    // Rutas públicas del portal mantienen su propio modelo de auth pero
+    // igual necesitan QueryProvider para componentes con useQuery.
     return <QueryProvider>{children}</QueryProvider>;
   }
 

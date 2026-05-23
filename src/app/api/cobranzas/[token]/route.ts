@@ -7,7 +7,6 @@ import { getItemsByToken, updateItem } from "@/lib/dal/collection-campaigns";
 import { checkRateLimit, getClientIP } from "@/lib/utils/rate-limit";
 import { fetchBCVRate, convertUsdToBs } from "@/lib/integrations/bcv";
 import { searchRead, isOdooConfigured } from "@/lib/integrations/odoo";
-import { generatePortalInviteToken } from "@/lib/utils/portal-invite-token";
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://api.wuipi.net";
 
@@ -90,21 +89,12 @@ export async function GET(
     // Extract safe metadata for public display (invoice details only)
     const odooInvoices = item.metadata?.odoo_invoices || null;
 
-    // Portal access URLs for the post-payment confirmation screen.
-    // We prefer the permanent invite URL (one-click magic-link generation)
-    // but always supply the pre-filled login URL as a fallback in case the
-    // partner lookup fails. Only resolve once the payment is paid — saves
-    // an Odoo round-trip during the polling phase.
-    let portalInviteUrl: string | null = null;
+    // Portal access URL for the post-payment confirmation screen.
+    // Email pre-filled so el cliente solo ingresa su contraseña (o la crea
+    // si es primera vez). Sin magic link.
     let portalLoginUrl: string | null = null;
     if (item.customer_email) {
       portalLoginUrl = `${APP_URL}/portal/acceso?email=${encodeURIComponent(item.customer_email)}`;
-      if (item.status === "paid") {
-        const partnerId = await resolvePartnerIdForItem(item);
-        if (partnerId) {
-          portalInviteUrl = `${APP_URL}/portal/invite/${generatePortalInviteToken(partnerId)}`;
-        }
-      }
     }
 
     // Return only safe public fields
@@ -119,7 +109,6 @@ export async function GET(
       payment_method: item.payment_method,
       payment_reference: item.payment_reference,
       paid_at: item.paid_at,
-      portal_invite_url: portalInviteUrl,
       portal_login_url: portalLoginUrl,
       ...(odooInvoices ? { odoo_invoices: odooInvoices, currency: item.metadata?.currency } : {}),
     });

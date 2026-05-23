@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { apiSuccess, apiError, apiServerError } from "@/lib/api-helpers";
 import { isConfigured, findPartnerByEmail } from "@/lib/integrations/odoo-new";
+import { findPortalUserByEmail } from "@/lib/auth/portal-auth";
 import { checkRateLimit, getClientIP } from "@/lib/utils/rate-limit";
 
 export const dynamic = "force-dynamic";
@@ -17,9 +18,6 @@ async function minTime<T>(p: Promise<T>, ms: number): Promise<T> {
 export async function POST(request: NextRequest) {
   const started = Date.now();
   try {
-    // Rate limit: 5 req/10min per IP, 10 req/10min per email.
-    // Email rate limit also prevents an attacker from using many IPs to enumerate
-    // a known target.
     const ip = getClientIP(request.headers);
     const rlIp = checkRateLimit(`verify-email:ip:${ip}`, 5, 10 * 60_000);
     if (!rlIp.allowed) {
@@ -43,24 +41,25 @@ export async function POST(request: NextRequest) {
       return minTime(Promise.resolve(apiError("Demasiados intentos. Esperá unos minutos.", 429)), MIN_RESPONSE_MS);
     }
 
-    const partner = await findPartnerByEmail(email, { customersOnly: true });
+    const [partner, user] = await Promise.all([
+      findPartnerByEmail(email, { customersOnly: true }),
+      findPortalUserByEmail(email),
+    ]);
 
-    // Pad response to MIN_RESPONSE_MS so a hit and a miss look identical on the wire.
+    // Pad response to MIN_RESPONSE_MS so all branches look identical on the wire.
     const elapsed = Date.now() - started;
     const pad = Math.max(0, MIN_RESPONSE_MS - elapsed);
     if (pad > 0) await new Promise(r => setTimeout(r, pad));
 
     if (!partner) {
-      // Never leak "email not found" — return shape identical to success.
-      // Client treats absence of partner_id as "not registered" without exposing
-      // the customer's name to pre-auth callers.
-      return apiSuccess({ exists: false });
+      // Never leak details. Frontend will show "no estás registrado como cliente".
+      return apiSuccess({ exists: false, hasAccount: false });
     }
 
-    // Return partner_id (required for magic-link flow) but NOT the name.
-    // Full name is only visible post-authentication.
+    // Partner exists in Odoo. hasAccount tells UI whether to show login or signup form.
     return apiSuccess({
       exists: true,
+      hasAccount: !!user,
       partner_id: partner.id,
     });
   } catch (error) {
