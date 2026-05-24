@@ -5,7 +5,7 @@
 
 import { Resend } from "resend";
 
-const FROM_EMAIL = process.env.RESEND_FROM_EMAIL || "cobros@wuipi.net";
+const FROM_EMAIL = process.env.RESEND_FROM_EMAIL || "pagos@wuipi.net";
 const LOGO_URL = "https://api.wuipi.net/img/wuipi-logo.png";
 
 function getResend(): Resend | null {
