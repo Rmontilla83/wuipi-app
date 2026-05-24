@@ -20,11 +20,18 @@ import { cookies } from "next/headers";
 import type { NextRequest, NextResponse } from "next/server";
 
 export const PORTAL_SESSION_COOKIE = "wpi_session";
+export const PORTAL_REFRESH_COOKIE = "wpi_refresh";
 
-// 30 días — alineado con la decisión de OTP expiration original. Lo
-// suficientemente largo para que un cliente que recibió la invitación hace
-// semanas siga entrando sin re-pedir nada.
+// 30 días para la cookie de sesión. Si Safari ITP la borra (después de 7 días
+// sin interacción) o el cliente cambia de browser, el refresh token largo se
+// encarga de regenerarla transparentemente.
 const TTL_SECONDS = 30 * 24 * 60 * 60;
+
+// 180 días para el refresh token. Patrón "auto-login silencioso" — el cliente
+// nunca debería ver el form de login otra vez (salvo logout explícito o cambio
+// de dispositivo). Si se necesita invalidar todas las sesiones globalmente,
+// rotar PAYMENT_TOKEN_SECRET en Vercel invalida ambas cookies de golpe.
+const REFRESH_TTL_SECONDS = 180 * 24 * 60 * 60;
 
 function getSecret(): string {
   const s = process.env.PAYMENT_TOKEN_SECRET;
@@ -47,26 +54,28 @@ export interface PortalSessionPayload {
   iat: number;
 }
 
-function sign(payload: PortalSessionPayload): string {
+function sign(payload: PortalSessionPayload, kind: "session" | "refresh" = "session"): string {
   const json = JSON.stringify(payload);
   const b64 = Buffer.from(json, "utf8").toString("base64url");
+  const prefix = kind === "refresh" ? "portal-refresh-v1" : "portal-session-v1";
   const sig = crypto
     .createHmac("sha256", getSecret())
-    .update(`portal-session-v1.${b64}`)
+    .update(`${prefix}.${b64}`)
     .digest("base64url")
     .slice(0, 32); // 192 bits es más que suficiente
   return `${b64}.${sig}`;
 }
 
-function verify(token: string): PortalSessionPayload | null {
+function verify(token: string, kind: "session" | "refresh" = "session"): PortalSessionPayload | null {
   const parts = token.split(".");
   if (parts.length !== 2) return null;
   const [b64, sig] = parts;
   if (!b64 || !sig) return null;
 
+  const prefix = kind === "refresh" ? "portal-refresh-v1" : "portal-session-v1";
   const expected = crypto
     .createHmac("sha256", getSecret())
-    .update(`portal-session-v1.${b64}`)
+    .update(`${prefix}.${b64}`)
     .digest("base64url")
     .slice(0, 32);
 
@@ -121,10 +130,57 @@ export function setPortalSession(
 }
 
 /**
- * Limpiar la cookie de portal session (logout).
+ * Setear el refresh token de larga duración (180 días). Va separado de la
+ * cookie de sesión para que rotaciones de seguridad puedan invalidar uno sin
+ * otro. Patrón "auto-login silencioso": cuando wpi_session expira (Safari ITP
+ * borra cookies cross-site tras 7 días sin interacción, etc.), la app usa
+ * este refresh para regenerar wpi_session sin pedir password.
+ */
+export function setPortalRefresh(
+  responseCookies: CookieMutator,
+  data: { pid: number; name?: string; email?: string }
+): void {
+  const now = Math.floor(Date.now() / 1000);
+  const payload: PortalSessionPayload = {
+    pid: data.pid,
+    name: data.name,
+    email: data.email,
+    iat: now,
+    exp: now + REFRESH_TTL_SECONDS,
+  };
+  responseCookies.set(PORTAL_REFRESH_COOKIE, sign(payload, "refresh"), {
+    httpOnly: true,
+    secure: true,
+    sameSite: "lax",
+    path: "/",
+    maxAge: REFRESH_TTL_SECONDS,
+  });
+}
+
+/**
+ * Helper: setea AMBAS cookies (sesión + refresh) en una sola llamada.
+ * Es lo que login/signup/reset-password/confirm deben llamar tras autenticar.
+ */
+export function setPortalAuthOnResponse(
+  response: NextResponse,
+  data: { pid: number; name?: string; email?: string }
+): void {
+  setPortalSession(response.cookies, data);
+  setPortalRefresh(response.cookies, data);
+}
+
+/**
+ * Limpiar la cookie de portal session (logout). También limpia refresh.
  */
 export function clearPortalSession(responseCookies: CookieMutator): void {
   responseCookies.set(PORTAL_SESSION_COOKIE, "", {
+    httpOnly: true,
+    secure: true,
+    sameSite: "lax",
+    path: "/",
+    maxAge: 0,
+  });
+  responseCookies.set(PORTAL_REFRESH_COOKIE, "", {
     httpOnly: true,
     secure: true,
     sameSite: "lax",
@@ -201,4 +257,51 @@ export function setPortalSessionOnResponse(
 
 export function clearPortalSessionOnResponse(response: NextResponse): void {
   clearPortalSession(response.cookies);
+}
+
+/**
+ * Lee el refresh token desde las cookies del request actual (server-side).
+ * Devuelve null si no existe, expiró, o el HMAC no valida.
+ */
+export function getPortalRefreshFromCookieJar(): PortalSessionPayload | null {
+  try {
+    const c = cookies().get(PORTAL_REFRESH_COOKIE);
+    if (!c?.value) return null;
+    return verify(c.value, "refresh");
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Auto-renovación silenciosa de la sesión usando el refresh token.
+ *
+ * Patrón típico: en el layout del portal o middleware, si `wpi_session`
+ * no existe o expiró, llamamos a esta función. Si hay un `wpi_refresh`
+ * válido, regenera `wpi_session` (escribiendo la cookie via next/headers
+ * cookies()) y devuelve el payload "como si la sesión hubiera estado
+ * presente". El cliente no se entera de nada.
+ *
+ * Devuelve null si tampoco hay refresh válido — ahí sí hay que mandar
+ * al cliente a /portal/acceso.
+ */
+export function tryRefreshPortalSession(): PortalSessionPayload | null {
+  const refresh = getPortalRefreshFromCookieJar();
+  if (!refresh) return null;
+
+  // Regenerar wpi_session con un TTL nuevo de 30 días.
+  // OJO: cookies().set() solo funciona en Route Handlers y Server Actions —
+  // en Server Components puros tira un error silente que ignoramos. Si no
+  // se puede escribir, devolvemos el payload del refresh igual para que la
+  // página renderice; el próximo request hará el refresh real.
+  try {
+    setPortalSessionFromCookieJar({
+      pid: refresh.pid,
+      name: refresh.name,
+      email: refresh.email,
+    });
+  } catch {
+    // Silencioso — Server Component, no podemos escribir cookie acá.
+  }
+  return refresh;
 }

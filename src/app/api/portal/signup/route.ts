@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { apiError, apiServerError } from "@/lib/api-helpers";
 import { isConfigured, findPartnerByEmail } from "@/lib/integrations/odoo-new";
 import { createPortalUser, findPortalUserByEmail } from "@/lib/auth/portal-auth";
-import { setPortalSessionOnResponse } from "@/lib/auth/portal-session";
+import { setPortalAuthOnResponse } from "@/lib/auth/portal-session";
 import { checkRateLimit, getClientIP } from "@/lib/utils/rate-limit";
 
 export const dynamic = "force-dynamic";
@@ -49,7 +49,7 @@ export async function POST(request: NextRequest) {
     }
 
     const response = NextResponse.json({ ok: true, partner_id: partner.id });
-    setPortalSessionOnResponse(response, {
+    setPortalAuthOnResponse(response, {
       pid: partner.id,
       name: partner.name,
       email: partner.email ?? email,
