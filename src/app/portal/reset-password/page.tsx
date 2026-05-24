@@ -64,7 +64,9 @@ export default function ResetPasswordPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "No pudimos actualizar la contraseña");
       setSuccess(true);
-      setTimeout(() => router.push("/portal/inicio"), 1500);
+      // Full reload para garantizar que las cookies wpi_session+wpi_refresh
+      // estén aplicadas antes del render del portal.
+      setTimeout(() => { window.location.href = "/portal/inicio"; }, 1500);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Error desconocido");
     } finally {

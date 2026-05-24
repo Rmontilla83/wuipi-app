@@ -89,7 +89,12 @@ export default function PortalLoginPage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Email o contraseña incorrectos");
-      router.push("/portal/inicio");
+      // window.location.href fuerza un full reload — garantiza que el browser
+      // ya aplicó las cookies del Set-Cookie del response antes de re-renderear.
+      // Con router.push() hay race condition: el SSR del /portal/inicio puede
+      // correr antes de que el cookie commit en el browser, mostrando "algo
+      // salió mal" en el primer login y andando recién al refresh.
+      window.location.href = "/portal/inicio";
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Error desconocido");
     } finally {
@@ -119,7 +124,7 @@ export default function PortalLoginPage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "No pudimos crear tu cuenta");
-      router.push("/portal/inicio");
+      window.location.href = "/portal/inicio";
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Error desconocido");
     } finally {

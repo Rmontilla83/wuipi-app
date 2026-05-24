@@ -4,21 +4,14 @@ import { PortalProvider } from "@/lib/portal/context";
 import { PortalHeader } from "@/components/portal/header";
 import { PortalNav } from "@/components/portal/nav";
 import { QueryProvider } from "@/components/layout/query-provider";
-import { getPortalSessionFromCookieJar, tryRefreshPortalSession } from "@/lib/auth/portal-session";
+import { getPortalSessionFromCookieJar, hasValidPortalRefresh } from "@/lib/auth/portal-session";
 
 export default async function PortalLayout({ children }: { children: React.ReactNode }) {
   // Auth del portal: cookie HMAC `wpi_session` seteada por /api/portal/login
   // (y signup, reset-password/confirm). El password storage lo maneja
   // Supabase Auth pero la sesión real es nuestra cookie HMAC porque el
   // webview de WhatsApp no propaga cookies de Supabase confiablemente.
-  //
-  // Si `wpi_session` se perdió (Safari ITP la borra a los 7 días sin
-  // interacción cross-site, browser limpia cookies, etc.) intentamos
-  // regenerarla en silencio desde `wpi_refresh` (TTL 180d). El cliente
-  // no ve el form de login otra vez — solo si el refresh tampoco está
-  // (logout explícito o dispositivo nuevo).
-  const portalSession =
-    getPortalSessionFromCookieJar() || tryRefreshPortalSession();
+  const portalSession = getPortalSessionFromCookieJar();
 
   const partnerId = portalSession?.pid;
   const customerName = portalSession?.name || "";
@@ -39,6 +32,13 @@ export default async function PortalLayout({ children }: { children: React.React
   const isAuthenticated = !!partnerId;
   if (!isAuthenticated) {
     if (!isPublicPortalRoute) {
+      // Si hay refresh válido pero no session (Safari ITP, browser cleanup),
+      // regeneramos session vía Route Handler y volvemos a la página original.
+      // El cliente no ve el form de login.
+      if (hasValidPortalRefresh()) {
+        const next = pathname || "/portal/inicio";
+        redirect(`/api/portal/refresh?next=${encodeURIComponent(next)}`);
+      }
       redirect("/portal/acceso");
     }
     // Rutas públicas del portal mantienen su propio modelo de auth pero

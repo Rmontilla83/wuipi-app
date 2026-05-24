@@ -274,34 +274,15 @@ export function getPortalRefreshFromCookieJar(): PortalSessionPayload | null {
 }
 
 /**
- * Auto-renovación silenciosa de la sesión usando el refresh token.
+ * Detecta si hay un refresh token válido (sin tocar cookies).
+ * Útil en Server Components para decidir si redirigir a
+ * `/api/portal/refresh` (que regenera la session via Route Handler).
  *
- * Patrón típico: en el layout del portal o middleware, si `wpi_session`
- * no existe o expiró, llamamos a esta función. Si hay un `wpi_refresh`
- * válido, regenera `wpi_session` (escribiendo la cookie via next/headers
- * cookies()) y devuelve el payload "como si la sesión hubiera estado
- * presente". El cliente no se entera de nada.
- *
- * Devuelve null si tampoco hay refresh válido — ahí sí hay que mandar
- * al cliente a /portal/acceso.
+ * NO se puede regenerar la cookie en un Server Component porque
+ * `cookies().set()` está prohibido fuera de Route Handlers y Server
+ * Actions (Next.js 14+). Por eso el refresh va por una redirect al
+ * endpoint dedicado.
  */
-export function tryRefreshPortalSession(): PortalSessionPayload | null {
-  const refresh = getPortalRefreshFromCookieJar();
-  if (!refresh) return null;
-
-  // Regenerar wpi_session con un TTL nuevo de 30 días.
-  // OJO: cookies().set() solo funciona en Route Handlers y Server Actions —
-  // en Server Components puros tira un error silente que ignoramos. Si no
-  // se puede escribir, devolvemos el payload del refresh igual para que la
-  // página renderice; el próximo request hará el refresh real.
-  try {
-    setPortalSessionFromCookieJar({
-      pid: refresh.pid,
-      name: refresh.name,
-      email: refresh.email,
-    });
-  } catch {
-    // Silencioso — Server Component, no podemos escribir cookie acá.
-  }
-  return refresh;
+export function hasValidPortalRefresh(): boolean {
+  return getPortalRefreshFromCookieJar() !== null;
 }
