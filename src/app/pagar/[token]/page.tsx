@@ -156,18 +156,26 @@ function ShortlinkTranslator({ code }: { code: string }) {
 }
 
 // ---------- Main Component ----------
+//
+// Wrapper que decide qué componente montar:
+//  - Si el `token` es un shortlink code de campaña Odoo → <ShortlinkTranslator />
+//  - Sino → <PagarPageMain /> (flujo de pago wpy_token existente)
+// Esto es necesario porque el componente legacy hace 30+ useState
+// y meter un early-return arriba viola rules-of-hooks.
 
 export default function PagarPage() {
   const params = useParams();
-  const searchParams = useSearchParams();
-  const token = params.token as string;
-
-  // Si el `token` es en realidad un shortlink code (formato 6-12 alfanum
-  // sin prefijo wpy_), interceptamos: traducimos a wpy_token y redirect
-  // al flow existente. No tocamos nada del resto del componente.
+  const token = (params?.token as string) || "";
   if (token && isShortlinkCode(token)) {
     return <ShortlinkTranslator code={token} />;
   }
+  return <PagarPageMain />;
+}
+
+function PagarPageMain() {
+  const params = useParams();
+  const searchParams = useSearchParams();
+  const token = params.token as string;
 
   const [data, setData] = useState<PaymentData | null>(null);
   const [bcv, setBcv] = useState<BCVData | null>(null);
