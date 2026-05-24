@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useParams, useSearchParams } from "next/navigation";
+import { useParams, useSearchParams, useRouter } from "next/navigation";
+import { isShortlinkCode } from "@/lib/utils/payment-shortlink";
 import {
   Building2,
   CreditCard,
@@ -90,12 +91,83 @@ const BANCOS_VENEZUELA: Array<{ code: string; name: string }> = [
   { code: "0191", name: "BNC" },
 ];
 
+// ---------- Shortlink translator ----------
+// Cuando el cliente llega desde un email/SMS de campaña Odoo, el `token`
+// del URL es en realidad el `code` de wuipi.campaign.shortlink (8 chars
+// alfanumérico). Acá lo traducimos a un wpy_token clásico via
+// /api/pagar/shortlink/iniciar y redirigimos al flujo existente.
+
+function ShortlinkTranslator({ code }: { code: string }) {
+  const router = useRouter();
+  const [error, setError] = useState<string | null>(null);
+  const didFireRef = useRef(false);
+
+  useEffect(() => {
+    if (didFireRef.current) return;
+    didFireRef.current = true;
+    (async () => {
+      try {
+        const res = await fetch("/api/pagar/shortlink/iniciar", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ code }),
+          cache: "no-store",
+        });
+        const json = await res.json();
+        if (!res.ok || !json?.payment_token) {
+          setError(json?.error || "No pudimos abrir tu enlace de pago.");
+          return;
+        }
+        // Reemplaza la URL al wpy_token canónico — el flujo existente
+        // toma desde acá sin cambios.
+        router.replace(`/pagar/${json.payment_token}`);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Error al abrir el enlace");
+      }
+    })();
+  }, [code, router]);
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-[#0a0a1a] flex items-center justify-center px-4">
+        <div className="max-w-md w-full bg-[#13132a] border border-red-500/30 rounded-2xl p-8 text-center">
+          <AlertCircle size={40} className="text-red-400 mx-auto mb-4" />
+          <h1 className="text-white text-lg font-semibold mb-2">Enlace no disponible</h1>
+          <p className="text-gray-400 text-sm mb-6">{error}</p>
+          <a
+            href="https://api.wuipi.net/portal/acceso"
+            className="inline-block px-5 py-2.5 bg-[#5b2c8f] text-white text-sm font-medium rounded-lg hover:opacity-90"
+          >
+            Ir a mi portal
+          </a>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-[#0a0a1a] flex items-center justify-center px-4">
+      <div className="text-center">
+        <Loader2 size={32} className="text-[#F46800] animate-spin mx-auto mb-3" />
+        <p className="text-gray-400 text-sm">Abriendo tu enlace de pago…</p>
+      </div>
+    </div>
+  );
+}
+
 // ---------- Main Component ----------
 
 export default function PagarPage() {
   const params = useParams();
   const searchParams = useSearchParams();
   const token = params.token as string;
+
+  // Si el `token` es en realidad un shortlink code (formato 6-12 alfanum
+  // sin prefijo wpy_), interceptamos: traducimos a wpy_token y redirect
+  // al flow existente. No tocamos nada del resto del componente.
+  if (token && isShortlinkCode(token)) {
+    return <ShortlinkTranslator code={token} />;
+  }
 
   const [data, setData] = useState<PaymentData | null>(null);
   const [bcv, setBcv] = useState<BCVData | null>(null);
