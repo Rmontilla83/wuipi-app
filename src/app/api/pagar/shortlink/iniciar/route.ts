@@ -12,7 +12,7 @@
 // dónde sale el partner_id (acá del JWT del shortlink, allá del HMAC
 // permanente).
 
-import { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { apiSuccess, apiError, apiServerError } from "@/lib/api-helpers";
 import { isConfigured, getPartner, listInvoices } from "@/lib/integrations/odoo-new";
 import { resolveShortlinkByCode, markShortlinkAccessed } from "@/lib/integrations/odoo-new/shortlinks";
@@ -73,7 +73,18 @@ export async function POST(request: NextRequest) {
 
     const drafts = draftsResult.items;
     if (drafts.length === 0) {
-      return apiError("No tienes facturas pendientes. Si ya pagaste, ingresa a tu portal para verificar.", 400);
+      // Estado feliz: cliente sin facturas pendientes. No es un error — el
+      // cliente solo necesita saber que ya no debe nada. Devolvemos 200 con
+      // `code` discriminador para que el front renderice una tarjeta amigable
+      // en vez del cartel rojo "Enlace no disponible".
+      return NextResponse.json(
+        {
+          code: "no_drafts_pending",
+          customer_name: partner.name,
+          portal_url: "https://api.wuipi.net/portal/acceso",
+        },
+        { status: 200 },
+      );
     }
 
     const cedulaRif = normalizeOdooVatToCedula(partner.vat, partner.isCompany, partnerId);
@@ -86,7 +97,15 @@ export async function POST(request: NextRequest) {
       : 0;
     const netDue = Math.round(Math.max(draftTotal - creditFavorUsd, 0) * 100) / 100;
     if (netDue <= 0) {
-      return apiError("Tu cuenta está al día. Ingresa al portal para confirmar.", 400);
+      // Saldo a favor cubre todos los drafts → cuenta al día.
+      return NextResponse.json(
+        {
+          code: "account_at_zero",
+          customer_name: partner.name,
+          portal_url: "https://api.wuipi.net/portal/acceso",
+        },
+        { status: 200 },
+      );
     }
 
     // 4. Reusar collection_item activo si ya existe para este partner

@@ -97,9 +97,16 @@ const BANCOS_VENEZUELA: Array<{ code: string; name: string }> = [
 // alfanumérico). Acá lo traducimos a un wpy_token clásico via
 // /api/pagar/shortlink/iniciar y redirigimos al flujo existente.
 
+type FriendlyState = {
+  code: "no_drafts_pending" | "account_at_zero";
+  customer_name?: string;
+  portal_url?: string;
+};
+
 function ShortlinkTranslator({ code }: { code: string }) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
+  const [friendly, setFriendly] = useState<FriendlyState | null>(null);
   const didFireRef = useRef(false);
 
   useEffect(() => {
@@ -114,6 +121,17 @@ function ShortlinkTranslator({ code }: { code: string }) {
           cache: "no-store",
         });
         const json = await res.json();
+        // Estado feliz: cliente sin deuda. El endpoint devuelve 200 con
+        // un `code` discriminador y sin payment_token — mostramos una
+        // tarjeta amigable en vez del cartel rojo de error.
+        if (res.ok && (json?.code === "no_drafts_pending" || json?.code === "account_at_zero")) {
+          setFriendly({
+            code: json.code,
+            customer_name: typeof json.customer_name === "string" ? json.customer_name : undefined,
+            portal_url: typeof json.portal_url === "string" ? json.portal_url : undefined,
+          });
+          return;
+        }
         if (!res.ok || !json?.payment_token) {
           setError(json?.error || "No pudimos abrir tu enlace de pago.");
           return;
@@ -127,16 +145,41 @@ function ShortlinkTranslator({ code }: { code: string }) {
     })();
   }, [code, router]);
 
+  if (friendly) {
+    const firstName = (friendly.customer_name || "").split(" ")[0] || "";
+    const portalUrl = friendly.portal_url || "https://api.wuipi.net/portal/acceso";
+    return (
+      <div className="min-h-screen bg-[#0a0a1a] flex items-center justify-center px-4">
+        <div className="max-w-md w-full bg-[#13132a] border border-emerald-500/20 rounded-2xl p-8 text-center">
+          <CheckCircle2 size={48} className="text-emerald-400 mx-auto mb-4" />
+          <h1 className="text-white text-xl font-semibold mb-2">
+            {firstName ? `¡${firstName}, tu cuenta está al día!` : "¡Tu cuenta está al día!"}
+          </h1>
+          <p className="text-gray-400 text-sm mb-6">
+            No tienes facturas pendientes en este momento. Gracias por estar al día con tus pagos.
+          </p>
+          <a
+            href={portalUrl}
+            className="inline-block px-5 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-white text-sm font-medium rounded-lg transition-colors"
+          >
+            Ir a mi portal
+          </a>
+          <p className="text-gray-600 text-[10px] mt-6">Wuipi Telecomunicaciones C.A.</p>
+        </div>
+      </div>
+    );
+  }
+
   if (error) {
     return (
       <div className="min-h-screen bg-[#0a0a1a] flex items-center justify-center px-4">
-        <div className="max-w-md w-full bg-[#13132a] border border-red-500/30 rounded-2xl p-8 text-center">
-          <AlertCircle size={40} className="text-red-400 mx-auto mb-4" />
-          <h1 className="text-white text-lg font-semibold mb-2">Enlace no disponible</h1>
+        <div className="max-w-md w-full bg-[#13132a] border border-amber-500/20 rounded-2xl p-8 text-center">
+          <AlertCircle size={40} className="text-amber-400 mx-auto mb-4" />
+          <h1 className="text-white text-lg font-semibold mb-2">No pudimos abrir tu enlace</h1>
           <p className="text-gray-400 text-sm mb-6">{error}</p>
           <a
             href="https://api.wuipi.net/portal/acceso"
-            className="inline-block px-5 py-2.5 bg-[#5b2c8f] text-white text-sm font-medium rounded-lg hover:opacity-90"
+            className="inline-block px-5 py-2.5 bg-[#5b2c8f] hover:opacity-90 text-white text-sm font-medium rounded-lg transition-opacity"
           >
             Ir a mi portal
           </a>
