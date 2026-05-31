@@ -1,4 +1,12 @@
 /** @type {import('next').NextConfig} */
+// En dev mode Next.js usa eval() para HMR/React Refresh, por eso agregamos
+// 'unsafe-eval' SOLO cuando NODE_ENV === "development". En producción el
+// CSP queda byte por byte idéntico al que está hoy en Vercel.
+const isDev = process.env.NODE_ENV === "development";
+const scriptSrc = isDev
+  ? "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://js.stripe.com"
+  : "script-src 'self' 'unsafe-inline' https://js.stripe.com";
+
 const nextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
@@ -24,7 +32,7 @@ const nextConfig = {
           key: "Content-Security-Policy",
           value: [
             "default-src 'self'",
-            "script-src 'self' 'unsafe-inline' https://js.stripe.com",
+            scriptSrc,
             "style-src 'self' 'unsafe-inline'",
             "img-src 'self' data: blob: https://api.wuipi.net",
             "font-src 'self' data:",
