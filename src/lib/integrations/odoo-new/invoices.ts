@@ -137,6 +137,41 @@ export async function listInvoices(opts: ListInvoicesOptions = {}): Promise<{
   return { items: rows.map(toDomain), total };
 }
 
+/**
+ * Devuelve los nombres de servicio/producto de cada factura (account.move.line
+ * con display_type=product). Usado para poblar el detalle "Servicio" que ve el
+ * cliente en el portal de pago. Una sola query batched para N facturas.
+ *
+ * Normaliza "[BM020SE] WUIPI Beam 20" → "WUIPI Beam 20".
+ */
+export async function getInvoiceProductsByMove(moveIds: number[]): Promise<Map<number, string[]>> {
+  const result = new Map<number, string[]>();
+  if (moveIds.length === 0) return result;
+  const rawLines = await searchRead<{
+    move_id: [number, string] | false;
+    product_id: [number, string] | false;
+    name: string | false;
+  }>(
+    "account.move.line",
+    [["move_id", "in", moveIds], ["display_type", "=", "product"]],
+    { fields: ["move_id", "product_id", "name"], limit: 500 },
+  );
+  for (const l of rawLines) {
+    const moveId = Array.isArray(l.move_id) ? l.move_id[0] : 0;
+    if (!moveId) continue;
+    const productName =
+      (Array.isArray(l.product_id) ? l.product_id[1] : null) ??
+      (typeof l.name === "string" ? l.name : "") ??
+      "";
+    const clean = productName.replace(/^\[.*?\]\s*/, "").trim();
+    if (!clean) continue;
+    const list = result.get(moveId) ?? [];
+    list.push(clean);
+    result.set(moveId, list);
+  }
+  return result;
+}
+
 /** Listado de invoices pendientes (no pagadas) de un partner — ordenadas por vencimiento. */
 export async function listPendingInvoicesForPartner(partnerId: number): Promise<OdooInvoice[]> {
   const { items } = await listInvoices({

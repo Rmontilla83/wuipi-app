@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { apiSuccess, apiError, apiServerError } from "@/lib/api-helpers";
 import { verifyClientPaymentToken } from "@/lib/utils/payment-token";
-import { isConfigured, getPartner, listInvoices } from "@/lib/integrations/odoo-new";
+import { isConfigured, getPartner, listInvoices, getInvoiceProductsByMove } from "@/lib/integrations/odoo-new";
 import { createAdminSupabase } from "@/lib/supabase/server";
 import { generateCollectionToken } from "@/lib/dal/collection-campaigns";
 import { checkRateLimit, getClientIP } from "@/lib/utils/rate-limit";
@@ -86,6 +86,22 @@ export async function POST(request: NextRequest) {
       odooInvoiceAmountsUsd[d.id] = d.amountTotal;
     }
 
+    // Detalle de facturas que ve el cliente (number + servicio + monto).
+    // Se construye UNA vez y se usa tanto al crear como al reusar el item, así
+    // el display nunca queda desfasado cuando los drafts del partner cambian
+    // (bug 2026-06-03: el reuse refrescaba IDs/monto pero no este array).
+    // `products` se puebla con los servicios reales del draft (account.move.line).
+    const productsByMove = await getInvoiceProductsByMove(selectedDrafts.map((d) => d.id));
+    const odooInvoices = selectedDrafts.map((d) => ({
+      number: d.name,
+      date: d.invoiceDate || "",
+      due_date: d.invoiceDateDue || "",
+      total: d.amountTotal,
+      amount_due: d.amountTotal,
+      currency: d.currencyCode || "USD",
+      products: productsByMove.get(d.id) ?? [],
+    }));
+
     if (isPayAll) {
       // Busca items abiertos que pertenezcan a este partner por cédula.
       const lookupCedulas = Array.from(new Set([
@@ -127,6 +143,9 @@ export async function POST(request: NextRequest) {
             ...(existingMeta || {}),
             odoo_invoice_ids: newInvoiceIds,
             odoo_invoice_amounts_usd: odooInvoiceAmountsUsd,
+            // Refrescar el detalle visible (number/servicio/monto) junto con los
+            // IDs — sino el portal muestra datos viejos del draft anterior.
+            odoo_invoices: odooInvoices,
             is_pay_all: true,
           };
         }
@@ -157,19 +176,9 @@ export async function POST(request: NextRequest) {
       campaignId = newCampaign.id;
     }
 
-    // Build invoice metadata (solo de las facturas seleccionadas)
-    const odooInvoices = selectedDrafts.map((d) => ({
-      number: d.name,
-      date: d.invoiceDate || "",
-      due_date: d.invoiceDateDue || "",
-      total: d.amountTotal,
-      amount_due: d.amountTotal,
-      currency: d.currencyCode || "USD",
-      products: [],
-    }));
-
     // odoo_invoice_ids: TODAS las facturas seleccionadas. Sin esto, clientes con N
     // drafts pagando "todo" dejaban N-1 facturas en draft post-pago (bug 2026-05-14).
+    // `odooInvoices` (detalle con servicios) ya se construyó arriba.
     const odooInvoiceIds = selectedDrafts.map((d) => d.id);
 
     // Create collection item

@@ -14,7 +14,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { apiSuccess, apiError, apiServerError } from "@/lib/api-helpers";
-import { isConfigured, getPartner, listInvoices } from "@/lib/integrations/odoo-new";
+import { isConfigured, getPartner, listInvoices, getInvoiceProductsByMove } from "@/lib/integrations/odoo-new";
 import { resolveShortlinkByCode, markShortlinkAccessed } from "@/lib/integrations/odoo-new/shortlinks";
 import { verifyShortlinkJWT, shortlinkErrorMessage, isShortlinkCode } from "@/lib/utils/payment-shortlink";
 import { createAdminSupabase } from "@/lib/supabase/server";
@@ -114,6 +114,19 @@ export async function POST(request: NextRequest) {
     const odooInvoiceIds = drafts.map((d) => d.id);
     for (const d of drafts) odooInvoiceAmountsUsd[d.id] = d.amountTotal;
 
+    // Detalle de facturas (number + servicio + monto), construido una vez y
+    // usado al crear y al reusar — así el display nunca queda desfasado.
+    const productsByMove = await getInvoiceProductsByMove(drafts.map((d) => d.id));
+    const odooInvoicesMeta = drafts.map((d) => ({
+      number: d.name,
+      date: d.invoiceDate || "",
+      due_date: d.invoiceDateDue || "",
+      total: d.amountTotal,
+      amount_due: d.amountTotal,
+      currency: d.currencyCode || "USD",
+      products: productsByMove.get(d.id) ?? [],
+    }));
+
     const sb = createAdminSupabase();
     const lookupCedulas = Array.from(new Set([
       cedulaRif,
@@ -146,6 +159,8 @@ export async function POST(request: NextRequest) {
             ...existingMeta,
             odoo_invoice_ids: newIdsSorted,
             odoo_invoice_amounts_usd: odooInvoiceAmountsUsd,
+            // Refrescar el detalle visible junto con los IDs.
+            odoo_invoices: odooInvoicesMeta,
             is_pay_all: true,
             shortlink_code: code,
           },
@@ -179,17 +194,7 @@ export async function POST(request: NextRequest) {
       campaignId = newCampaign.id;
     }
 
-    // 6. Crear el collection_item
-    const odooInvoicesMeta = drafts.map((d) => ({
-      number: d.name,
-      date: d.invoiceDate || "",
-      due_date: d.invoiceDateDue || "",
-      total: d.amountTotal,
-      amount_due: d.amountTotal,
-      currency: d.currencyCode || "USD",
-      products: [],
-    }));
-
+    // 6. Crear el collection_item (odooInvoicesMeta ya construido arriba con servicios)
     const paymentToken = generateCollectionToken();
     const { error: insertErr } = await sb
       .from("collection_items")
