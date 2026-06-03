@@ -31,6 +31,7 @@ import {
   computeProratedAmounts,
 } from "@/lib/integrations/odoo";
 import { enqueueOdooSync } from "@/lib/dal/odoo-sync-queue";
+import { createAdminSupabase } from "@/lib/supabase/server";
 
 export interface SyncTriggerInput {
   /** UUID del collection_item ya marcado como paid */
@@ -220,6 +221,25 @@ export async function triggerOdooSyncOrEnqueue(input: SyncTriggerInput): Promise
       odooPartnerId, odooInvoiceId: failures[0].invoiceId,
       error: `${failures.length}/${invoiceIds.length} fallaron: ${failures.map(f => `inv${f.invoiceId}=${f.error}`).join("; ").slice(0, 1500)}`,
     });
+    return;
+  }
+
+  // Todas las facturas se sincronizaron OK sin encolar. Marcar el item
+  // como sincronizado in-line para que el visor /cobranzas no lo cuente
+  // como huérfano (introducido 2026-06-03 — ver migración 021).
+  await markCollectionItemSyncedNow(collectionItemId);
+}
+
+async function markCollectionItemSyncedNow(collectionItemId: string): Promise<void> {
+  try {
+    const db = createAdminSupabase();
+    await db
+      .from("collection_items")
+      .update({ odoo_sync_synced_at: new Date().toISOString() })
+      .eq("id", collectionItemId);
+  } catch (err) {
+    // No bloqueante — el sync ya fue exitoso, solo perdemos el flag visual.
+    console.warn(`[OdooSyncTrigger] No se pudo marcar odoo_sync_synced_at en ${collectionItemId}:`, err);
   }
 }
 

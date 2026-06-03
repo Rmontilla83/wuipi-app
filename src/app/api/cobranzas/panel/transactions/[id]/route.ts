@@ -29,7 +29,7 @@ export async function GET(_req: Request, { params }: Params) {
     const { data: item, error: itemErr } = await db
       .from("collection_items")
       .select(
-        "id, paid_at, created_at, customer_name, customer_cedula_rif, customer_email, customer_phone, amount_usd, amount_bss, bcv_rate, payment_method, payment_reference, status, invoice_number, concept, metadata, expires_at, payment_token",
+        "id, paid_at, created_at, customer_name, customer_cedula_rif, customer_email, customer_phone, amount_usd, amount_bss, bcv_rate, payment_method, payment_reference, status, invoice_number, concept, metadata, expires_at, payment_token, odoo_sync_synced_at",
       )
       .eq("id", id)
       .maybeSingle();
@@ -219,16 +219,16 @@ export async function GET(_req: Request, { params }: Params) {
     } else if (syncQueue && syncQueue.status !== "done" && !syncQueue.resolved_manually) {
       const t = translateSyncError(syncQueue.last_error);
       if (t) diagnostic = t;
-    } else if (item.status === "paid" && !syncQueue) {
+    } else if (item.status === "paid" && !syncQueue && !item.odoo_sync_synced_at) {
       diagnostic = {
-        reason: "Pago recibido pero no se encoló sync a Odoo.",
+        reason: "Pago recibido pero no se registró sync a Odoo (sin entrada en cola y sin marca de sync exitoso).",
         action: "Reportar al área técnica — la conciliación contable no se intentó automáticamente.",
         severity: "warn",
       };
     }
-    // Nota: status="paid" con syncQueue.status="done" o resolved_manually
-    // deja diagnostic=null → drawer muestra "sin incidencias detectadas".
-    // Eso es lo correcto en ese caso (flujo completo, sin nada que actuar).
+    // Nota: status="paid" con sync exitoso (queue done/resolved_manually O
+    // odoo_sync_synced_at != null) deja diagnostic=null → drawer muestra
+    // "sin incidencias detectadas". Eso es lo correcto.
 
     // ----- IDs de facturas Odoo (de metadata) -----
     const meta = (item.metadata || {}) as Record<string, unknown>;
@@ -239,9 +239,11 @@ export async function GET(_req: Request, { params }: Params) {
       ? (meta.odoo_invoices as TxDetail["item"]["odoo_invoices_meta"])
       : [];
 
-    // sync_status sintetizado
+    // sync_status sintetizado.
+    // Sin entrada en cola pero con odoo_sync_synced_at = sync sincrónico
+    // exitoso (caso normal post-fix del 2026-06-03), no es huérfano.
     const sync_status = !syncQueue
-      ? "none"
+      ? (item.odoo_sync_synced_at ? "synced" : "none")
       : syncQueue.resolved_manually || syncQueue.status === "done"
       ? "synced"
       : syncQueue.status === "pending"

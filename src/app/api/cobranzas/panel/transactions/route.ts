@@ -29,8 +29,13 @@ function parsePeriod(value: string | null): Period {
 
 function syncStatusFromQueue(
   row: { status: string; resolved_manually: boolean } | null | undefined,
+  syncedAt: string | null,
 ): SyncStatus {
-  if (!row) return "none";
+  // Sin entrada en la cola.
+  //   - synced_at != null → el sync sincrónico fue exitoso (caso feliz
+  //     post-fix de wiring 2026-06-03). NO es huérfano.
+  //   - synced_at == null → realmente huérfano (sin trazas).
+  if (!row) return syncedAt ? "synced" : "none";
   if (row.resolved_manually) return "synced";
   const s = row.status;
   if (s === "done") return "synced";
@@ -75,7 +80,7 @@ export async function GET(req: NextRequest) {
     let q = db
       .from("collection_items")
       .select(
-        "id, paid_at, created_at, customer_name, customer_cedula_rif, amount_usd, amount_bss, payment_method, payment_reference, status, invoice_number, metadata",
+        "id, paid_at, created_at, customer_name, customer_cedula_rif, amount_usd, amount_bss, payment_method, payment_reference, status, invoice_number, metadata, odoo_sync_synced_at",
         { count: "exact" },
       )
       .gte(dateColumn, range.from)
@@ -128,7 +133,7 @@ export async function GET(req: NextRequest) {
 
     const rows: TxListItem[] = (items || []).map((it) => {
       const sync = syncByItem[it.id];
-      const sync_status = syncStatusFromQueue(sync);
+      const sync_status = syncStatusFromQueue(sync, it.odoo_sync_synced_at);
 
       // Si el filtro de sync está activo, lo aplicamos en memoria (no es
       // un campo nativo de collection_items y un join filtrante nos forzaría

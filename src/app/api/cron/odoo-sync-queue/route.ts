@@ -226,6 +226,18 @@ async function processQueueItem(
 
   if (failures.length === 0) {
     await markQueueItemDone(item.id);
+    // Marcar el collection_item como sincronizado para que el panel
+    // /cobranzas no lo cuente como huérfano (mismo flag que el trigger
+    // sincrónico — ver migración 021).
+    try {
+      await db
+        .from("collection_items")
+        .update({ odoo_sync_synced_at: new Date().toISOString() })
+        .eq("id", item.collection_item_id)
+        .is("odoo_sync_synced_at", null);
+    } catch (e) {
+      console.warn(`[cron] failed to mark synced_at for ${item.collection_item_id}:`, e);
+    }
     return allAlreadySynced ? "already_synced" : "done";
   }
 

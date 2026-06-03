@@ -97,12 +97,15 @@ export async function GET(req: NextRequest) {
         .eq("status", "manual_review")
         .eq("resolved_manually", false),
 
-      // IDs de items paid en los últimos 90 días (para cruzar con la cola)
+      // IDs de items paid en los últimos 90 días SIN marca de sync exitoso
+      // (los que tienen odoo_sync_synced_at son los que el sync sincrónico
+      // ya cerró bien — no son huérfanos aunque no tengan queue entry).
       db
         .from("collection_items")
         .select("id")
         .eq("status", "paid")
-        .gte("paid_at", orphansHorizonFrom),
+        .gte("paid_at", orphansHorizonFrom)
+        .is("odoo_sync_synced_at", null),
 
       // IDs de items que SÍ están en la cola de sync (para excluir del cruce)
       db.from("odoo_sync_queue").select("collection_item_id"),

@@ -60,7 +60,7 @@ export async function GET(req: NextRequest) {
     let q = db
       .from("collection_items")
       .select(
-        "id, paid_at, created_at, customer_name, customer_cedula_rif, amount_usd, amount_bss, payment_method, payment_reference, status, invoice_number, metadata",
+        "id, paid_at, created_at, customer_name, customer_cedula_rif, amount_usd, amount_bss, payment_method, payment_reference, status, invoice_number, metadata, odoo_sync_synced_at",
       )
       .gte(dateColumn, range.from)
       .lt(dateColumn, range.to);
@@ -119,6 +119,10 @@ export async function GET(req: NextRequest) {
       const meta = (it.metadata || {}) as { odoo_invoices?: Array<{ number?: string }> };
       const invoiceFromMeta = meta.odoo_invoices?.[0]?.number;
 
+      // Sin entrada en cola pero con odoo_sync_synced_at != null = sync
+      // sincrónico exitoso. Reflejarlo en el CSV como "synced".
+      const syncLabel = sync ? sync.status : (it.odoo_sync_synced_at ? "synced" : "sin cola");
+
       const row = [
         formatCaracas(it.created_at),
         formatCaracas(it.paid_at),
@@ -130,7 +134,7 @@ export async function GET(req: NextRequest) {
         it.payment_reference ?? "",
         it.invoice_number || invoiceFromMeta || "",
         it.status,
-        sync ? sync.status : "sin cola",
+        syncLabel,
         sync?.last_error ? sync.last_error.slice(0, 200) : "",
       ].map(csvEscape).join(",");
       lines.push(row);
