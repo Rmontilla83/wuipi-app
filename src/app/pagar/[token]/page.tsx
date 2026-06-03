@@ -1210,54 +1210,73 @@ function TransferDetails({
       <div className="bg-white/[0.03] rounded-xl p-4 border border-white/5 space-y-3">
         <h4 className="text-white text-sm font-semibold">¿Ya realizaste la transferencia?</h4>
         <p className="text-gray-500 text-[11px] leading-relaxed">
-          Seleccioná el banco desde el que transferiste y pegá la referencia.
-          Si coincide con nuestro banco, tu pago se confirma al instante.
+          Completa los 3 datos de tu comprobante. Con ellos verificamos tu
+          pago con el banco y se confirma automáticamente. Mientras más exactos
+          los datos, más rápido se confirma.
         </p>
-        <select
-          value={originBank}
-          onChange={(e) => setOriginBank(e.target.value)}
-          className="w-full px-4 py-3 rounded-xl bg-white/[0.03] border border-white/10 text-white text-sm focus:border-[#F46800]/50 focus:outline-none"
-        >
-          {/* style en cada <option> porque navegadores en light mode renderean
-              fondo blanco por default y heredan text-white → opciones invisibles */}
-          <option value="" className="bg-[#0a0a1a] text-white">Tu banco origen…</option>
-          {BANCOS_VENEZUELA.map(b => (
-            <option key={b.code} value={b.code} className="bg-[#0a0a1a] text-white">{b.name}</option>
-          ))}
-        </select>
-        <input
-          value={transferRef}
-          onChange={(e) => setTransferRef(e.target.value)}
-          placeholder="Número de referencia"
-          className="w-full px-4 py-3 rounded-xl bg-white/[0.03] border border-white/10 text-white text-sm placeholder-gray-600 focus:border-[#F46800]/50 focus:outline-none"
-        />
         <div className="space-y-1">
           <label className="text-gray-500 text-[11px] block">
-            Monto exacto en Bs que transferiste
+            1. Banco desde el que transferiste <span className="text-[#F46800]">*</span>
+          </label>
+          <select
+            value={originBank}
+            onChange={(e) => setOriginBank(e.target.value)}
+            className="w-full px-4 py-3 rounded-xl bg-white/[0.03] border border-white/10 text-white text-sm focus:border-[#F46800]/50 focus:outline-none"
+          >
+            {/* style en cada <option> porque navegadores en light mode renderean
+                fondo blanco por default y heredan text-white → opciones invisibles */}
+            <option value="" className="bg-[#0a0a1a] text-white">Selecciona tu banco…</option>
+            {BANCOS_VENEZUELA.map(b => (
+              <option key={b.code} value={b.code} className="bg-[#0a0a1a] text-white">{b.name}</option>
+            ))}
+          </select>
+        </div>
+        <div className="space-y-1">
+          <label className="text-gray-500 text-[11px] block">
+            2. Número de referencia <span className="text-[#F46800]">*</span>
+          </label>
+          <input
+            value={transferRef}
+            onChange={(e) => setTransferRef(e.target.value)}
+            placeholder="Ej: 0001234567"
+            className="w-full px-4 py-3 rounded-xl bg-white/[0.03] border border-white/10 text-white text-sm placeholder-gray-600 focus:border-[#F46800]/50 focus:outline-none"
+          />
+          <p className="text-gray-600 text-[10px] leading-snug">
+            Cópiala tal cual aparece en tu comprobante, completa y sin espacios.
+          </p>
+        </div>
+        <div className="space-y-1">
+          <label className="text-gray-500 text-[11px] block">
+            3. Monto EXACTO en Bs que transferiste <span className="text-[#F46800]">*</span>
           </label>
           <input
             value={declaredAmount}
             onChange={(e) => setDeclaredAmount(e.target.value)}
             inputMode="decimal"
-            placeholder={amountBss.toFixed(2)}
+            placeholder={`Ej: ${amountBss.toFixed(2)}`}
             className={`w-full px-4 py-3 rounded-xl bg-white/[0.03] border text-white text-sm placeholder-gray-600 focus:outline-none ${
               declaredDiffers
                 ? "border-amber-400/50 focus:border-amber-400"
                 : "border-white/10 focus:border-[#F46800]/50"
             }`}
           />
+          <p className="text-gray-600 text-[10px] leading-snug">
+            El monto exacto que dice tu comprobante, con los céntimos. Es lo que
+            usamos para encontrar tu pago en el banco.
+          </p>
           {declaredDiffers && (
             <p className="text-amber-400/90 text-[11px] leading-snug">
-              El monto difiere del adeudado actual ({amountBss.toFixed(2)} Bs).
-              Si transferiste con una tasa BCV anterior, déjalo así. Tu pago se
-              detectará y nuestro equipo te contactará para la diferencia.
+              Este monto difiere del adeudado actual ({amountBss.toFixed(2)} Bs).
+              Si transferiste con una tasa BCV anterior, déjalo tal como lo
+              transferiste. Detectaremos tu pago y el equipo te contactará por
+              la diferencia.
             </p>
           )}
         </div>
         <button
           onClick={onConfirm}
-          disabled={confirming || !transferRef.trim()}
-          className="w-full py-3.5 rounded-xl bg-gradient-to-r from-[#F46800] to-[#ff8534] text-white font-semibold text-sm transition-all hover:shadow-lg active:scale-[0.98] disabled:opacity-50"
+          disabled={confirming || !transferRef.trim() || !originBank || !declaredIsValid}
+          className="w-full py-3.5 rounded-xl bg-gradient-to-r from-[#F46800] to-[#ff8534] text-white font-semibold text-sm transition-all hover:shadow-lg active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {confirming ? (
             <Loader2 className="w-4 h-4 animate-spin mx-auto" />
@@ -1265,6 +1284,11 @@ function TransferDetails({
             "Confirmar transferencia"
           )}
         </button>
+        {(!originBank || !transferRef.trim() || !declaredIsValid) && (
+          <p className="text-gray-600 text-[10px] text-center">
+            Completa los 3 campos para confirmar.
+          </p>
+        )}
       </div>
     </div>
   );
