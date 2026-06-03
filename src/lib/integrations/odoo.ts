@@ -5,10 +5,22 @@
 
 import { getJournalDisplayName } from "@/lib/utils/journal-names";
 
-const ODOO_URL = process.env.ODOO_URL || "";
-const ODOO_DB = process.env.ODOO_DB || "";
-const ODOO_USER = process.env.ODOO_USER || "";
-const ODOO_API_KEY = process.env.ODOO_API_KEY || "";
+// 2026-06-03: Repuntado al Odoo nuevo (erp.wuipi.net) usando las mismas env
+// vars que `odoo-new/client.ts`. Antes este cliente leía ODOO_URL/ODOO_DB/
+// ODOO_USER/ODOO_API_KEY que apuntaban a un Odoo SaaS abandonado
+// (wuipitech.odoo.com), mientras que los endpoints de pago (que crean los
+// collection_items) ya hablaban con erp.wuipi.net. El resultado: los IDs de
+// factura que guardamos eran del nuevo, pero el sync intentaba postearlos en
+// el viejo → ~$4K USD en transacciones desencajadas (39 en cola + 87
+// huérfanos al 2026-06-03). PAYMENT_METHOD_MAPPING (línea ~921) ya estaba
+// actualizado con IDs del nuevo desde 2026-05-23, solo faltaba esto.
+//
+// Las env vars viejas (ODOO_URL/ODOO_DB/ODOO_USER/ODOO_API_KEY) pueden
+// borrarse de Vercel después de validar este deploy.
+const ODOO_URL = process.env.ODOO_BASE_URL || "";
+const ODOO_DB = "wuipi";
+const ODOO_USER = process.env.ODOO_INT_LOGIN || "";
+const ODOO_API_KEY = process.env.ODOO_INT_API_KEY || "";
 
 const TIMEOUT_MS = 15_000;
 const TIMEOUT_MS_LONG = 60_000;  // operaciones pesadas: action_post, action_create_payments, etc.
