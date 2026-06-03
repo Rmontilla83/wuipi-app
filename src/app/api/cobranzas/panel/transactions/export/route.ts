@@ -119,9 +119,17 @@ export async function GET(req: NextRequest) {
       const meta = (it.metadata || {}) as { odoo_invoices?: Array<{ number?: string }> };
       const invoiceFromMeta = meta.odoo_invoices?.[0]?.number;
 
-      // Sin entrada en cola pero con odoo_sync_synced_at != null = sync
-      // sincrónico exitoso. Reflejarlo en el CSV como "synced".
-      const syncLabel = sync ? sync.status : (it.odoo_sync_synced_at ? "synced" : "sin cola");
+      // Sin entrada en cola:
+      //   synced_at → sync sincrónico exitoso
+      //   no paid → no aplica (cliente no pagó)
+      //   paid sin nada → sin sincronizar (huérfano real)
+      const syncLabel = sync
+        ? sync.status
+        : it.odoo_sync_synced_at
+        ? "synced"
+        : it.status !== "paid"
+        ? "no aplica"
+        : "sin sincronizar";
 
       const row = [
         formatCaracas(it.created_at),

@@ -30,20 +30,31 @@ function parsePeriod(value: string | null): Period {
 function syncStatusFromQueue(
   row: { status: string; resolved_manually: boolean } | null | undefined,
   syncedAt: string | null,
+  itemStatus: string,
 ): SyncStatus {
-  // Sin entrada en la cola.
-  //   - synced_at != null → el sync sincrónico fue exitoso (caso feliz
-  //     post-fix de wiring 2026-06-03). NO es huérfano.
-  //   - synced_at == null → realmente huérfano (sin trazas).
-  if (!row) return syncedAt ? "synced" : "none";
-  if (row.resolved_manually) return "synced";
-  const s = row.status;
-  if (s === "done") return "synced";
-  if (s === "pending") return "pending";
-  if (s === "retrying") return "retrying";
-  if (s === "manual_review") return "manual_review";
-  if (s === "cancelled") return "cancelled";
-  return "pending";
+  // Con entrada en la cola: refleja el estado de la cola.
+  if (row) {
+    if (row.resolved_manually) return "synced";
+    const s = row.status;
+    if (s === "done") return "synced";
+    if (s === "pending") return "pending";
+    if (s === "retrying") return "retrying";
+    if (s === "manual_review") return "manual_review";
+    if (s === "cancelled") return "cancelled";
+    return "pending";
+  }
+
+  // Sin entrada en la cola:
+  //   - synced_at != null → sync sincrónico exitoso (caso feliz post-fix
+  //     2026-06-03). Sincronizado.
+  //   - el pago NO se concretó (no es "paid") → no aplica sync todavía.
+  //     Esto cubre viewed/sent/pending/failed/expired/conciliating: el
+  //     cliente no pagó, no hay nada que registrar en Odoo. Mostrar "—".
+  //   - el pago SÍ está paid pero sin cola ni synced_at → huérfano REAL,
+  //     requiere atención.
+  if (syncedAt) return "synced";
+  if (itemStatus !== "paid") return "n_a";
+  return "none";
 }
 
 export async function GET(req: NextRequest) {
@@ -133,7 +144,7 @@ export async function GET(req: NextRequest) {
 
     const rows: TxListItem[] = (items || []).map((it) => {
       const sync = syncByItem[it.id];
-      const sync_status = syncStatusFromQueue(sync, it.odoo_sync_synced_at);
+      const sync_status = syncStatusFromQueue(sync, it.odoo_sync_synced_at, it.status);
 
       // Si el filtro de sync está activo, lo aplicamos en memoria (no es
       // un campo nativo de collection_items y un join filtrante nos forzaría

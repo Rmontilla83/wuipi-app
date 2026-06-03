@@ -240,10 +240,12 @@ export async function GET(_req: Request, { params }: Params) {
       : [];
 
     // sync_status sintetizado.
-    // Sin entrada en cola pero con odoo_sync_synced_at = sync sincrónico
-    // exitoso (caso normal post-fix del 2026-06-03), no es huérfano.
+    // Sin entrada en cola:
+    //   synced_at != null → sync sincrónico exitoso.
+    //   no es paid → no aplica (cliente no pagó, nada que sincronizar).
+    //   paid sin nada → huérfano real.
     const sync_status = !syncQueue
-      ? (item.odoo_sync_synced_at ? "synced" : "none")
+      ? (item.odoo_sync_synced_at ? "synced" : item.status !== "paid" ? "n_a" : "none")
       : syncQueue.resolved_manually || syncQueue.status === "done"
       ? "synced"
       : syncQueue.status === "pending"

@@ -2,7 +2,11 @@
 
 export type TxStatus = "pending" | "sent" | "viewed" | "paid" | "failed" | "expired" | "conciliating";
 export type TxMethod = "debito_inmediato" | "transferencia" | "c2p" | "stripe" | "paypal" | "cash" | "pending";
-export type SyncStatus = "synced" | "pending" | "retrying" | "manual_review" | "cancelled" | "none";
+// "n_a" = no aplica: el pago no se concretó (viewed/sent/pending/failed/
+// expired/conciliating), no hay nada que sincronizar a Odoo todavía.
+// "none" = huérfano REAL: el pago SÍ se concretó (paid) pero no tiene
+// entrada en la cola ni marca de sync — eso sí requiere atención.
+export type SyncStatus = "synced" | "pending" | "retrying" | "manual_review" | "cancelled" | "none" | "n_a";
 
 export type TxListItem = {
   id: string;

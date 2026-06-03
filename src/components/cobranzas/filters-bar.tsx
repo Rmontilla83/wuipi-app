@@ -57,7 +57,7 @@ const SYNC_OPTIONS: Array<{ value: SyncStatus; label: string }> = [
   { value: "pending", label: "En cola" },
   { value: "retrying", label: "Reintentando" },
   { value: "manual_review", label: "Revisión manual" },
-  { value: "none", label: "Sin cola" },
+  { value: "none", label: "Sin sincronizar" },
 ];
 
 function ChipMulti<T extends string>({

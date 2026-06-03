@@ -31,7 +31,10 @@ const SYNC_STYLE: Record<SyncStatus, { label: string; cls: string }> = {
   retrying: { label: "Reintentando", cls: "text-amber-400 bg-amber-500/10" },
   manual_review: { label: "Revisión manual", cls: "text-rose-400 bg-rose-500/10" },
   cancelled: { label: "Cancelado", cls: "text-gray-400 bg-gray-500/10" },
-  none: { label: "Sin cola", cls: "text-gray-500 bg-gray-500/10" },
+  // Huérfano real: pago confirmado pero sin sync. Requiere atención → ámbar.
+  none: { label: "Sin sincronizar", cls: "text-amber-400 bg-amber-500/10" },
+  // No aplica: el cliente no pagó, no hay nada que sincronizar a Odoo.
+  n_a: { label: "—", cls: "text-gray-600" },
 };
 
 const fmtUsd = new Intl.NumberFormat("es-VE", { style: "currency", currency: "USD", minimumFractionDigits: 2 });
