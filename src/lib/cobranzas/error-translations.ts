@@ -88,6 +88,149 @@ const MERCANTIL: Record<string, DiagnosticHint> = {
     action: "Reintenta en 15-30 minutos.",
     severity: "info",
   },
+  // ── Códigos ISO 8583 adicionales que puede devolver el switch ──
+  "01": {
+    reason: "El banco emisor rechazó y pide que el cliente se comunique con ellos (rechazo genérico).",
+    action: "El cliente debe llamar a su banco para saber por qué, o intentar con otro método/tarjeta.",
+    severity: "warn",
+  },
+  "03": {
+    reason: "Comercio inválido — error de configuración del lado de Wuipi/Mercantil.",
+    action: "Escalar al área técnica. No es un problema del cliente.",
+    severity: "error",
+  },
+  "04": {
+    reason: "El banco pidió retener la tarjeta (posible reporte de robo/extravío).",
+    action: "El cliente debe contactar a su banco. Sugiérele otro método de pago.",
+    severity: "warn",
+  },
+  "05": {
+    reason: "El banco emisor no aprobó la operación (rechazo sin detalle — 'no honrar').",
+    action: "El cliente debe consultar con su banco o intentar con otra tarjeta/método.",
+    severity: "warn",
+  },
+  "13": {
+    reason: "Monto inválido para la operación.",
+    action: "Verifica que el monto sea positivo y con el formato correcto. Reintenta.",
+    severity: "error",
+  },
+  "30": {
+    reason: "Error de formato en el mensaje enviado al banco.",
+    action: "Escalar al área técnica — es un problema de integración, no del cliente.",
+    severity: "error",
+  },
+  "41": {
+    reason: "Tarjeta reportada como extraviada.",
+    action: "El cliente debe usar otra tarjeta y contactar a su banco.",
+    severity: "warn",
+  },
+  "43": {
+    reason: "Tarjeta reportada como robada.",
+    action: "El cliente debe usar otra tarjeta y contactar a su banco.",
+    severity: "warn",
+  },
+  "56": {
+    reason: "La tarjeta/cuenta no existe en el banco emisor.",
+    action: "Pide al cliente verificar los datos o usar otro método.",
+    severity: "warn",
+  },
+  "58": {
+    reason: "Operación no permitida en este canal según el banco.",
+    action: "El cliente debe habilitar pagos en línea con su banco, o usar otro método.",
+    severity: "warn",
+  },
+  "62": {
+    reason: "Tarjeta restringida por el banco emisor.",
+    action: "El cliente debe contactar a su banco. Sugiérele otro método.",
+    severity: "warn",
+  },
+  "63": {
+    reason: "El banco rechazó por una violación de seguridad.",
+    action: "El cliente debe contactar a su banco. Puede intentar con otra tarjeta.",
+    severity: "warn",
+  },
+  "65": {
+    reason: "Excedió el límite de cantidad de operaciones permitidas por su banco.",
+    action: "El cliente debe esperar (suele resetear al día siguiente) o usar otro método.",
+    severity: "warn",
+  },
+  "76": {
+    reason: "Cuenta destino no encontrada / inconsistente.",
+    action: "Escalar al área técnica para verificar la configuración de la cuenta.",
+    severity: "error",
+  },
+  "78": {
+    reason: "Cuenta nueva no activada por el cliente.",
+    action: "El cliente debe activar su cuenta/tarjeta con su banco antes de reintentar.",
+    severity: "warn",
+  },
+  "96": {
+    reason: "Falla temporal del sistema del banco.",
+    action: "Reintenta en unos minutos.",
+    severity: "info",
+  },
+  "99": {
+    reason: "Error genérico reportado por el banco/switch.",
+    action: "Reintentar. Si persiste, revisar el mensaje específico o escalar a soporte Mercantil.",
+    severity: "warn",
+  },
+};
+
+// Mensajes en español que devuelve el Botón Web de Mercantil. Para este
+// producto el `response_code` es ambiguo (01 cubre varias razones), así que el
+// `response_message` es lo discriminante — confirmado con logs reales 2026-06.
+// Se matchea por substring uppercase, así que basta una palabra clave.
+const MERCANTIL_MESSAGES: Record<string, DiagnosticHint> = {
+  "CLAVE DE PAGO INVALIDA": {
+    reason: "El cliente ingresó mal su clave de pago (la clave dinámica/C2P del banco).",
+    action: "Pídele que solicite una clave nueva en su banco y reintente. Las claves expiran rápido.",
+    severity: "info",
+  },
+  "OPERACION RECHAZADA": {
+    reason: "El banco emisor rechazó la operación sin dar un motivo específico.",
+    action: "El cliente debe consultar con su banco (saldo, límites, bloqueos) o intentar con otro método.",
+    severity: "warn",
+  },
+  "MOTIVOS TECNICOS": {
+    reason: "El banco rechazó por un problema técnico temporal de su lado.",
+    action: "Pide al cliente reintentar en unos minutos. Si persiste, que use otro método.",
+    severity: "info",
+  },
+  "FONDOS INSUFICIENTES": {
+    reason: "La cuenta del cliente no tiene saldo suficiente.",
+    action: "El cliente debe fondear su cuenta o pagar con otro método.",
+    severity: "warn",
+  },
+  "FONDO INSUFICIENTE": {
+    reason: "La cuenta del cliente no tiene saldo suficiente.",
+    action: "El cliente debe fondear su cuenta o pagar con otro método.",
+    severity: "warn",
+  },
+  "EXCEDE LIMITE": {
+    reason: "La operación supera el límite diario/por transacción del cliente con su banco.",
+    action: "El cliente debe subir su límite en la banca en línea o pagar en montos menores.",
+    severity: "warn",
+  },
+  "TARJETA VENCIDA": {
+    reason: "La tarjeta del cliente está vencida.",
+    action: "Pide al cliente usar una tarjeta vigente.",
+    severity: "warn",
+  },
+  "NO AFILIADO": {
+    reason: "El cliente no está afiliado al servicio de pago (C2P/Clave de Pago) en su banco.",
+    action: "Indícale que se afilie desde su banca en línea antes de reintentar.",
+    severity: "warn",
+  },
+  "TIEMPO": {
+    reason: "La operación expiró por tiempo (el cliente tardó demasiado o el banco no respondió).",
+    action: "Pide al cliente reintentar la operación completa.",
+    severity: "info",
+  },
+  "ERROR": {
+    reason: "El banco/switch reportó un error genérico sin detalle.",
+    action: "Reintentar. Si persiste, escalar a soporte Mercantil con la fecha y hora.",
+    severity: "warn",
+  },
 };
 
 const STRIPE: Record<string, DiagnosticHint> = {
@@ -229,9 +372,11 @@ const DEFAULT_BY_GATEWAY: Record<string, DiagnosticHint> = {
  * Traduce un código/mensaje técnico a algo accionable para cobranzas.
  *
  * Orden de prioridad:
- *   1. Match exacto por código de respuesta dentro del gateway
- *   2. Match parcial por palabra clave en el mensaje
- *   3. Default por gateway
+ *   1. Para Mercantil: match por MENSAJE primero (el código 01 es ambiguo,
+ *      cubre "CLAVE INVALIDA", "OPERACION RECHAZADA", "MOTIVOS TECNICOS"...).
+ *   2. Match exacto por código de respuesta dentro del gateway.
+ *   3. Match parcial por palabra clave en el mensaje.
+ *   4. Default por gateway.
  */
 export function translateGatewayError(
   gateway: string,
@@ -241,6 +386,15 @@ export function translateGatewayError(
   const g = (gateway || "").toLowerCase().trim();
   const c = (code || "").trim();
   const m = (message || "").toLowerCase();
+  const mUpper = (message || "").toUpperCase();
+
+  // 1. Mercantil: el response_message es lo discriminante. Buscamos por
+  //    substring en el mapa de mensajes ANTES de mirar el código.
+  if (g === "mercantil" && mUpper) {
+    for (const [key, hint] of Object.entries(MERCANTIL_MESSAGES)) {
+      if (mUpper.includes(key)) return hint;
+    }
+  }
 
   const table: Record<string, DiagnosticHint> | undefined = (() => {
     if (g === "mercantil") return MERCANTIL;
@@ -250,7 +404,15 @@ export function translateGatewayError(
     return undefined;
   })();
 
-  if (table && c && table[c]) return table[c];
+  // 2. Match por código. Para Mercantil saltamos el código "01" porque es
+  //    ambiguo y, si llegamos acá, el mensaje no matcheó nada específico —
+  //    mejor caer al default que dar un diagnóstico de "01" potencialmente
+  //    equivocado.
+  if (table && c && table[c] && !(g === "mercantil" && c === "01")) {
+    return table[c];
+  }
+
+  // 3. Match parcial por keyword del mensaje contra las keys de la tabla.
   if (table) {
     for (const [k, hint] of Object.entries(table)) {
       if (m && (m.includes(k.toLowerCase()) || k.toLowerCase().includes(m))) {
