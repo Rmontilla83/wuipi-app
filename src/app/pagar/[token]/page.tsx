@@ -231,7 +231,6 @@ function PagarPageMain() {
   // Monto en Bs que el cliente declara haber transferido. Pre-llenado con el
   // monto adeudado (lo que ve en pantalla) cuando data carga; editable por si
   // transfirió con tasa BCV antigua que difiere del actual.
-  const [declaredAmount, setDeclaredAmount] = useState<string>("");
   const [confirmingSent, setConfirmingSent] = useState(false);
   const [autoVerifiedMsg, setAutoVerifiedMsg] = useState<string | null>(null);
   // Mensaje específico cuando Mercantil confirma la trx pero por monto distinto al adeudado.
@@ -290,9 +289,6 @@ function PagarPageMain() {
         const bcvJson = await bcvRes.json();
         if (bcvRes.ok) {
           setBcv(bcvJson);
-          // Pre-llenar el monto declarado con el monto adeudado actual la
-          // primera vez (no sobrescribir si el cliente ya editó).
-          setDeclaredAmount(prev => prev || (bcvJson.amount_bss ? bcvJson.amount_bss.toFixed(2) : ""));
         }
       }
 
@@ -473,12 +469,13 @@ function PagarPageMain() {
     setAutoVerifiedMsg(null);
     setAmountMismatchInfo(null);
     try {
-      // Parsear el monto declarado. Si está vacío o inválido, omitirlo y el
-      // servidor usará el amount_bss del item (comportamiento previo).
-      const declaredNum = declaredAmount ? parseFloat(declaredAmount.replace(",", ".")) : NaN;
-      const declaredAmountBss = !Number.isNaN(declaredNum) && declaredNum > 0
-        ? Math.round(declaredNum * 100) / 100
-        : undefined;
+      // El cliente debe transferir EXACTAMENTE el monto que le mostramos en
+      // pantalla (amountBss). Buscamos en Mercantil con ESE mismo monto — no
+      // uno recalculado server-side — para que coincida al céntimo con lo que
+      // el cliente vio y transfirió, aunque la tasa BCV haya cambiado entre el
+      // page-load y este confirm. Si el cliente transfirió otro monto, no
+      // matchea y cae a conciliating (verificación manual), que es lo esperado.
+      const declaredAmountBss = amountBss > 0 ? Math.round(amountBss * 100) / 100 : undefined;
 
       const res = await fetch("/api/cobranzas/pay/confirm", {
         method: "POST",
@@ -952,8 +949,6 @@ function PagarPageMain() {
             setTransferRef={setTransferRef}
             originBank={originBank}
             setOriginBank={setOriginBank}
-            declaredAmount={declaredAmount}
-            setDeclaredAmount={setDeclaredAmount}
             confirming={confirmingSent}
             onConfirm={handleConfirmTransfer}
             copied={copied}
@@ -1125,8 +1120,6 @@ function TransferDetails({
   setTransferRef,
   originBank,
   setOriginBank,
-  declaredAmount,
-  setDeclaredAmount,
   confirming,
   onConfirm,
   copied,
@@ -1139,17 +1132,11 @@ function TransferDetails({
   setTransferRef: (v: string) => void;
   originBank: string;
   setOriginBank: (v: string) => void;
-  declaredAmount: string;
-  setDeclaredAmount: (v: string) => void;
   confirming: boolean;
   onConfirm: () => void;
   copied: string | null;
   onCopy: (text: string, field: string) => void;
 }) {
-  // Detecta si el monto declarado difiere del adeudado para mostrar aviso
-  const declaredNum = parseFloat(declaredAmount.replace(",", "."));
-  const declaredIsValid = !Number.isNaN(declaredNum) && declaredNum > 0;
-  const declaredDiffers = declaredIsValid && Math.abs(declaredNum - amountBss) >= 0.01;
   const CopyBtn = ({ text, field }: { text: string; field: string }) => (
     <button
       onClick={() => onCopy(text, field)}
@@ -1206,17 +1193,36 @@ function TransferDetails({
         </div>
       </div>
 
+      {/* Aviso de monto exacto — preventivo. El cliente DEBE transferir este
+          monto exacto; si transfiere otro, no se auto-concilia. */}
+      <div className="bg-[#F46800]/[0.06] rounded-xl p-4 border border-[#F46800]/30 space-y-2">
+        <p className="text-gray-300 text-[11px] leading-relaxed">
+          Transfiere <span className="text-white font-semibold">exactamente</span> este monto:
+        </p>
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-[#F46800] text-2xl font-bold">
+            Bs. {amountBss.toLocaleString("es-VE", { minimumFractionDigits: 2 })}
+          </span>
+          <CopyBtn text={amountBss.toFixed(2)} field="monto-exacto" />
+        </div>
+        <p className="text-amber-400/90 text-[11px] leading-snug">
+          ⚠ Si transfieres un monto distinto (aunque sea por céntimos), tu pago
+          <span className="font-semibold"> no se confirma al instante</span> y
+          deberá verificarse manualmente, lo que puede tardar.
+        </p>
+      </div>
+
       {/* Confirm transfer */}
       <div className="bg-white/[0.03] rounded-xl p-4 border border-white/5 space-y-3">
         <h4 className="text-white text-sm font-semibold">¿Ya realizaste la transferencia?</h4>
         <p className="text-gray-500 text-[11px] leading-relaxed">
-          Completa los 3 datos de tu comprobante. Con ellos verificamos tu
-          pago con el banco y se confirma automáticamente. Mientras más exactos
-          los datos, más rápido se confirma.
+          Indícanos desde qué banco transferiste y la referencia de tu
+          comprobante. Verificamos tu pago con el banco y se confirma
+          automáticamente.
         </p>
         <div className="space-y-1">
           <label className="text-gray-500 text-[11px] block">
-            1. Banco desde el que transferiste <span className="text-[#F46800]">*</span>
+            Banco desde el que transferiste <span className="text-[#F46800]">*</span>
           </label>
           <select
             value={originBank}
@@ -1233,7 +1239,7 @@ function TransferDetails({
         </div>
         <div className="space-y-1">
           <label className="text-gray-500 text-[11px] block">
-            2. Número de referencia <span className="text-[#F46800]">*</span>
+            Número de referencia <span className="text-[#F46800]">*</span>
           </label>
           <input
             value={transferRef}
@@ -1245,37 +1251,9 @@ function TransferDetails({
             Cópiala tal cual aparece en tu comprobante, completa y sin espacios.
           </p>
         </div>
-        <div className="space-y-1">
-          <label className="text-gray-500 text-[11px] block">
-            3. Monto EXACTO en Bs que transferiste <span className="text-[#F46800]">*</span>
-          </label>
-          <input
-            value={declaredAmount}
-            onChange={(e) => setDeclaredAmount(e.target.value)}
-            inputMode="decimal"
-            placeholder={`Ej: ${amountBss.toFixed(2)}`}
-            className={`w-full px-4 py-3 rounded-xl bg-white/[0.03] border text-white text-sm placeholder-gray-600 focus:outline-none ${
-              declaredDiffers
-                ? "border-amber-400/50 focus:border-amber-400"
-                : "border-white/10 focus:border-[#F46800]/50"
-            }`}
-          />
-          <p className="text-gray-600 text-[10px] leading-snug">
-            El monto exacto que dice tu comprobante, con los céntimos. Es lo que
-            usamos para encontrar tu pago en el banco.
-          </p>
-          {declaredDiffers && (
-            <p className="text-amber-400/90 text-[11px] leading-snug">
-              Este monto difiere del adeudado actual ({amountBss.toFixed(2)} Bs).
-              Si transferiste con una tasa BCV anterior, déjalo tal como lo
-              transferiste. Detectaremos tu pago y el equipo te contactará por
-              la diferencia.
-            </p>
-          )}
-        </div>
         <button
           onClick={onConfirm}
-          disabled={confirming || !transferRef.trim() || !originBank || !declaredIsValid}
+          disabled={confirming || !transferRef.trim() || !originBank}
           className="w-full py-3.5 rounded-xl bg-gradient-to-r from-[#F46800] to-[#ff8534] text-white font-semibold text-sm transition-all hover:shadow-lg active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {confirming ? (
@@ -1284,9 +1262,9 @@ function TransferDetails({
             "Confirmar transferencia"
           )}
         </button>
-        {(!originBank || !transferRef.trim() || !declaredIsValid) && (
+        {(!originBank || !transferRef.trim()) && (
           <p className="text-gray-600 text-[10px] text-center">
-            Completa los 3 campos para confirmar.
+            Selecciona el banco y pega la referencia para confirmar.
           </p>
         )}
       </div>
