@@ -9,8 +9,9 @@ import { cn } from "@/lib/utils";
 export type KpiPreset = "cobrado" | "fallidos" | "pendientes";
 
 function pctDelta(curr: number, prev: number): { value: number; label: string } | null {
-  if (prev === 0 && curr === 0) return null;
-  if (prev === 0) return { value: 100, label: "+100%" };
+  // Sin base de comparación (período anterior en 0): NO mostrar "+100%" —
+  // es engañoso, no creció 100%, simplemente no hay con qué comparar.
+  if (prev === 0) return null;
   const diff = ((curr - prev) / prev) * 100;
   if (Math.abs(diff) < 0.1) return { value: 0, label: "0%" };
   return { value: diff, label: `${diff > 0 ? "+" : ""}${diff.toFixed(0)}%` };

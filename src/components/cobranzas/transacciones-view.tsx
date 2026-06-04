@@ -10,22 +10,32 @@ import type { TxListResponse } from "@/lib/cobranzas/types";
 
 /**
  * Aplica un preset de filtros al hacer click en un KPI card. La idea es
- * "click → ver justo eso". Cada preset patchea filters y resetea página.
+ * "click → ver justo de qué se trata ese número del KPI". Por eso LIMPIA la
+ * búsqueda de texto y los filtros de pasarela: el KPI cuenta el total del
+ * período, así que la tabla debe mostrar ese mismo total, no un subconjunto
+ * de una búsqueda previa. Mantiene el período (los KPIs son de ese período).
  */
 function applyPreset(current: FiltersValue, preset: KpiPreset): FiltersValue {
+  const cleared: FiltersValue = { ...current, q: "", methods: [], statuses: [], syncStatuses: [] };
   if (preset === "cobrado") {
-    return { ...current, statuses: ["paid"], syncStatuses: [] };
+    return { ...cleared, statuses: ["paid"] };
   }
   if (preset === "fallidos") {
-    return { ...current, statuses: ["failed"], syncStatuses: [] };
+    return { ...cleared, statuses: ["failed"] };
   }
-  // pendientes / colgados: paid con sync manual_review o sin cola. Forzamos
-  // ventana 30d porque los huérfanos pueden venir de hace tiempo.
+  // pendientes / colgados: paid con sync manual_review o sin cola. El KPI los
+  // cuenta en ventana de 90 días (huérfanos) + manual_review, así que usamos
+  // período custom de 90d para que la tabla muestre los mismos que el KPI.
+  const to = new Date();
+  const from = new Date();
+  from.setDate(from.getDate() - 90);
   return {
-    ...current,
+    ...cleared,
     statuses: ["paid"],
     syncStatuses: ["manual_review", "none"],
-    period: "30d",
+    period: "custom",
+    customFrom: from.toISOString().slice(0, 10),
+    customTo: to.toISOString().slice(0, 10),
   };
 }
 
