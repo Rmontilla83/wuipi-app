@@ -4,6 +4,10 @@
     {
       "path": "/api/cron/odoo-sync-queue",
       "schedule": "*/10 * * * *"
+    },
+    {
+      "path": "/api/cron/transfer-search-retry",
+      "schedule": "*/30 * * * *"
     }
   ]
 }

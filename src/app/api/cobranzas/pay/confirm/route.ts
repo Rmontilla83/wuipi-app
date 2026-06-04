@@ -308,7 +308,7 @@ export async function POST(request: NextRequest) {
       return apiSuccess({
         status: newStatus,
         auto_verified: false,
-        message: "Transferencia reportada. Será verificada en las próximas horas.",
+        message: "Transferencia reportada. La verificaremos automáticamente con el banco; si no se confirma, nuestro equipo la revisará y te avisará por WhatsApp.",
       });
     }
 

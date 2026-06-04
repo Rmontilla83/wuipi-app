@@ -633,7 +633,9 @@ function PagarPageMain() {
           </div>
           <h2 className="text-white text-xl font-semibold mb-2">Pago en proceso de verificación</h2>
           <p className="text-gray-400 text-sm mb-4">
-            Ya no es necesaria ninguna acción de tu parte. Recibirás una confirmación por WhatsApp cuando sea procesada.
+            Estamos verificando tu transferencia con el banco. No necesitas hacer
+            nada más: recibirás la confirmación por WhatsApp. Si en un rato no se
+            confirma, nuestro equipo la revisará manualmente.
           </p>
           {data.payment_reference && (
             <p className="text-gray-500 text-xs">
