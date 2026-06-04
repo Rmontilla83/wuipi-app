@@ -88,11 +88,20 @@ export async function GET(req: NextRequest) {
     const onlyPaid = statuses.length === 1 && statuses[0] === "paid";
     const dateColumn = onlyPaid ? "paid_at" : "created_at";
 
+    // El filtro de sync (manual_review/none/etc) NO es columna nativa — se
+    // deriva de odoo_sync_queue + odoo_sync_synced_at, así que se aplica en
+    // memoria. Cuando está activo, NO podemos paginar en SQL (perderíamos los
+    // matches que caen fuera de la primera página). En ese caso traemos todo
+    // el período (con cap) y filtramos+paginamos en memoria. Sin filtro de
+    // sync, paginamos en SQL como siempre (eficiente).
+    const hasSyncFilter = syncFilter.length > 0;
+    const FETCH_CAP = 3000;
+
     let q = db
       .from("collection_items")
       .select(
         "id, paid_at, created_at, customer_name, customer_cedula_rif, amount_usd, amount_bss, payment_method, payment_reference, status, invoice_number, metadata, odoo_sync_synced_at",
-        { count: "exact" },
+        hasSyncFilter ? {} : { count: "exact" },
       )
       .gte(dateColumn, range.from)
       .lt(dateColumn, range.to);
@@ -114,10 +123,12 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    q = q.order(dateColumn, { ascending: false, nullsFirst: false }).range(
-      (page - 1) * pageSize,
-      page * pageSize - 1,
-    );
+    q = q.order(dateColumn, { ascending: false, nullsFirst: false });
+    if (hasSyncFilter) {
+      q = q.limit(FETCH_CAP);
+    } else {
+      q = q.range((page - 1) * pageSize, page * pageSize - 1);
+    }
 
     const { data: items, count, error } = await q;
     if (error) {
@@ -170,13 +181,21 @@ export async function GET(req: NextRequest) {
       };
     });
 
-    const filtered = syncFilter.length > 0
-      ? rows.filter((r) => syncFilter.includes(r.sync_status))
-      : rows;
+    let pagedItems: TxListItem[];
+    let total: number;
+    if (hasSyncFilter) {
+      // Filtrar por sync sobre TODO el conjunto traído, luego paginar en memoria.
+      const filtered = rows.filter((r) => syncFilter.includes(r.sync_status));
+      total = filtered.length;
+      pagedItems = filtered.slice((page - 1) * pageSize, page * pageSize);
+    } else {
+      pagedItems = rows;
+      total = count || 0;
+    }
 
     const response: TxListResponse = {
-      items: filtered,
-      total: count || 0,
+      items: pagedItems,
+      total,
       page,
       pageSize,
     };
