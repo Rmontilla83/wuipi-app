@@ -13,8 +13,8 @@ const ERROR_MESSAGES: Record<string, string> = {
 
 type Step =
   | { kind: "email" }
-  | { kind: "login"; email: string; partnerId: number }
-  | { kind: "signup"; email: string; partnerId: number }
+  | { kind: "login"; email: string }
+  | { kind: "signup"; email: string }
   | { kind: "reset-request" }
   | { kind: "reset-sent"; email: string };
 
@@ -63,9 +63,9 @@ export default function PortalLoginPage() {
       }
       const trimmed = email.trim().toLowerCase();
       if (data.hasAccount) {
-        setStep({ kind: "login", email: trimmed, partnerId: data.partner_id });
+        setStep({ kind: "login", email: trimmed });
       } else {
-        setStep({ kind: "signup", email: trimmed, partnerId: data.partner_id });
+        setStep({ kind: "signup", email: trimmed });
       }
       setPassword("");
     } catch (err: unknown) {

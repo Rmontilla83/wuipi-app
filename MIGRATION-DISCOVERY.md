@@ -1,6 +1,6 @@
 # Odoo NUEVO — Discovery Report
 > Generado: 2026-05-23T10:56:29.016Z
-> Server: `https://erp.wuipi.net` · DB: `wuipi` · User: `rmontilla@wuipi.net` (uid=6)
+> Server / DB / User: redactados por seguridad — ver variables de entorno (`ODOO_*`) en Vercel/`.env.local`.
 > Solo lectura. Sin escritura. Sin tocar Odoo viejo.
 
 ## 1. Server

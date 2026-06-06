@@ -326,10 +326,16 @@ export async function POST(request: NextRequest) {
 
           // Fallback: por invoice_number Odoo o por payment_token
           if (!item) {
+            // Sanitizar antes de interpolar en .or(): quitar caracteres con
+            // significado en filtros PostgREST (coma separa condiciones,
+            // parentesis agrupan) para evitar inyeccion de operadores via el
+            // campo descifrado del webhook. Los valores legitimos (WPY-XXXX,
+            // numero Odoo, token wpy_hex) no contienen estos caracteres.
+            const safeInv = String(normalized.invoice_number).replace(/[,()]/g, "");
             const { data: items } = await supabase
               .from("collection_items")
               .select("*")
-              .or(`invoice_number.eq.${normalized.invoice_number},payment_token.eq.${normalized.invoice_number}`)
+              .or(`invoice_number.eq.${safeInv},payment_token.eq.${safeInv}`)
               .in("status", ["pending", "sent", "viewed"])
               .limit(1);
             item = items && items[0] ? items[0] : null;
@@ -477,10 +483,13 @@ export async function POST(request: NextRequest) {
           // de polling sin novedad.
           let item = await getItemByMercantilInvoiceId(normalized.invoice_number);
           if (!item) {
+            // Sanitizar (ver nota en el branch approved): evita inyeccion de
+            // operadores PostgREST via el invoice_number del webhook.
+            const safeInv = String(normalized.invoice_number).replace(/[,()]/g, "");
             const { data: items } = await supabase
               .from("collection_items")
               .select("*")
-              .or(`invoice_number.eq.${normalized.invoice_number},payment_token.eq.${normalized.invoice_number}`)
+              .or(`invoice_number.eq.${safeInv},payment_token.eq.${safeInv}`)
               .in("status", ["pending", "sent", "viewed"])
               .limit(1);
             item = items && items[0] ? items[0] : null;

@@ -20,13 +20,9 @@ const TS_CLIENT    = env.MERCANTIL_SEARCH_TRANSFER_CLIENT_ID;
 const TS_BASE      = env.MERCANTIL_SEARCH_TRANSFER_BASE_URL || env.MERCANTIL_BASE_URL;
 const TS_PRODUCT_MERCHANT = env.MERCANTIL_SEARCH_TRANSFER_MERCHANT_ID; // 217546
 
-console.log("=== Composicion de la secret key ===");
-console.log("  secret:", TS_SECRET);
-console.log("  partes detectadas:");
-console.log("    [0:10]  personId padded:", TS_SECRET?.slice(0,10));
-console.log("    [10:11] prefijo letra:  ", TS_SECRET?.slice(10,11));
-console.log("    [11:26] RIF padded:     ", TS_SECRET?.slice(11,26));
-console.log("    [26:]   fecha?:         ", TS_SECRET?.slice(26));
+// NO imprimir el secret completo (fuga a logs de terminal/CI). Solo metadatos.
+console.log("=== Secret key (enmascarada) ===");
+console.log("  secret:", TS_SECRET ? `${TS_SECRET.slice(0,4)}…${TS_SECRET.slice(-4)} (len ${TS_SECRET.length})` : "(no set)");
 
 function deriveKey(secret) {
   const hash = crypto.createHash("sha256").update(secret, "utf8").digest();

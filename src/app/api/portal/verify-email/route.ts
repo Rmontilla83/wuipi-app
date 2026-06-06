@@ -57,10 +57,11 @@ export async function POST(request: NextRequest) {
     }
 
     // Partner exists in Odoo. hasAccount tells UI whether to show login or signup form.
+    // NO devolver partner_id: el front no lo usa (login/signup resuelven el
+    // partner server-side desde el email) y exponerlo facilitaba enumeracion.
     return apiSuccess({
       exists: true,
       hasAccount: !!user,
-      partner_id: partner.id,
     });
   } catch (error) {
     return apiServerError(error);
