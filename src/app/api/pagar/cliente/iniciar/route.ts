@@ -111,7 +111,7 @@ export async function POST(request: NextRequest) {
       ].filter(Boolean)));
       const { data: existing } = await sb
         .from("collection_items")
-        .select("id, payment_token, amount_usd, status, metadata, customer_cedula_rif")
+        .select("id, payment_token, amount_usd, status, metadata, customer_cedula_rif, expires_at")
         .in("customer_cedula_rif", lookupCedulas)
         .in("status", ["pending", "sent", "viewed"])
         .order("created_at", { ascending: false })
@@ -122,7 +122,12 @@ export async function POST(request: NextRequest) {
       const wasPayAll = existingMeta
         ? (existingMeta.is_pay_all === true || !existingMeta.odoo_invoice_ids)
         : false;
-      const reusable = existing && existing.length > 0 && wasPayAll;
+      // No reusar items expirados (default 30d, migración 004): reusar uno
+      // vencido devuelve un token muerto → "Este enlace de pago ha expirado"
+      // (incidente 2026-06-27). Si venció, se crea uno fresco más abajo.
+      const notExpired = !!(existing && existing[0]
+        && !(existing[0].expires_at && new Date(existing[0].expires_at as string) < new Date()));
+      const reusable = existing && existing.length > 0 && wasPayAll && notExpired;
 
       if (reusable) {
         const item = existing[0];
