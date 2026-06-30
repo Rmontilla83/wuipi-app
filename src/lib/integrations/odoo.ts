@@ -1199,6 +1199,79 @@ export async function previewRegisterPayment(opts: {
   };
 }
 
+// ============================================================
+// ANTICIPO (saldo a favor) — incidente 2026-06-30
+// Odoo expone 2 métodos en sus módulos wuipi_* (verificados en prod):
+//   res.partner.wuipi_get_partner_anticipo(pid)
+//       -> { bs, usd, bcv_rate, has_anticipo }
+//   account.move.wuipi_apply_anticipo(invId, { amount_bs })
+//       -> { success, move_id, amount_applied_bs, residual_after_bs }
+// ============================================================
+
+export interface PartnerAnticipo {
+  bs: number;
+  usd: number;
+  bcv_rate: number;
+  has_anticipo: boolean;
+}
+
+/** Lee el saldo a favor (anticipo, cta 2105007) del partner. Read-only. */
+export async function getPartnerAnticipo(partnerId: number): Promise<PartnerAnticipo> {
+  const uid = await authenticate();
+  const r = (await jsonRpc("object", "execute_kw", [
+    ODOO_DB, uid, ODOO_API_KEY,
+    "res.partner", "wuipi_get_partner_anticipo", [[partnerId]],
+  ])) as Partial<PartnerAnticipo> | null;
+  return {
+    bs: Number(r?.bs ?? 0),
+    usd: Number(r?.usd ?? 0),
+    bcv_rate: Number(r?.bcv_rate ?? 0),
+    has_anticipo: !!r?.has_anticipo,
+  };
+}
+
+/** Aplica `amountBs` del anticipo del partner a la factura (cierra el residuo). */
+export async function applyAnticipoToInvoice(
+  invoiceId: number,
+  amountBs: number,
+): Promise<{ success: boolean; move_id?: number; amount_applied_bs: number; residual_after_bs: number }> {
+  const uid = await authenticate();
+  const r = (await jsonRpc("object", "execute_kw", [
+    ODOO_DB, uid, ODOO_API_KEY,
+    "account.move", "wuipi_apply_anticipo", [[invoiceId], { amount_bs: amountBs }],
+  ])) as { success?: boolean; move_id?: number; amount_applied_bs?: number; residual_after_bs?: number } | null;
+  return {
+    success: !!r?.success,
+    move_id: r?.move_id,
+    amount_applied_bs: Number(r?.amount_applied_bs ?? 0),
+    residual_after_bs: Number(r?.residual_after_bs ?? 0),
+  };
+}
+
+/**
+ * Idempotencia POR FACTURA: ¿ESTA factura ya tiene un account.payment de ESTE
+ * token? El memo de cada payment es `${paymentToken} — Mercantil Web ref:...`.
+ * Evita doble-pago en reintentos del cron (crítico con el flujo de anticipo,
+ * donde la factura puede quedar parcial y disparar retry).
+ *
+ * OJO multi-factura: en pago-todo cada factura tiene su PROPIO payment pero
+ * TODOS comparten el token. Por eso filtramos por la factura (matched_payment_ids)
+ * y NO solo por el token — sino al procesar la 2ª factura encontraríamos el
+ * payment de la 1ª y saltaríamos crear el suyo.
+ */
+export async function findPaymentForInvoiceByToken(
+  invoiceId: number,
+  paymentToken: string,
+): Promise<number | null> {
+  if (!paymentToken) return null;
+  const inv = (await read("account.move", [invoiceId], ["matched_payment_ids"]))[0];
+  const pmtIds: number[] = (inv?.matched_payment_ids as number[]) || [];
+  if (pmtIds.length === 0) return null;
+  const pmts = (await read("account.payment", pmtIds, ["id", "memo"])) as Array<{ id: number; memo?: string | false }>;
+  const existing = pmts.find((p) => typeof p.memo === "string" && p.memo.startsWith(paymentToken));
+  return existing?.id ?? null;
+}
+
 /**
  * REGISTER REAL — crea el account.payment, lo postea y lo reconcilia con la
  * factura. Approach manual paso a paso (en vez del wizard) porque el wizard
@@ -1227,6 +1300,13 @@ export async function registerPaymentForInvoice(opts: {
    * ignora y se usa `invoice.amount_total`.
    */
   amountUsd?: number | null;
+  /**
+   * Monto REAL en Bs que el gateway cobró (= lo que entró al banco). Solo se
+   * usa en MISMA moneda CUANDO el partner tiene saldo a favor: en ese caso se
+   * registra este monto (no invoice.amount_total) y se aplica el anticipo al
+   * residuo. Sin anticipo se ignora. Incidente 2026-06-30.
+   */
+  amountVesPaid?: number | null;
 }): Promise<PaymentRegisterResult> {
   const errors: string[] = [];
   const preview = await previewRegisterPayment(opts);
@@ -1239,6 +1319,44 @@ export async function registerPaymentForInvoice(opts: {
   }
 
   try {
+    // Idempotencia POR FACTURA: si ESTA factura ya tiene un payment de este
+    // token, NO crear otro (reintentos del cron). Por-factura para no romper el
+    // pago multi-factura (cada factura tiene su payment con el mismo token).
+    // NOTA: solo cubre payments YA reconciliados (matched_payment_ids); un
+    // payment posteado-pero-no-reconciliado (fallo de reconcile previo) NO se
+    // detecta — ventana de doble-pago pre-existente, no garantía total.
+    const existingPaymentId = await findPaymentForInvoiceByToken(opts.invoiceId, opts.paymentToken);
+    if (existingPaymentId) {
+      // Si la factura quedó PARCIAL (un intento previo registró el monto real
+      // pero el applyAnticipo falló transitoriamente), reintentar aplicar el
+      // anticipo ahora. NO sellar como 'done' una factura parcial: devolver
+      // ok = (factura realmente pagada) para que, si sigue parcial, caiga a
+      // revisión manual en vez de quedar como deuda fantasma silenciosa.
+      let inv = (await read("account.move", [opts.invoiceId], ["payment_state", "amount_residual"]))[0];
+      let residual = round2(Number(inv?.amount_residual || 0));
+      if (residual > 0.01) {
+        try {
+          const a = await getPartnerAnticipo(preview.partner_id);
+          if (a.has_anticipo && a.bs > 0.01) {
+            await applyAnticipoToInvoice(opts.invoiceId, round2(Math.min(residual, a.bs)));
+            inv = (await read("account.move", [opts.invoiceId], ["payment_state", "amount_residual"]))[0];
+            residual = round2(Number(inv?.amount_residual || 0));
+          }
+        } catch (err) {
+          console.warn(`[registerPayment] reintento applyAnticipo inv=${opts.invoiceId}:`, err);
+        }
+      }
+      const ps = inv?.payment_state;
+      const fullyPaid = ps === "paid" || ps === "in_payment" || residual <= 0.01;
+      return {
+        ok: fullyPaid,
+        payment_id: existingPaymentId,
+        invoice_payment_state_after: ps || "unknown",
+        reconciled: fullyPaid,
+        errors: fullyPaid ? undefined : [`Payment ${existingPaymentId} ya existe pero la factura sigue ${ps} (residual=${residual}) — revisar`],
+      };
+    }
+
     // Multimoneda: si paymentCurrency difiere de invoiceCurrency (Stripe/PayPal),
     // el account.payment se crea en la moneda del payment con su propio amount.
     // Si coinciden, payment.amount = invoice.amount_total (comportamiento previo).
@@ -1247,9 +1365,41 @@ export async function registerPaymentForInvoice(opts: {
     const invoiceCurrencyId =
       preview.mapping.invoiceCurrencyId ?? preview.mapping.currencyId;
     const isMultiCurrency = paymentCurrencyId !== invoiceCurrencyId;
+
+    // ── NO INFLAR EL BANCO / ANTICIPO — incidente 2026-06-30 ─────────────
+    // INVARIANTE: nunca registrar MÁS de lo que entró al banco. Si el gateway
+    // cobró MENOS que el total de la factura (amountVesPaid < total) — por saldo
+    // a favor, deriva BCV, o anticipo consumido entre el quote y el cobro —
+    // registramos el monto REAL cobrado, NO invoice.amount_total. La señal
+    // autoritativa es "cobramos de menos", NO que el anticipo siga vigente
+    // (evita TOCTOU). Luego, si hay anticipo, lo aplicamos al residuo; si no
+    // alcanza (deriva BCV, anticipo consumido), la factura queda parcial y cae
+    // a revisión manual — mejor que inflar el banco.
+    // Solo factura en VES (cash_usd queda fuera: USD, no compara con Bs).
+    // Sin cobrar-de-menos (>99% de casos): IDÉNTICO al previo y NO se llama el
+    // helper de Odoo (cero costo extra en el camino feliz).
+    const invoiceIsVes = invoiceCurrencyId === 171; // VED nuevo
+    const useRealAmount =
+      !isMultiCurrency &&
+      invoiceIsVes &&
+      typeof opts.amountVesPaid === "number" &&
+      opts.amountVesPaid > 0 &&
+      opts.amountVesPaid < preview.amount - 0.01;
+
+    let anticipo: PartnerAnticipo = { bs: 0, usd: 0, bcv_rate: 0, has_anticipo: false };
+    if (useRealAmount) {
+      try {
+        anticipo = await getPartnerAnticipo(preview.partner_id);
+      } catch (err) {
+        // Si el helper falla, igual registramos el monto real (no inflar). El
+        // residuo quedará sin cubrir → factura parcial → revisión manual.
+        console.warn(`[registerPayment] getPartnerAnticipo fallo partner ${preview.partner_id}:`, err);
+      }
+    }
+
     const paymentAmount = isMultiCurrency && typeof opts.amountUsd === "number" && opts.amountUsd > 0
       ? opts.amountUsd
-      : preview.amount;
+      : (useRealAmount ? (opts.amountVesPaid as number) : preview.amount);
 
     // 1. Crear el account.payment directamente (state inicial = draft)
     const paymentId = await odooCreate("account.payment", {
@@ -1337,6 +1487,31 @@ export async function registerPaymentForInvoice(opts: {
       "reconcile"
     );
 
+    // 5b. Cobramos de menos: la factura queda con residuo. Si hay anticipo, lo
+    //     aplicamos (cap al disponible). Si NO hay anticipo (deriva BCV, anticipo
+    //     consumido), la factura queda PARCIAL a propósito — el verify de abajo
+    //     devuelve ok=false → revisión manual (mejor que inflar el banco). NO se
+    //     duplica pago en el reintento por la idempotencia por-factura (salvo el
+    //     huérfano posteado-no-reconciliado, documentado arriba).
+    if (useRealAmount) {
+      try {
+        const invRes = (await read("account.move", [opts.invoiceId], ["amount_residual"]))[0];
+        const residual = round2(Number(invRes?.amount_residual || 0));
+        if (residual > 0.01 && anticipo.has_anticipo && anticipo.bs > 0.01) {
+          const applyAmt = round2(Math.min(residual, anticipo.bs));
+          const ar = await applyAnticipoToInvoice(opts.invoiceId, applyAmt);
+          console.log(
+            `[registerPayment] anticipo inv=${opts.invoiceId}: pedido=${applyAmt} ` +
+            `aplicado=${ar.amount_applied_bs} residual_after=${ar.residual_after_bs} success=${ar.success}`
+          );
+        }
+      } catch (err) {
+        console.error(`[registerPayment] applyAnticipo fallo inv=${opts.invoiceId}:`, err);
+        // No revertimos el payment; la factura quedará parcial y el item se
+        // encolará para revisión manual (sin duplicar pago).
+      }
+    }
+
     // 6. Releer factura para verificar payment_state
     const after = (await read("account.move", [opts.invoiceId],
       ["payment_state", "matched_payment_ids", "amount_residual"]))[0];
@@ -1411,6 +1586,8 @@ export async function syncOdooForCollectionItem(opts: {
    * coincide con la de la factura, este campo se ignora.
    */
   amountUsd?: number | null;
+  /** Monto real en Bs cobrado por el gateway (para el flujo de anticipo). */
+  amountVesPaid?: number | null;
 }): Promise<SyncOdooResult> {
   const result: SyncOdooResult = {
     ok: false,
@@ -1474,6 +1651,7 @@ export async function syncOdooForCollectionItem(opts: {
         paymentToken: opts.paymentToken,
         paymentDate: opts.paymentDate,
         amountUsd: opts.amountUsd ?? null,
+        amountVesPaid: opts.amountVesPaid ?? null,
       });
       result.payment_result = payRes;
       if (!payRes.ok) {

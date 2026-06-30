@@ -71,7 +71,20 @@ export async function POST(request: NextRequest) {
     // El crédito a favor solo se aplica cuando se paga TODO. En pago parcial
     // no se aplica para evitar inconsistencias.
     const isPayAll = !invoice_ids || invoice_ids.length === 0 || selectedDrafts.length === drafts.length;
-    const creditFavorUsd = (isPayAll && partner.totalReceivable < 0) ? Math.abs(partner.totalReceivable) / 474 : 0;
+    // Saldo a favor (anticipo, cta 2105007): fuente autoritativa = helper Odoo,
+    // NO la tasa vieja hardcodeada /474 (incidente 2026-06-30). Solo en pago-todo.
+    // Si el helper falla, NO descontar (cobra el total; el anticipo se aplica en
+    // Odoo al sincronizar) — preferible cobrar de más que de menos.
+    let creditFavorUsd = 0;
+    if (isPayAll) {
+      try {
+        const { getPartnerAnticipo } = await import("@/lib/integrations/odoo");
+        const anticipo = await getPartnerAnticipo(partnerId);
+        creditFavorUsd = anticipo.has_anticipo ? anticipo.usd : 0;
+      } catch (err) {
+        console.warn("[pagar/cliente/iniciar] getPartnerAnticipo fallo:", err);
+      }
+    }
     const netDue = Math.round(Math.max(selectedTotal - creditFavorUsd, 0) * 100) / 100;
 
     if (netDue <= 0) return apiError("No hay saldo pendiente", 400);

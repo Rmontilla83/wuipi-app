@@ -92,9 +92,18 @@ export async function POST(request: NextRequest) {
     // Total a cobrar = suma de todos los drafts (pago "todo").
     // Si el crédito a favor del partner es negativo (overpaid), se descuenta.
     const draftTotal = drafts.reduce((s, d) => s + d.amountTotal, 0);
-    const creditFavorUsd = partner.totalReceivable < 0
-      ? Math.abs(partner.totalReceivable) / 474  // BCV fallback
-      : 0;
+    // Saldo a favor (anticipo, cta 2105007): fuente autoritativa = helper Odoo,
+    // NO la tasa vieja hardcodeada /474 (incidente 2026-06-30). Si el helper
+    // falla, NO descontar (cobra el total; el anticipo se aplica en Odoo al
+    // sincronizar) — preferible cobrar de más que de menos.
+    let creditFavorUsd = 0;
+    try {
+      const { getPartnerAnticipo } = await import("@/lib/integrations/odoo");
+      const anticipo = await getPartnerAnticipo(partnerId);
+      creditFavorUsd = anticipo.has_anticipo ? anticipo.usd : 0;
+    } catch (err) {
+      console.warn("[pagar/shortlink/iniciar] getPartnerAnticipo fallo:", err);
+    }
     const netDue = Math.round(Math.max(draftTotal - creditFavorUsd, 0) * 100) / 100;
     if (netDue <= 0) {
       // Saldo a favor cubre todos los drafts → cuenta al día.

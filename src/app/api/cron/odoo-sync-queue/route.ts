@@ -34,6 +34,7 @@ import {
   syncOdooForCollectionItem,
   isMultiCurrencyMethod,
   computeProratedAmounts,
+  getPartnerAnticipo,
 } from "@/lib/integrations/odoo";
 
 const BATCH_SIZE = 25; // Procesar máx 25 items por corrida — evita timeouts
@@ -149,6 +150,24 @@ async function processQueueItem(
     return "failed";
   }
 
+  // M2 — Multi-factura + saldo a favor: el reparto del anticipo entre N facturas
+  // NO está automatizado. Postear el total de cada factura inflaría el banco (la
+  // guarda de Odoo NO lo atrapa: por-factura amount==residual). → revisión manual.
+  // Incidente 2026-06-30.
+  if (invoiceIds.length > 1 && item.odoo_partner_id) {
+    try {
+      const a = await getPartnerAnticipo(item.odoo_partner_id);
+      if (a.has_anticipo && a.bs > 0.01) {
+        await markQueueItemFailed(item.id, {
+          error: `Multi-factura (${invoiceIds.length}) con saldo a favor (Bs ${a.bs}) — revisión manual: reparto de anticipo multi-factura no automatizado (no inflar banco).`,
+        });
+        return "failed";
+      }
+    } catch (err) {
+      console.warn("[cron odoo-sync] M2 check anticipo multi-factura fallo:", err);
+    }
+  }
+
   const amountsMap = (() => {
     if (!metadata.odoo_invoice_amounts_usd || typeof metadata.odoo_invoice_amounts_usd !== "object") return null;
     const raw = metadata.odoo_invoice_amounts_usd as Record<string, unknown>;
@@ -195,6 +214,9 @@ async function processQueueItem(
         postInvoiceDone: invoiceIds.length === 1 ? postDoneAggregate : false,
         registerPaymentDone: invoiceIds.length === 1 ? regDoneAggregate : false,
         amountUsd: amountUsdForInvoice,
+        // Monto real cobrado en Bs (flujo de anticipo). Solo factura única.
+        // item.amount_ves de la cola = el monto pasado al encolar (= amount_bss).
+        amountVesPaid: invoiceIds.length === 1 ? (Number(item.amount_ves) || null) : null,
       });
 
       if (result.ok) {

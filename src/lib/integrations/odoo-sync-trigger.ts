@@ -7,9 +7,9 @@
 //   - /api/mercantil/route.ts (debito_inmediato — Botón Web)
 //   - /api/cobranzas/pay/confirm/route.ts (transferencia)
 //   - /api/cobranzas/pay/c2p-confirm/route.ts (c2p)
-//   - /api/cobranzas/items/mark-cash/route.ts (cash o cash_usd según paid_currency)
 //   - /api/cobranzas/webhook/stripe/route.ts (stripe)
 //   - /api/cobranzas/webhook/paypal/route.ts (paypal)
+//   - /api/cron/transfer-search-retry/route.ts (transferencia, reintento)
 //
 // Comportamiento:
 //   1. Verifica kill switch ODOO_SYNC_ENABLED
@@ -29,6 +29,7 @@ import {
   PAYMENT_METHOD_MAPPING,
   isMultiCurrencyMethod,
   computeProratedAmounts,
+  getPartnerAnticipo,
 } from "@/lib/integrations/odoo";
 import { enqueueOdooSync } from "@/lib/dal/odoo-sync-queue";
 import { createAdminSupabase } from "@/lib/supabase/server";
@@ -141,6 +142,27 @@ export async function triggerOdooSyncOrEnqueue(input: SyncTriggerInput): Promise
     return;
   }
 
+  // M2 — Multi-factura + saldo a favor: el reparto del anticipo entre N facturas
+  // NO está automatizado. Postear el total de cada factura inflaría el banco (la
+  // guarda de Odoo NO lo atrapa: por-factura amount==residual). → revisión manual
+  // en vez de postear inline. Incidente 2026-06-30.
+  if (invoiceIds.length > 1) {
+    try {
+      const a = await getPartnerAnticipo(odooPartnerId);
+      if (a.has_anticipo && a.bs > 0.01) {
+        await safeEnqueue({
+          collectionItemId, paymentToken, paymentMethod, paymentReference,
+          amountUsd, amountVes, paymentDate,
+          odooPartnerId, odooInvoiceId: invoiceIds[0],
+          error: `Multi-factura (${invoiceIds.length}) con saldo a favor (Bs ${a.bs}) — revisión manual: reparto de anticipo multi-factura no automatizado (no inflar banco).`,
+        });
+        return;
+      }
+    } catch (err) {
+      console.warn("[OdooSyncTrigger] M2 check anticipo multi-factura fallo:", err);
+    }
+  }
+
   // 6. Calcular el `amountUsd` que recibe CADA factura.
   //
   // Caso A — misma moneda (transferencia, débito, c2p, cash_ves):
@@ -195,6 +217,10 @@ export async function triggerOdooSyncOrEnqueue(input: SyncTriggerInput): Promise
         paymentToken,
         paymentDate,
         amountUsd: amountUsdForInvoice,
+        // Monto real cobrado en Bs (flujo de anticipo). Solo factura única —
+        // multi-factura CON anticipo ya se desvió a revisión manual arriba (M2);
+        // multi-factura SIN anticipo registra el total de cada factura (correcto).
+        amountVesPaid: invoiceIds.length === 1 ? (amountVes ?? null) : null,
       });
 
       if (result.ok) {
