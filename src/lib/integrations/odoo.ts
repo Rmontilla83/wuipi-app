@@ -1176,7 +1176,12 @@ export async function previewRegisterPayment(opts: {
   }
 
   const paymentDate = opts.paymentDate || new Date().toISOString().split("T")[0];
-  const memo = `${opts.paymentToken} — Mercantil Web ref:${opts.paymentReference}`;
+  // Memo ÚNICO POR FACTURA: sufijo #<invoiceId> pegado al token (sin espacios).
+  // El guard de idempotencia de Odoo captura wpy_<hex>(#<suffix>)? y así distingue
+  // pago-todo multi-factura del mismo monto exacto (que si no daría falso positivo).
+  // También hace nuestra idempotencia exacta por (token, factura), incl. huérfanos.
+  // Incidente 2026-07-01.
+  const memo = `${opts.paymentToken}#${opts.invoiceId} — Mercantil Web ref:${opts.paymentReference}`;
 
   const ok = validations.invoice_exists && validations.invoice_is_posted &&
              validations.invoice_not_already_paid && validations.mapping_exists &&
@@ -1250,7 +1255,8 @@ export async function applyAnticipoToInvoice(
 
 /**
  * Idempotencia POR FACTURA: ¿ESTA factura ya tiene un account.payment de ESTE
- * token? El memo de cada payment es `${paymentToken} — Mercantil Web ref:...`.
+ * token? El memo nuevo es `${paymentToken}#${invoiceId} — Mercantil Web ref:...`
+ * (legacy sin sufijo: `${paymentToken} — ...`).
  * Evita doble-pago en reintentos del cron (crítico con el flujo de anticipo,
  * donde la factura puede quedar parcial y disparar retry).
  *
@@ -1272,19 +1278,25 @@ export async function findPaymentForInvoiceByToken(
   const pmts = (await searchRead(
     "account.payment",
     [["memo", "like", `${paymentToken}%`]],
-    { fields: ["id", "reconciled_invoice_ids", "state"], limit: 20 },
-  )) as Array<{ id: number; reconciled_invoice_ids?: number[]; state?: string }>;
+    { fields: ["id", "memo", "reconciled_invoice_ids", "state"], limit: 20 },
+  )) as Array<{ id: number; memo?: string | false; reconciled_invoice_ids?: number[]; state?: string }>;
   // Excluir cancelados/borrador (un payment cancelado no bloquea el reenvío).
   const active = pmts.filter((p) => p.state !== "cancel" && p.state !== "cancelled" && p.state !== "draft");
-  // 1) Idempotencia exacta: un payment de este token YA reconciliado contra ESTA
-  //    factura. Correcto también en multi-factura (cada factura su payment).
-  const forThis = active.find(
+  // 1) Formato nuevo (memo `${token}#${invoiceId} — ...`): match EXACTO por
+  //    (token, factura). NO depende de la reconciliación → cubre también el
+  //    huérfano posteado-no-reconciliado. Vía preferida, a prueba de balas.
+  const uniquePrefix = `${paymentToken}#${invoiceId}`;
+  const byMemo = active.find(
+    (p) => typeof p.memo === "string" && (p.memo === uniquePrefix || p.memo.startsWith(uniquePrefix + " ")),
+  );
+  if (byMemo) return byMemo.id;
+  // 2) Legacy (memo sin sufijo): payment YA reconciliado contra ESTA factura.
+  const byRecon = active.find(
     (p) => Array.isArray(p.reconciled_invoice_ids) && p.reconciled_invoice_ids.includes(invoiceId),
   );
-  if (forThis) return forThis.id;
-  // 2) Huérfano: payment posteado con este token SIN reconciliar contra ninguna
-  //    factura (reconcile falló en un intento previo). Solo lo reusamos si es el
-  //    ÚNICO payment del token — así no cruzamos facturas en multi-factura.
+  if (byRecon) return byRecon.id;
+  // 3) Legacy huérfano: único payment del token sin reconciliar (reconcile falló
+  //    en un intento previo). Solo si es el único → no cruzar facturas.
   if (active.length === 1) {
     const only = active[0];
     if (!only.reconciled_invoice_ids || only.reconciled_invoice_ids.length === 0) return only.id;
