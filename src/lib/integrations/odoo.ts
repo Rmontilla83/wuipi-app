@@ -1264,12 +1264,32 @@ export async function findPaymentForInvoiceByToken(
   paymentToken: string,
 ): Promise<number | null> {
   if (!paymentToken) return null;
-  const inv = (await read("account.move", [invoiceId], ["matched_payment_ids"]))[0];
-  const pmtIds: number[] = (inv?.matched_payment_ids as number[]) || [];
-  if (pmtIds.length === 0) return null;
-  const pmts = (await read("account.payment", pmtIds, ["id", "memo"])) as Array<{ id: number; memo?: string | false }>;
-  const existing = pmts.find((p) => typeof p.memo === "string" && p.memo.startsWith(paymentToken));
-  return existing?.id ?? null;
+  // IMPORTANTE (bug 2026-07-01): NO usar invoice.matched_payment_ids — en este
+  // Odoo 18 viene SIEMPRE vacío aunque el pago esté reconciliado, así que la
+  // idempotencia devolvía null y el cron duplicaba pagos (14 pares). Buscamos
+  // en account.payment por MEMO (empieza con el token) y filtramos por
+  // reconciled_invoice_ids (ESE sí está poblado en el lado payment).
+  const pmts = (await searchRead(
+    "account.payment",
+    [["memo", "like", `${paymentToken}%`]],
+    { fields: ["id", "reconciled_invoice_ids", "state"], limit: 20 },
+  )) as Array<{ id: number; reconciled_invoice_ids?: number[]; state?: string }>;
+  // Excluir cancelados/borrador (un payment cancelado no bloquea el reenvío).
+  const active = pmts.filter((p) => p.state !== "cancel" && p.state !== "cancelled" && p.state !== "draft");
+  // 1) Idempotencia exacta: un payment de este token YA reconciliado contra ESTA
+  //    factura. Correcto también en multi-factura (cada factura su payment).
+  const forThis = active.find(
+    (p) => Array.isArray(p.reconciled_invoice_ids) && p.reconciled_invoice_ids.includes(invoiceId),
+  );
+  if (forThis) return forThis.id;
+  // 2) Huérfano: payment posteado con este token SIN reconciliar contra ninguna
+  //    factura (reconcile falló en un intento previo). Solo lo reusamos si es el
+  //    ÚNICO payment del token — así no cruzamos facturas en multi-factura.
+  if (active.length === 1) {
+    const only = active[0];
+    if (!only.reconciled_invoice_ids || only.reconciled_invoice_ids.length === 0) return only.id;
+  }
+  return null;
 }
 
 /**
