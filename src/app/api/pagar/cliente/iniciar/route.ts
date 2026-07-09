@@ -6,6 +6,7 @@ import { createAdminSupabase } from "@/lib/supabase/server";
 import { generateCollectionToken } from "@/lib/dal/collection-campaigns";
 import { checkRateLimit, getClientIP } from "@/lib/utils/rate-limit";
 import { normalizeOdooVatToCedula } from "@/lib/utils/cedula";
+import { isSaldoAnteriorEnabledForPartner } from "@/lib/cobranzas/saldo-anterior";
 
 export const dynamic = "force-dynamic";
 
@@ -96,7 +97,7 @@ export async function POST(request: NextRequest) {
     // "viaja" cuando hay al menos un draft (sin drafts netDue<=0 y ya retornamos)
     // — consistente con la decisión §8.4: no se cobran residuales sueltos, se
     // barren cuando una factura nueva los acompaña.
-    const saldoAnteriorEnabled = process.env.PORTAL_SALDO_ANTERIOR_ENABLED === "true";
+    const saldoAnteriorEnabled = isSaldoAnteriorEnabledForPartner(partnerId);
     let postedResiduals: PostedResidual[] = [];
     if (saldoAnteriorEnabled) {
       try {

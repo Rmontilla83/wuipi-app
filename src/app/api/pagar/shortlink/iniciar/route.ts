@@ -21,6 +21,7 @@ import { createAdminSupabase } from "@/lib/supabase/server";
 import { generateCollectionToken } from "@/lib/dal/collection-campaigns";
 import { checkRateLimit, getClientIP } from "@/lib/utils/rate-limit";
 import { normalizeOdooVatToCedula } from "@/lib/utils/cedula";
+import { isSaldoAnteriorEnabledForPartner } from "@/lib/cobranzas/saldo-anterior";
 
 export const dynamic = "force-dynamic";
 
@@ -122,7 +123,7 @@ export async function POST(request: NextRequest) {
     // (típ. cobro incompleto en caja) que el portal no mostraba. Aditivo y
     // gateado: flag OFF → postedResidualMeta = {} → byte-idéntico. El residual
     // solo viaja cuando hay drafts (sin drafts ya retornamos "no_drafts_pending").
-    const saldoAnteriorEnabled = process.env.PORTAL_SALDO_ANTERIOR_ENABLED === "true";
+    const saldoAnteriorEnabled = isSaldoAnteriorEnabledForPartner(partnerId);
     let postedResiduals: PostedResidual[] = [];
     if (saldoAnteriorEnabled) {
       try {
