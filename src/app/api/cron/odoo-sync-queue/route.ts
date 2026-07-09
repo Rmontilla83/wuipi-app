@@ -193,6 +193,15 @@ async function processQueueItem(
 
   const paymentDate = item.payment_date || ci.paid_at?.slice(0, 10) || undefined;
 
+  // Fase 1 — saldo anterior: residuales posteados (típ. caja incompleta). Solo
+  // misma moneda (Bs) + flag on. Se procesan APARTE de invoiceIds → la guarda M2
+  // de arriba sigue contando solo drafts (decisión §8.3).
+  const residualIds = process.env.PORTAL_SALDO_ANTERIOR_ENABLED === "true"
+    && !isMultiCur
+    && Array.isArray(metadata.odoo_posted_residual_ids)
+      ? (metadata.odoo_posted_residual_ids as unknown[]).map(Number).filter((n) => Number.isInteger(n) && n > 0)
+      : [];
+
   // Procesar cada factura
   const failures: Array<{ invoiceId: number; error: string }> = [];
   let allAlreadySynced = true;
@@ -243,6 +252,33 @@ async function processQueueItem(
       allAlreadySynced = false;
       const msg = err instanceof Error ? err.message : String(err);
       failures.push({ invoiceId, error: `exception: ${msg}` });
+    }
+  }
+
+  // Fase 1 — procesar los residuales (saldo anterior) por su amount_residual.
+  // syncOdooForCollectionItem salta el posteo (ya están posted) y registerPayment
+  // usa preview.amount = amount_residual (sin amountUsd ni amountVesPaid).
+  for (const invoiceId of residualIds) {
+    try {
+      const result = await syncOdooForCollectionItem({
+        invoiceId,
+        paymentMethod,
+        paymentReference: item.payment_reference || ci.payment_reference || "",
+        paymentToken: item.payment_token || ci.payment_token,
+        paymentDate,
+        amountUsd: undefined,
+        amountVesPaid: null,
+      });
+      if (result.ok) {
+        if (!result.already_synced) allAlreadySynced = false;
+      } else {
+        allAlreadySynced = false;
+        failures.push({ invoiceId, error: `residual: ${result.error || "sync fallo"}` });
+      }
+    } catch (err) {
+      allAlreadySynced = false;
+      const msg = err instanceof Error ? err.message : String(err);
+      failures.push({ invoiceId, error: `residual exception: ${msg}` });
     }
   }
 

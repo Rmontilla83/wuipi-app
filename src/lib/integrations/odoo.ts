@@ -1159,6 +1159,15 @@ export async function previewRegisterPayment(opts: {
   const fullInv = (await read("account.move", [opts.invoiceId], ["payment_state", "amount_residual"]))[0];
   const paymentState = fullInv?.payment_state || "not_paid";
 
+  // Monto a registrar = lo que FALTA por pagar (amount_residual), NO el total.
+  //  - Draft recién posteado (flujo normal): residual == total → idéntico al previo.
+  //  - Factura posted-PARCIAL (saldo anterior de caja): paga solo el residual →
+  //    cierra a 0 sin sobre-pagar. Fase 1 (saldo anterior), diseño 2026-07-09.
+  const residualNow = Math.round(Number(fullInv?.amount_residual ?? 0) * 100) / 100;
+  const amountToRegister = invoice.state === "posted" && residualNow > 0.01
+    ? residualNow
+    : invoice.amount_total;
+
   validations.invoice_is_posted = invoice.state === "posted";
   if (invoice.state !== "posted") {
     warnings.push(`Factura esta en state="${invoice.state}", debe estar posted antes de registrar pago`);
@@ -1194,7 +1203,7 @@ export async function previewRegisterPayment(opts: {
     invoice_payment_state: paymentState,
     partner_id: invoice.partner_id?.[0] || 0,
     partner_name: invoice.partner_id?.[1] || "",
-    amount: invoice.amount_total,
+    amount: amountToRegister,
     currency: invoice.currency_id?.[1] || "",
     mapping: mapping || ({} as PaymentMethodMapping),
     payment_date: paymentDate,

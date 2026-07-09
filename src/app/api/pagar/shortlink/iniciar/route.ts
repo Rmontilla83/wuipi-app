@@ -14,7 +14,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { apiSuccess, apiError, apiServerError } from "@/lib/api-helpers";
-import { isConfigured, getPartner, listInvoices, getInvoiceProductsByMove } from "@/lib/integrations/odoo-new";
+import { isConfigured, getPartner, listInvoices, getInvoiceProductsByMove, listPostedResidualsForPartner, type PostedResidual } from "@/lib/integrations/odoo-new";
 import { resolveShortlinkByCode, markShortlinkAccessed } from "@/lib/integrations/odoo-new/shortlinks";
 import { verifyShortlinkJWT, shortlinkErrorMessage, isShortlinkCode } from "@/lib/utils/payment-shortlink";
 import { createAdminSupabase } from "@/lib/supabase/server";
@@ -117,6 +117,40 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // ── Fase 1 — SALDO ANTERIOR (flag PORTAL_SALDO_ANTERIOR_ENABLED) ──────────
+    // Igual que en /api/pagar/cliente/iniciar: facturas posteadas con residual
+    // (típ. cobro incompleto en caja) que el portal no mostraba. Aditivo y
+    // gateado: flag OFF → postedResidualMeta = {} → byte-idéntico. El residual
+    // solo viaja cuando hay drafts (sin drafts ya retornamos "no_drafts_pending").
+    const saldoAnteriorEnabled = process.env.PORTAL_SALDO_ANTERIOR_ENABLED === "true";
+    let postedResiduals: PostedResidual[] = [];
+    if (saldoAnteriorEnabled) {
+      try {
+        postedResiduals = await listPostedResidualsForPartner(partnerId);
+      } catch (err) {
+        console.warn("[pagar/shortlink/iniciar] listPostedResidualsForPartner fallo:", err);
+      }
+    }
+    const postedResidualsBs: Record<number, number> = {};
+    let postedResidualTotalBs = 0;
+    for (const r of postedResiduals) {
+      postedResidualsBs[r.id] = r.residualBs;
+      postedResidualTotalBs += r.residualBs;
+    }
+    postedResidualTotalBs = Math.round(postedResidualTotalBs * 100) / 100;
+    const postedResidualMeta: Record<string, unknown> = saldoAnteriorEnabled
+      ? {
+          odoo_posted_residual_ids: postedResiduals.map((r) => r.id),
+          odoo_posted_residuals_bs: postedResidualsBs,
+          odoo_posted_residuals: postedResiduals.map((r) => ({
+            number: r.number,
+            residual_bs: r.residualBs,
+            due_date: r.dueDate || "",
+          })),
+          posted_residual_total_bs: postedResidualTotalBs,
+        }
+      : {};
+
     // 4. Reusar collection_item activo si ya existe para este partner
     //    (cliente que abrió el link 2 veces no genera 2 items)
     const odooInvoiceAmountsUsd: Record<number, number> = {};
@@ -170,7 +204,14 @@ export async function POST(request: NextRequest) {
         : null;
       const idsChanged = !oldIds || JSON.stringify(oldIds) !== JSON.stringify(newIdsSorted);
       const amountChanged = Math.abs(Number(item.amount_usd) - netDue) > 0.01;
-      if (idsChanged || amountChanged) {
+      // Refrescar también si cambió el set de residuales (solo con flag on).
+      const newResidualIds = postedResiduals.map((r) => r.id).sort((a, b) => a - b);
+      const oldResidualIds = Array.isArray(existingMeta.odoo_posted_residual_ids)
+        ? (existingMeta.odoo_posted_residual_ids as number[]).slice().sort((a, b) => a - b)
+        : [];
+      const residualsChanged = saldoAnteriorEnabled
+        && JSON.stringify(oldResidualIds) !== JSON.stringify(newResidualIds);
+      if (idsChanged || amountChanged || residualsChanged) {
         await sb.from("collection_items").update({
           amount_usd: netDue,
           metadata: {
@@ -181,6 +222,8 @@ export async function POST(request: NextRequest) {
             odoo_invoices: odooInvoicesMeta,
             is_pay_all: true,
             shortlink_code: code,
+            // Saldo anterior (flag on): {} cuando off → no altera el metadata.
+            ...postedResidualMeta,
           },
         }).eq("id", item.id);
       }
@@ -233,6 +276,8 @@ export async function POST(request: NextRequest) {
           is_pay_all: true,
           shortlink_code: code,
           shortlink_id: shortlink.id,
+          // Saldo anterior (flag on): {} cuando off → no altera el metadata.
+          ...postedResidualMeta,
         },
       });
     if (insertErr) throw insertErr;

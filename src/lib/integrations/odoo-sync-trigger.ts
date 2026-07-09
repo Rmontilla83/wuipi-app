@@ -236,6 +236,41 @@ export async function triggerOdooSyncOrEnqueue(input: SyncTriggerInput): Promise
     }
   }
 
+  // ── Fase 1 — SALDO ANTERIOR: cobrar también los residuales posteados ────────
+  // Facturas posted-parciales (saldo anterior de caja) que el portal ahora
+  // incluye. Solo MISMA MONEDA (Bs): en USD (Stripe/PayPal) el cliente pagó
+  // amount_usd = solo drafts, el residual en Bs NO entró → no se registra.
+  // Gateado por el flag; con el flag off, readPostedResidualIds devuelve [] (el
+  // metadata no trae residual ids). Se procesan APARTE de invoiceIds para que la
+  // guarda M2 siga contando solo drafts (decisión §8.3). Registro por residual:
+  // registerPayment usa preview.amount = amount_residual (no amountVesPaid).
+  if (process.env.PORTAL_SALDO_ANTERIOR_ENABLED === "true" && !isMultiCur) {
+    const residualIds = await readPostedResidualIds(collectionItemId);
+    for (const invoiceId of residualIds) {
+      try {
+        const result = await syncOdooForCollectionItem({
+          invoiceId,
+          paymentMethod,
+          paymentReference: paymentReference || "",
+          paymentToken,
+          paymentDate,
+          amountUsd: undefined,
+          amountVesPaid: null,
+        });
+        if (result.ok) {
+          console.log(`[OdooSyncTrigger] ✅ ${collectionItemId} residual invoice=${invoiceId} OK state=${result.invoice_payment_state}`);
+        } else {
+          failures.push({ invoiceId, error: `residual: ${result.error || "sync fallo"}` });
+          console.warn(`[OdooSyncTrigger] residual invoice=${invoiceId} fallo: ${result.error}`);
+        }
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        failures.push({ invoiceId, error: `residual exception: ${errMsg}` });
+        console.error(`[OdooSyncTrigger] residual invoice=${invoiceId} exception:`, err);
+      }
+    }
+  }
+
   // Si hubo cualquier falla, encolar para reintentos. La cola tiene UNIQUE
   // en collection_item_id, asi que solo encolamos UNA fila con la primera
   // factura fallida — el cron va a reintentar y la idempotencia parcial
@@ -266,6 +301,29 @@ async function markCollectionItemSyncedNow(collectionItemId: string): Promise<vo
   } catch (err) {
     // No bloqueante — el sync ya fue exitoso, solo perdemos el flag visual.
     console.warn(`[OdooSyncTrigger] No se pudo marcar odoo_sync_synced_at en ${collectionItemId}:`, err);
+  }
+}
+
+/**
+ * Lee los IDs de facturas posteadas-con-residual (saldo anterior) del metadata
+ * del collection_item. Devuelve [] si no hay o si algo falla (no bloqueante).
+ * Fase 1 — saldo anterior (diseño 2026-07-09).
+ */
+async function readPostedResidualIds(collectionItemId: string): Promise<number[]> {
+  try {
+    const db = createAdminSupabase();
+    const { data } = await db
+      .from("collection_items")
+      .select("metadata")
+      .eq("id", collectionItemId)
+      .maybeSingle();
+    const meta = (data?.metadata ?? {}) as Record<string, unknown>;
+    return Array.isArray(meta.odoo_posted_residual_ids)
+      ? (meta.odoo_posted_residual_ids as unknown[]).map(Number).filter((n) => Number.isInteger(n) && n > 0)
+      : [];
+  } catch (err) {
+    console.warn(`[OdooSyncTrigger] readPostedResidualIds fallo ${collectionItemId}:`, err);
+    return [];
   }
 }
 

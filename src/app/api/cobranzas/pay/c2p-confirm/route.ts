@@ -8,6 +8,7 @@ import { apiSuccess, apiError, apiServerError } from "@/lib/api-helpers";
 import { validate, collectionC2PConfirmSchema } from "@/lib/validations/schemas";
 import { getItemsByToken, markItemPaid, ensureMercantilInvoiceId } from "@/lib/dal/collection-campaigns";
 import { fetchBCVRate, convertUsdToBs } from "@/lib/integrations/bcv";
+import { postedResidualBs } from "@/lib/cobranzas/saldo-anterior";
 import { MercantilSDK } from "@/lib/mercantil";
 import { checkRateLimit, getClientIP } from "@/lib/utils/rate-limit";
 import { sendPaymentConfirmationWhatsApp } from "@/lib/notifications/whatsapp";
@@ -33,7 +34,9 @@ export async function POST(request: NextRequest) {
     if (item.status === "paid") return apiError("Este cobro ya fue pagado", 400);
 
     const bcv = await fetchBCVRate();
-    const amountBss = convertUsdToBs(Number(item.amount_usd), bcv.usd_to_bs);
+    // Fase 1: sumar el saldo anterior (Bs fijo) al monto convertido.
+    const amountBss = convertUsdToBs(Number(item.amount_usd), bcv.usd_to_bs)
+      + postedResidualBs(item.metadata);
 
     const sdk = new MercantilSDK();
     const ua = request.headers.get("user-agent") || "WUIPI-Portal";

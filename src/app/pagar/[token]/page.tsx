@@ -50,6 +50,10 @@ interface PaymentData {
   portal_login_url?: string | null;
   odoo_invoices?: OdooInvoiceInfo[] | null;
   currency?: string | null;
+  // Fase 1 — saldo anterior: residual de facturas ya posteadas (Bs fijo) que se
+  // suma al total a pagar. Solo presente con el flag PORTAL_SALDO_ANTERIOR_ENABLED.
+  posted_residual_total_bs?: number | null;
+  odoo_posted_residuals?: { number: string; residual_bs: number; due_date: string }[] | null;
 }
 
 interface BCVData {
@@ -770,7 +774,11 @@ function PagarPageMain() {
     );
   }
 
-  const amountBss = bcv?.amount_bss || 0;
+  // Fase 1: el saldo anterior (Bs fijo) se suma al total que ve y paga el cliente.
+  // Con el flag off, el endpoint no devuelve el campo → 0 → total idéntico al previo.
+  // amountBss alimenta el "MONTO A PAGAR", el monto a transferir y el de C2P.
+  const residualBs = data.posted_residual_total_bs || 0;
+  const amountBss = (bcv?.amount_bss || 0) + residualBs;
   const bcvRate = bcv?.usd_to_bs || 0;
 
   // ---- Payment selection ----
@@ -838,6 +846,18 @@ function PagarPageMain() {
                   <span className="text-white text-sm font-mono">{data.invoice_number}</span>
                 </div>
               )}
+            </div>
+          )}
+
+          {residualBs > 0 && (
+            <div className="mb-4 flex items-center justify-between rounded-xl border border-amber-300/25 bg-amber-400/10 px-3 py-2">
+              <div>
+                <p className="text-amber-100 text-xs font-semibold">Saldo anterior</p>
+                <p className="text-amber-200/60 text-[11px]">Pendiente de un pago previo incompleto</p>
+              </div>
+              <span className="whitespace-nowrap text-white text-sm font-bold">
+                Bs. {residualBs.toLocaleString("es-VE", { minimumFractionDigits: 2 })}
+              </span>
             </div>
           )}
 

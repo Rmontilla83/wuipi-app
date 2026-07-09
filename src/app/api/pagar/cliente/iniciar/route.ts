@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { apiSuccess, apiError, apiServerError } from "@/lib/api-helpers";
 import { verifyClientPaymentToken } from "@/lib/utils/payment-token";
-import { isConfigured, getPartner, listInvoices, getInvoiceProductsByMove } from "@/lib/integrations/odoo-new";
+import { isConfigured, getPartner, listInvoices, getInvoiceProductsByMove, listPostedResidualsForPartner, type PostedResidual } from "@/lib/integrations/odoo-new";
 import { createAdminSupabase } from "@/lib/supabase/server";
 import { generateCollectionToken } from "@/lib/dal/collection-campaigns";
 import { checkRateLimit, getClientIP } from "@/lib/utils/rate-limit";
@@ -89,6 +89,44 @@ export async function POST(request: NextRequest) {
 
     if (netDue <= 0) return apiError("No hay saldo pendiente", 400);
 
+    // ── Fase 1 — SALDO ANTERIOR (flag PORTAL_SALDO_ANTERIOR_ENABLED) ──────────
+    // Facturas YA posteadas con residual (típ. cobro incompleto en caja) que el
+    // portal no mostraba. Aditivo y gateado: con el flag OFF, postedResidualMeta
+    // = {} → metadata y comportamiento byte-idénticos al actual. El residual solo
+    // "viaja" cuando hay al menos un draft (sin drafts netDue<=0 y ya retornamos)
+    // — consistente con la decisión §8.4: no se cobran residuales sueltos, se
+    // barren cuando una factura nueva los acompaña.
+    const saldoAnteriorEnabled = process.env.PORTAL_SALDO_ANTERIOR_ENABLED === "true";
+    let postedResiduals: PostedResidual[] = [];
+    if (saldoAnteriorEnabled) {
+      try {
+        postedResiduals = await listPostedResidualsForPartner(partnerId);
+      } catch (err) {
+        console.warn("[pagar/cliente/iniciar] listPostedResidualsForPartner fallo:", err);
+      }
+    }
+    const postedResidualsBs: Record<number, number> = {};
+    let postedResidualTotalBs = 0;
+    for (const r of postedResiduals) {
+      postedResidualsBs[r.id] = r.residualBs;
+      postedResidualTotalBs += r.residualBs;
+    }
+    postedResidualTotalBs = Math.round(postedResidualTotalBs * 100) / 100;
+    // Bloque de metadata del saldo anterior. VACÍO cuando el flag está off → no
+    // altera el metadata (byte-idéntico). Se mezcla al crear y al reusar el item.
+    const postedResidualMeta: Record<string, unknown> = saldoAnteriorEnabled
+      ? {
+          odoo_posted_residual_ids: postedResiduals.map((r) => r.id),
+          odoo_posted_residuals_bs: postedResidualsBs,
+          odoo_posted_residuals: postedResiduals.map((r) => ({
+            number: r.number,
+            residual_bs: r.residualBs,
+            due_date: r.dueDate || "",
+          })),
+          posted_residual_total_bs: postedResidualTotalBs,
+        }
+      : {};
+
     const sb = createAdminSupabase();
 
     // Reusa item existente SOLO en el caso "pago todo" (sin invoice_ids).
@@ -156,7 +194,14 @@ export async function POST(request: NextRequest) {
           ? (existingMeta.odoo_invoice_ids as number[]).slice().sort((a, b) => a - b)
           : null;
         const idsChanged = !oldInvoiceIds || JSON.stringify(oldInvoiceIds) !== JSON.stringify(newInvoiceIds);
-        if (idsChanged) {
+        // Refrescar también si cambió el set de residuales (solo con flag on).
+        const newResidualIds = postedResiduals.map((r) => r.id).sort((a, b) => a - b);
+        const oldResidualIds = Array.isArray(existingMeta?.odoo_posted_residual_ids)
+          ? (existingMeta.odoo_posted_residual_ids as number[]).slice().sort((a, b) => a - b)
+          : [];
+        const residualsChanged = saldoAnteriorEnabled
+          && JSON.stringify(oldResidualIds) !== JSON.stringify(newResidualIds);
+        if (idsChanged || residualsChanged) {
           itemUpdate.metadata = {
             ...(existingMeta || {}),
             odoo_invoice_ids: newInvoiceIds,
@@ -165,6 +210,8 @@ export async function POST(request: NextRequest) {
             // IDs — sino el portal muestra datos viejos del draft anterior.
             odoo_invoices: odooInvoices,
             is_pay_all: true,
+            // Saldo anterior (flag on): {} cuando off → no altera el metadata.
+            ...postedResidualMeta,
           };
         }
         if (Object.keys(itemUpdate).length > 0) {
@@ -219,6 +266,8 @@ export async function POST(request: NextRequest) {
           odoo_invoice_amounts_usd: odooInvoiceAmountsUsd,
           draft_total_all: draftTotalAll,
           is_pay_all: isPayAll,
+          // Saldo anterior (flag on): {} cuando off → no altera el metadata.
+          ...postedResidualMeta,
         },
       });
 

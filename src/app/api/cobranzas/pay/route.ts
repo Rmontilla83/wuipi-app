@@ -6,6 +6,7 @@ import { apiSuccess, apiError, apiServerError } from "@/lib/api-helpers";
 import { validate, collectionPaySchema } from "@/lib/validations/schemas";
 import { getItemsByToken, updateItem, ensureMercantilInvoiceId } from "@/lib/dal/collection-campaigns";
 import { fetchBCVRate, convertUsdToBs } from "@/lib/integrations/bcv";
+import { postedResidualBs } from "@/lib/cobranzas/saldo-anterior";
 import { MercantilSDK } from "@/lib/mercantil";
 import { checkRateLimit, getClientIP } from "@/lib/utils/rate-limit";
 import Stripe from "stripe";
@@ -69,7 +70,10 @@ export async function POST(request: NextRequest) {
     }
 
     const bcv = await fetchBCVRate();
-    const amountBss = convertUsdToBs(Number(item.amount_usd), bcv.usd_to_bs);
+    // Fase 1: sumar el saldo anterior (Bs fijo) al monto convertido → el cliente
+    // paga drafts + residual en un solo cobro. Flag off → postedResidualBs = 0.
+    const amountBss = convertUsdToBs(Number(item.amount_usd), bcv.usd_to_bs)
+      + postedResidualBs(item.metadata);
 
     // Save BCV rate on the item for future reference
     await updateItem(item.id, {

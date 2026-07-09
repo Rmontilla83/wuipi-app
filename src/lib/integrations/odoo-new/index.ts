@@ -25,7 +25,9 @@ export {
   getInvoice,
   listInvoices,
   listPendingInvoicesForPartner,
+  listPostedResidualsForPartner,
   getInvoiceProductsByMove,
+  type PostedResidual,
 } from "./invoices";
 
 export {

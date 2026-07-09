@@ -13,6 +13,7 @@ import { sendPaymentConfirmationEmail } from "@/lib/notifications/email";
 import { checkRateLimit, getClientIP } from "@/lib/utils/rate-limit";
 import { MercantilSDK, transferReferenceLast8 } from "@/lib/mercantil";
 import { fetchBCVRate, convertUsdToBs } from "@/lib/integrations/bcv";
+import { postedResidualBs } from "@/lib/cobranzas/saldo-anterior";
 import { logGatewayEvent, classifyError, maskAccountLast4 } from "@/lib/dal/payment-gateway-logs";
 import { createPaymentFailureCase, closeOpenCasesForPaidItem } from "@/lib/cobranzas/payment-failure-case";
 
@@ -68,7 +69,11 @@ export async function POST(request: NextRequest) {
     if (!amountBss) {
       try {
         const bcv = await fetchBCVRate();
-        amountBss = convertUsdToBs(Number(item.amount_usd), bcv.usd_to_bs);
+        // Fase 1: incluir el saldo anterior (Bs fijo) para que la baseline del
+        // mismatch iguale al declaredAmountBss (que ya lo incluye desde el display).
+        // El frozen item.amount_bss ya viene inclusivo (se congela en [token]).
+        amountBss = convertUsdToBs(Number(item.amount_usd), bcv.usd_to_bs)
+          + postedResidualBs(item.metadata);
         await updateItem(item.id, {
           amount_bss: amountBss,
           bcv_rate: bcv.usd_to_bs,

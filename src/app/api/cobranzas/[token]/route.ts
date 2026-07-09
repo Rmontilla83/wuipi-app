@@ -6,6 +6,7 @@ import { apiSuccess, apiError, apiServerError } from "@/lib/api-helpers";
 import { getItemsByToken, updateItem } from "@/lib/dal/collection-campaigns";
 import { checkRateLimit, getClientIP } from "@/lib/utils/rate-limit";
 import { fetchBCVRate, convertUsdToBs } from "@/lib/integrations/bcv";
+import { postedResidualBs } from "@/lib/cobranzas/saldo-anterior";
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://api.wuipi.net";
 
@@ -50,7 +51,11 @@ export async function GET(
       if (!item.amount_bss) {
         try {
           const bcv = await fetchBCVRate();
-          update.amount_bss = convertUsdToBs(Number(item.amount_usd), bcv.usd_to_bs);
+          // Fase 1: el monto congelado = drafts convertidos + saldo anterior (Bs
+          // fijo). Es el "monto esperado" TOTAL que el cliente debe pagar. Con el
+          // flag off, postedResidualBs devuelve 0 → idéntico al comportamiento previo.
+          const residualBs = postedResidualBs(item.metadata);
+          update.amount_bss = convertUsdToBs(Number(item.amount_usd), bcv.usd_to_bs) + residualBs;
           update.bcv_rate = bcv.usd_to_bs;
           item.amount_bss = update.amount_bss as number;
           item.bcv_rate = update.bcv_rate as number;
@@ -64,6 +69,12 @@ export async function GET(
 
     // Extract safe metadata for public display (invoice details only)
     const odooInvoices = item.metadata?.odoo_invoices || null;
+    // Fase 1 — saldo anterior: monto Bs fijo + detalle para la línea del portal.
+    // 0 con el flag off → no se agrega nada a la respuesta.
+    const residualTotalBs = postedResidualBs(item.metadata);
+    const postedResidualsDetail = residualTotalBs > 0
+      ? (item.metadata?.odoo_posted_residuals ?? null)
+      : null;
 
     // Portal access URL for the post-payment confirmation screen.
     // Email pre-filled — el cliente solo ingresa contraseña (o la crea si es
@@ -87,6 +98,9 @@ export async function GET(
       paid_at: item.paid_at,
       portal_login_url: portalLoginUrl,
       ...(odooInvoices ? { odoo_invoices: odooInvoices, currency: item.metadata?.currency } : {}),
+      ...(residualTotalBs > 0
+        ? { posted_residual_total_bs: residualTotalBs, odoo_posted_residuals: postedResidualsDetail }
+        : {}),
     });
   } catch (error) {
     return apiServerError(error);

@@ -4,6 +4,7 @@
 
 import { read, searchCount, searchRead } from "./client";
 import { bool, m2oId, m2oName, mapCurrencyCode, nullable } from "./mappers";
+import { CURRENCY_IDS } from "./config";
 import type {
   InvoicePaymentState,
   InvoiceState,
@@ -181,4 +182,54 @@ export async function listPendingInvoicesForPartner(partnerId: number): Promise<
     order: "invoice_date_due asc",
   });
   return items;
+}
+
+/** Saldo anterior: una factura YA POSTEADA con residual pendiente en Bs. */
+export interface PostedResidual {
+  id: number;
+  /** Número/secuencia de la factura (ej. "00057688"). */
+  number: string;
+  /** Residual FIJO en Bs (VED) — la factura ya está posteada, no se convierte. */
+  residualBs: number;
+  /** Vencimiento, para orden/contexto en el display. */
+  dueDate: string | null;
+}
+
+/**
+ * Facturas out_invoice YA POSTEADAS con residual pendiente en VED — el "saldo
+ * anterior" que el portal no mostraba (solo listaba drafts). Origen típico:
+ * cobro incompleto en caja → la factura se postea con payment_state="partial"
+ * y un amount_residual>0 que quedaba invisible (Fase 1, diseño 2026-07-09).
+ *
+ * Solo VED (171): el residual es un monto FIJO en Bs (la factura ya está
+ * posteada), no se convierte. Excluye `in_payment` (pago registrado NO
+ * reconciliado → riesgo de doble cobro) y el micro-polvo (<= dustFloor).
+ * READ-ONLY.
+ */
+export async function listPostedResidualsForPartner(
+  partnerId: number,
+  opts: { dustFloor?: number } = {},
+): Promise<PostedResidual[]> {
+  const dust = opts.dustFloor ?? 0.01;
+  const { items } = await listInvoices({
+    partnerId,
+    states: ["posted"],
+    unpaidOnly: true, // payment_state in [not_paid, partial, in_payment]
+    limit: 50,
+    order: "invoice_date_due asc",
+  });
+  return items
+    // Excluir in_payment: pago posteado pero no reconciliado — cobrarlo otra vez
+    // sería doble cobro. Solo not_paid | partial.
+    .filter((inv) => inv.paymentState === "not_paid" || inv.paymentState === "partial")
+    // Solo VED: el residual se trata como Bs fijo. Un posted en USD sería otro
+    // caso (raro) y se maneja aparte, no acá.
+    .filter((inv) => inv.currencyId === CURRENCY_IDS.VED)
+    .filter((inv) => inv.amountResidual > dust)
+    .map((inv) => ({
+      id: inv.id,
+      number: inv.name,
+      residualBs: Math.round(inv.amountResidual * 100) / 100,
+      dueDate: inv.invoiceDateDue,
+    }));
 }
