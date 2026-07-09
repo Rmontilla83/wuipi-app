@@ -931,34 +931,41 @@ function PagarPageMain() {
             accent="#F46800"
           />
 
-          {/* Stripe — minimo $0.50 USD por requisito de Stripe Checkout */}
-          {(() => {
-            const stripeDisabled = Number(data.amount_usd) < 0.5;
-            return (
-              <PaymentMethodCard
-                icon={<CreditCard className="w-5 h-5" />}
-                title="Tarjeta Nacional o Internacional (Divisas)"
-                subtitle={`$${Number(data.amount_usd).toFixed(2)} USD`}
-                description="Visa, Mastercard, American Express"
-                selected={selectedMethod === "stripe"}
-                onClick={() => !stripeDisabled && setSelectedMethod("stripe")}
-                accent="#635BFF"
-                disabled={stripeDisabled}
-                disabledReason="Monto mínimo $0.50 USD (requisito Stripe)"
-              />
-            );
-          })()}
+          {/* Stripe/PayPal (USD) — ocultos si hay saldo anterior: son montos en
+              USD que NO incluyen el residual en Bs, así que el saldo anterior solo
+              se puede pagar por métodos Bs (débito/transferencia/c2p). (M3 review) */}
+          {residualBs <= 0 && (
+            <>
+              {/* Stripe — minimo $0.50 USD por requisito de Stripe Checkout */}
+              {(() => {
+                const stripeDisabled = Number(data.amount_usd) < 0.5;
+                return (
+                  <PaymentMethodCard
+                    icon={<CreditCard className="w-5 h-5" />}
+                    title="Tarjeta Nacional o Internacional (Divisas)"
+                    subtitle={`$${Number(data.amount_usd).toFixed(2)} USD`}
+                    description="Visa, Mastercard, American Express"
+                    selected={selectedMethod === "stripe"}
+                    onClick={() => !stripeDisabled && setSelectedMethod("stripe")}
+                    accent="#635BFF"
+                    disabled={stripeDisabled}
+                    disabledReason="Monto mínimo $0.50 USD (requisito Stripe)"
+                  />
+                );
+              })()}
 
-          {/* PayPal */}
-          <PaymentMethodCard
-            icon={<Globe className="w-5 h-5" />}
-            title="PayPal"
-            subtitle={`$${Number(data.amount_usd).toFixed(2)} USD`}
-            description="Paga con tu cuenta PayPal o tarjeta"
-            selected={selectedMethod === "paypal"}
-            onClick={() => setSelectedMethod("paypal")}
-            accent="#0070BA"
-          />
+              {/* PayPal */}
+              <PaymentMethodCard
+                icon={<Globe className="w-5 h-5" />}
+                title="PayPal"
+                subtitle={`$${Number(data.amount_usd).toFixed(2)} USD`}
+                description="Paga con tu cuenta PayPal o tarjeta"
+                selected={selectedMethod === "paypal"}
+                onClick={() => setSelectedMethod("paypal")}
+                accent="#0070BA"
+              />
+            </>
+          )}
         </div>
 
         {/* Action area — sticky on mobile */}

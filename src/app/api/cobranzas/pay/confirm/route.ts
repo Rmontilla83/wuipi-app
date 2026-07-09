@@ -74,6 +74,7 @@ export async function POST(request: NextRequest) {
         // El frozen item.amount_bss ya viene inclusivo (se congela en [token]).
         amountBss = convertUsdToBs(Number(item.amount_usd), bcv.usd_to_bs)
           + postedResidualBs(item.metadata);
+        item.amount_bss = amountBss; // refrescar en memoria (lectores posteriores)
         await updateItem(item.id, {
           amount_bss: amountBss,
           bcv_rate: bcv.usd_to_bs,
@@ -337,7 +338,11 @@ export async function POST(request: NextRequest) {
           paymentMethod: "transferencia",
           paymentReference: reference,
           amountUsd: Number(item.amount_usd),
-          amountVes: typeof item.amount_bss === "number" ? item.amount_bss : null,
+          // amountBss (local) es el valor inclusivo CORRECTO (frozen válido O
+          // recomputado fresco arriba). item.amount_bss puede quedar null tras el
+          // reset de M1-followup y NO reflejar el recompute → usar el local, sino
+          // el sync recibiría null → useRealAmount=false → banco inflado (anticipo).
+          amountVes: typeof amountBss === "number" ? amountBss : null,
           odooInvoiceIds,
           invoiceAmountsUsd,
         }).catch((err) => console.error("[PayConfirm] Sync Odoo fallo:", err))

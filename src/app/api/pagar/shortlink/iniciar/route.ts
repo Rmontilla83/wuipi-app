@@ -209,11 +209,20 @@ export async function POST(request: NextRequest) {
       const oldResidualIds = Array.isArray(existingMeta.odoo_posted_residual_ids)
         ? (existingMeta.odoo_posted_residual_ids as number[]).slice().sort((a, b) => a - b)
         : [];
-      const residualsChanged = saldoAnteriorEnabled
-        && JSON.stringify(oldResidualIds) !== JSON.stringify(newResidualIds);
+      // M1 (review): refrescar también si cambió el MONTO del residual (cobro
+      // parcial en caja con el mismo ID) — sino el cliente paga el Bs congelado viejo.
+      const oldResidualTotal = Number(existingMeta.posted_residual_total_bs || 0);
+      const residualsChanged = saldoAnteriorEnabled && (
+        JSON.stringify(oldResidualIds) !== JSON.stringify(newResidualIds)
+        || Math.abs(oldResidualTotal - postedResidualTotalBs) > 0.01
+      );
       if (idsChanged || amountChanged || residualsChanged) {
         await sb.from("collection_items").update({
           amount_usd: netDue,
+          // M1-followup (review): si cambió el residual, invalidar el amount_bss
+          // congelado → el próximo GET /pagar/[token] lo re-congela inclusivo con
+          // el residual FRESCO (sino B1 inflaría el banco en transferencia+anticipo).
+          ...(residualsChanged ? { amount_bss: null, bcv_rate: null } : {}),
           metadata: {
             ...existingMeta,
             odoo_invoice_ids: newIdsSorted,

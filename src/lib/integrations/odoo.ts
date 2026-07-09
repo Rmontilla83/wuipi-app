@@ -1159,14 +1159,18 @@ export async function previewRegisterPayment(opts: {
   const fullInv = (await read("account.move", [opts.invoiceId], ["payment_state", "amount_residual"]))[0];
   const paymentState = fullInv?.payment_state || "not_paid";
 
-  // Monto a registrar = lo que FALTA por pagar (amount_residual), NO el total.
-  //  - Draft recién posteado (flujo normal): residual == total → idéntico al previo.
-  //  - Factura posted-PARCIAL (saldo anterior de caja): paga solo el residual →
-  //    cierra a 0 sin sobre-pagar. Fase 1 (saldo anterior), diseño 2026-07-09.
+  // Monto a registrar = lo que FALTA por pagar (amount_residual) SOLO para las
+  // facturas posted-PARCIALES del saldo anterior (residual < total). Un draft
+  // recién posteado tiene residual == total → sigue usando amount_total.
+  // m4 (review): gateado por el flag para que con flag OFF sea provablemente
+  // byte-idéntico (siempre amount_total, preservando el baseline de useRealAmount).
   const residualNow = Math.round(Number(fullInv?.amount_residual ?? 0) * 100) / 100;
-  const amountToRegister = invoice.state === "posted" && residualNow > 0.01
-    ? residualNow
-    : invoice.amount_total;
+  const useResidualAmount =
+    process.env.PORTAL_SALDO_ANTERIOR_ENABLED === "true" &&
+    invoice.state === "posted" &&
+    residualNow > 0.01 &&
+    residualNow < invoice.amount_total - 0.01;
+  const amountToRegister = useResidualAmount ? residualNow : invoice.amount_total;
 
   validations.invoice_is_posted = invoice.state === "posted";
   if (invoice.state !== "posted") {
@@ -1300,9 +1304,17 @@ export async function findPaymentForInvoiceByToken(
   );
   if (byMemo) return byMemo.id;
   // 2) Legacy (memo sin sufijo): payment YA reconciliado contra ESTA factura.
-  const byRecon = active.find(
-    (p) => Array.isArray(p.reconciled_invoice_ids) && p.reconciled_invoice_ids.includes(invoiceId),
-  );
+  //    V1 (review): descartar el pago de OTRA factura (memo `${token}#<otroId>`)
+  //    que el auto-reconcile de Odoo pudo cruzar contra esta — sino, al procesar
+  //    el residual, tomaríamos el pago del draft y NO registraríamos el del residual.
+  const byRecon = active.find((p) => {
+    if (!Array.isArray(p.reconciled_invoice_ids) || !p.reconciled_invoice_ids.includes(invoiceId)) return false;
+    if (typeof p.memo === "string" && p.memo.startsWith(`${paymentToken}#`)) {
+      const targetId = parseInt(p.memo.slice(`${paymentToken}#`.length), 10);
+      if (Number.isInteger(targetId) && targetId !== invoiceId) return false;
+    }
+    return true;
+  });
   if (byRecon) return byRecon.id;
   // 3) Legacy huérfano: único payment del token sin reconciliar (reconcile falló
   //    en un intento previo). Solo si es el único → no cruzar facturas.

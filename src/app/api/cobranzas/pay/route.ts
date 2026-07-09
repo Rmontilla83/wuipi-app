@@ -69,6 +69,17 @@ export async function POST(request: NextRequest) {
       }).catch(() => {/* swallow — log es best-effort */});
     }
 
+    // M3 (review): Stripe/PayPal cobran SOLO los drafts en USD; el saldo anterior
+    // es un monto FIJO en Bs que esos métodos no incluyen. Si hay residual, forzar
+    // un método Bs (débito/transferencia/c2p) para no cerrar el item como pagado
+    // sin haber cobrado el saldo anterior. Flag off → postedResidualBs = 0 → no aplica.
+    if ((method === "stripe" || method === "paypal") && postedResidualBs(item.metadata) > 0) {
+      return apiError(
+        "Tienes un saldo anterior que solo se puede pagar en bolívares. Elige Débito Inmediato, Transferencia o Pago Móvil.",
+        400,
+      );
+    }
+
     const bcv = await fetchBCVRate();
     // Fase 1: sumar el saldo anterior (Bs fijo) al monto convertido → el cliente
     // paga drafts + residual en un solo cobro. Flag off → postedResidualBs = 0.

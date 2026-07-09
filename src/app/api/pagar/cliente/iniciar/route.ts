@@ -199,8 +199,14 @@ export async function POST(request: NextRequest) {
         const oldResidualIds = Array.isArray(existingMeta?.odoo_posted_residual_ids)
           ? (existingMeta.odoo_posted_residual_ids as number[]).slice().sort((a, b) => a - b)
           : [];
-        const residualsChanged = saldoAnteriorEnabled
-          && JSON.stringify(oldResidualIds) !== JSON.stringify(newResidualIds);
+        // M1 (review): refrescar también si cambió el MONTO del residual (misma
+        // factura con amount_residual menor por cobro parcial en caja) — sino el
+        // cliente pagaría el Bs congelado viejo (sobrecobro).
+        const oldResidualTotal = Number((existingMeta as Record<string, unknown> | null)?.posted_residual_total_bs || 0);
+        const residualsChanged = saldoAnteriorEnabled && (
+          JSON.stringify(oldResidualIds) !== JSON.stringify(newResidualIds)
+          || Math.abs(oldResidualTotal - postedResidualTotalBs) > 0.01
+        );
         if (idsChanged || residualsChanged) {
           itemUpdate.metadata = {
             ...(existingMeta || {}),
@@ -213,6 +219,14 @@ export async function POST(request: NextRequest) {
             // Saldo anterior (flag on): {} cuando off → no altera el metadata.
             ...postedResidualMeta,
           };
+        }
+        // M1-followup (review): si cambió el residual, invalidar el amount_bss
+        // congelado para que el próximo GET /pagar/[token] lo re-congele inclusivo
+        // (drafts + residual FRESCO). Sino B1 restaría el residual nuevo de un
+        // amount_bss viejo → transferencia+anticipo inflaría el banco.
+        if (residualsChanged) {
+          itemUpdate.amount_bss = null;
+          itemUpdate.bcv_rate = null;
         }
         if (Object.keys(itemUpdate).length > 0) {
           await sb.from("collection_items").update(itemUpdate).eq("id", item.id);
