@@ -92,15 +92,39 @@ export async function triggerOdooSyncOrEnqueue(input: SyncTriggerInput): Promise
     return;
   }
 
-  // 3. Lookup partner
+  // 3. Lookup partner — PREFERIR el partner autoritativo del metadata del item
+  //    (fijado en `iniciar` desde el token del cliente). El lookup por email/
+  //    cédula es FRÁGIL: dos partners pueden compartir email (duplicados/familia)
+  //    y `search` devuelve el ID más bajo → resuelve el partner EQUIVOCADO, con lo
+  //    que el gate/whitelist y el lookup de anticipo aplican al partner errado.
+  //    Caso 2026-07-10: Ana(8) y Rafael(1707) comparten rafaelmontilla8@gmail.com
+  //    → el sync resolvió 8 → gate de migración saltó → misroute. El metadata
+  //    partner es el dueño real de las facturas que el portal listó y cobró.
   let odooPartnerId: number | null = null;
   try {
-    odooPartnerId = await findOdooPartnerByIdentifiers({
-      vat: customerCedulaRif,
-      email: customerEmail,
-    });
+    const db = createAdminSupabase();
+    const { data: ci } = await db
+      .from("collection_items")
+      .select("metadata")
+      .eq("id", collectionItemId)
+      .maybeSingle();
+    const metaPid = Number(
+      (ci?.metadata as Record<string, unknown> | null)?.odoo_partner_id,
+    );
+    if (Number.isInteger(metaPid) && metaPid > 0) odooPartnerId = metaPid;
   } catch (err) {
-    console.warn("[OdooSyncTrigger] Lookup partner fallo:", err);
+    console.warn("[OdooSyncTrigger] Lookup partner desde metadata falló:", err);
+  }
+  // Fallback: lookup por cédula/email (flujos sin token o metadata sin partner).
+  if (!odooPartnerId) {
+    try {
+      odooPartnerId = await findOdooPartnerByIdentifiers({
+        vat: customerCedulaRif,
+        email: customerEmail,
+      });
+    } catch (err) {
+      console.warn("[OdooSyncTrigger] Lookup partner fallo:", err);
+    }
   }
   if (!odooPartnerId) {
     await safeEnqueue({

@@ -160,6 +160,15 @@ async function processQueueItem(
   const isMultiCur = isMultiCurrencyMethod(paymentMethod);
   const paymentDate = item.payment_date || ci.paid_at?.slice(0, 10) || undefined;
 
+  // Partner efectivo: preferir el del metadata (autoritativo, fijado en `iniciar`
+  // desde el token del cliente) sobre el guardado en la cola. El de la cola pudo
+  // resolverse por email/cédula → partner EQUIVOCADO si dos comparten email
+  // (duplicados/familia). Ver la nota del trigger (caso Ana(8)/Rafael(1707)).
+  const metaPidRaw = Number((metadata as Record<string, unknown>).odoo_partner_id);
+  const effectivePartnerId = (Number.isInteger(metaPidRaw) && metaPidRaw > 0)
+    ? metaPidRaw
+    : item.odoo_partner_id;
+
   const failures: Array<{ invoiceId: number; error: string }> = [];
   let allAlreadySynced = true;
   let postDoneAggregate = item.post_invoice_done;
@@ -171,7 +180,7 @@ async function processQueueItem(
   // "solo Bs" = factura VED (171); excluye cash_usd (misma-moneda USD) del helper.
   const isBsInvoiceMethod = !isMultiCur
     && PAYMENT_METHOD_MAPPING[paymentMethod]?.invoiceCurrencyId === 171;
-  if (isBsInvoiceMethod && item.odoo_partner_id && isPayInvoiceMigrationEnabledForPartner(item.odoo_partner_id)) {
+  if (isBsInvoiceMethod && effectivePartnerId && isPayInvoiceMigrationEnabledForPartner(effectivePartnerId)) {
     const journalId = PAYMENT_METHOD_MAPPING[paymentMethod]?.journalId;
     const residualIds = process.env.PORTAL_SALDO_ANTERIOR_ENABLED === "true"
       && Array.isArray(metadata.odoo_posted_residual_ids)
@@ -246,9 +255,9 @@ async function processQueueItem(
 
   // M2 — Multi-DRAFT + saldo a favor: reparto de anticipo no automatizado →
   // revisión manual (los residuales ya se procesaron arriba). Incidente 2026-06-30.
-  if (invoiceIds.length > 1 && item.odoo_partner_id) {
+  if (invoiceIds.length > 1 && effectivePartnerId) {
     try {
-      const a = await getPartnerAnticipo(item.odoo_partner_id);
+      const a = await getPartnerAnticipo(effectivePartnerId);
       if (a.has_anticipo && a.bs > 0.01) {
         await markQueueItemFailed(item.id, {
           error: `Multi-draft (${invoiceIds.length}) con saldo a favor (Bs ${a.bs}) — revisión manual: reparto de anticipo no automatizado (no inflar banco).${failures.length ? ` (residual(es) ${failures.map(f => f.invoiceId).join(",")} fallaron — reintenta)` : ``}`,

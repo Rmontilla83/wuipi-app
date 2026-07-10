@@ -226,6 +226,10 @@ export async function POST(request: NextRequest) {
           ...(residualsChanged ? { amount_bss: null, bcv_rate: null } : {}),
           metadata: {
             ...existingMeta,
+            // Refrescar el partner autoritativo (del token) junto con las facturas.
+            // El sync lo prefiere sobre el lookup por email/cédula; si el item se
+            // reusó desde otro partner (comparten cédula/email) quedaría STALE.
+            odoo_partner_id: partnerId,
             odoo_invoice_ids: newIdsSorted,
             odoo_invoice_amounts_usd: odooInvoiceAmountsUsd,
             // Refrescar el detalle visible junto con los IDs.

@@ -211,6 +211,10 @@ export async function POST(request: NextRequest) {
         if (idsChanged || residualsChanged) {
           itemUpdate.metadata = {
             ...(existingMeta || {}),
+            // Refrescar el partner autoritativo (del token) junto con las facturas.
+            // El sync lo prefiere sobre el lookup por email/cédula; si el item se
+            // reusó desde otro partner (comparten cédula/email) quedaría STALE.
+            odoo_partner_id: partnerId,
             odoo_invoice_ids: newInvoiceIds,
             odoo_invoice_amounts_usd: odooInvoiceAmountsUsd,
             // Refrescar el detalle visible (number/servicio/monto) junto con los
