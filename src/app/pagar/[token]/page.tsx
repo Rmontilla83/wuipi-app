@@ -853,7 +853,11 @@ function PagarPageMain() {
             <div className="mb-4 flex items-center justify-between rounded-xl border border-amber-300/25 bg-amber-400/10 px-3 py-2">
               <div>
                 <p className="text-amber-100 text-xs font-semibold">Saldo anterior</p>
-                <p className="text-amber-200/60 text-[11px]">Pendiente de un pago previo incompleto</p>
+                <p className="text-amber-200/60 text-[11px]">
+                  {data.odoo_posted_residuals && data.odoo_posted_residuals.length > 0
+                    ? `Factura${data.odoo_posted_residuals.length > 1 ? "s" : ""} ${data.odoo_posted_residuals.map((r) => r.number).join(", ")} — pago previo incompleto`
+                    : "Pendiente de un pago previo incompleto"}
+                </p>
               </div>
               <span className="whitespace-nowrap text-white text-sm font-bold">
                 Bs. {residualBs.toLocaleString("es-VE", { minimumFractionDigits: 2 })}
@@ -872,6 +876,12 @@ function PagarPageMain() {
             {bcvRate > 0 && (
               <p className="text-blue-200/50 text-xs mt-1">
                 = Bs. {amountBss.toLocaleString("es-VE", { minimumFractionDigits: 2 })} (Tasa BCV: {bcvRate.toFixed(2)})
+              </p>
+            )}
+            {residualBs > 0 && bcvRate > 0 && (
+              <p className="text-amber-200/70 text-[11px] mt-1">
+                Incluye tu factura Bs. {(bcv?.amount_bss || 0).toLocaleString("es-VE", { minimumFractionDigits: 2 })}
+                {" + saldo anterior Bs. "}{residualBs.toLocaleString("es-VE", { minimumFractionDigits: 2 })}
               </p>
             )}
           </div>
