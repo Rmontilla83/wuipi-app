@@ -33,11 +33,13 @@ import {
 import {
   syncOdooForCollectionItem,
   payInvoiceResidual,
+  payInvoice,
   isMultiCurrencyMethod,
   computeProratedAmounts,
   getPartnerAnticipo,
   PAYMENT_METHOD_MAPPING,
 } from "@/lib/integrations/odoo";
+import { isPayInvoiceMigrationEnabledForPartner } from "@/lib/cobranzas/saldo-anterior";
 
 const BATCH_SIZE = 25; // Procesar máx 25 items por corrida — evita timeouts
 
@@ -162,6 +164,45 @@ async function processQueueItem(
   let allAlreadySynced = true;
   let postDoneAggregate = item.post_invoice_done;
   let regDoneAggregate = item.register_payment_done;
+
+  // ── MIGRACIÓN a wuipi_pay_invoice (flag WUIPI_PAY_INVOICE_ENABLED) ────────────
+  // Mismo flujo unificado que el trigger, para reintentos. Solo Bs. Idempotente
+  // por memo → reintentar sobre facturas ya pagadas devuelve already_paid.
+  if (!isMultiCur && item.odoo_partner_id && isPayInvoiceMigrationEnabledForPartner(item.odoo_partner_id)) {
+    const journalId = PAYMENT_METHOD_MAPPING[paymentMethod]?.journalId;
+    const residualIds = process.env.PORTAL_SALDO_ANTERIOR_ENABLED === "true"
+      && Array.isArray(metadata.odoo_posted_residual_ids)
+      ? (metadata.odoo_posted_residual_ids as unknown[]).map(Number).filter((n) => Number.isInteger(n) && n > 0)
+      : [];
+    const allIds = Array.from(new Set([...invoiceIds, ...residualIds])).sort((a, b) => a - b);
+    const token = item.payment_token || ci.payment_token;
+    for (const invoiceId of allIds) {
+      try {
+        const r = await payInvoice(invoiceId, { journalId, memo: `${token}#${invoiceId}` });
+        if (!(r.success && (r.alreadyPaid || r.residualAfterBs <= 0.01))) {
+          failures.push({ invoiceId, error: `pay_invoice no cerró: residual_after=${r.residualAfterBs}` });
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        failures.push({ invoiceId, error: `pay_invoice: ${msg.slice(0, 200)}` });
+      }
+    }
+    if (failures.length > 0) {
+      await markQueueItemFailed(item.id, {
+        error: `wuipi_pay_invoice: ${failures.length}/${allIds.length} fallaron: ${failures.map((f) => `inv${f.invoiceId}=${f.error}`).join("; ").slice(0, 1400)}`,
+      });
+      return "failed";
+    }
+    await markQueueItemDone(item.id);
+    try {
+      await db.from("collection_items")
+        .update({ odoo_sync_synced_at: new Date().toISOString() })
+        .eq("id", item.collection_item_id).is("odoo_sync_synced_at", null);
+    } catch (e) {
+      console.warn(`[cron] failed to mark synced_at for ${item.collection_item_id}:`, e);
+    }
+    return "done";
+  }
 
   // ── Fase 1 — SALDO ANTERIOR: residuales posteados PRIMERO (antes de M2/drafts) ──
   // Se cobran con wuipi_pay_invoice_residual (helper Odoo): crea+postea+reconcilia

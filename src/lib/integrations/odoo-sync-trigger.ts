@@ -27,11 +27,13 @@ import {
   findOdooPartnerByIdentifiers,
   findLatestDraftInvoiceForPartner,
   payInvoiceResidual,
+  payInvoice,
   PAYMENT_METHOD_MAPPING,
   isMultiCurrencyMethod,
   computeProratedAmounts,
   getPartnerAnticipo,
 } from "@/lib/integrations/odoo";
+import { isPayInvoiceMigrationEnabledForPartner } from "@/lib/cobranzas/saldo-anterior";
 import { enqueueOdooSync } from "@/lib/dal/odoo-sync-queue";
 import { createAdminSupabase } from "@/lib/supabase/server";
 
@@ -145,6 +147,47 @@ export async function triggerOdooSyncOrEnqueue(input: SyncTriggerInput): Promise
 
   const isMultiCur = isMultiCurrencyMethod(paymentMethod);
   const failures: Array<{ invoiceId: number; error: string }> = [];
+
+  // ── MIGRACIÓN a wuipi_pay_invoice (flag WUIPI_PAY_INVOICE_ENABLED) ────────────
+  // Flujo UNIFICADO Bs: cobra TODAS las facturas (drafts + saldos anteriores) con
+  // el helper atómico wuipi_pay_invoice — postea + auto-aplica anticipo + cobra el
+  // residual, SIN el matching de drafts del hook (que desviaba pagos a anticipo en
+  // multi-factura → casos Massimo/Gustavo/Emilio). Elimina M2, B1, registerPayment
+  // + reconcile manual. amount_bs omitido = residual exacto post-anticipo. Solo Bs
+  // (USD/Stripe/PayPal sigue el flujo de abajo). Flag off → flujo actual intacto.
+  if (!isMultiCur && isPayInvoiceMigrationEnabledForPartner(odooPartnerId)) {
+    const journalId = PAYMENT_METHOD_MAPPING[paymentMethod]?.journalId;
+    const residualIds = process.env.PORTAL_SALDO_ANTERIOR_ENABLED === "true"
+      ? (await readPostedResidualInfo(collectionItemId)).ids
+      : [];
+    // Todas las facturas, más vieja primero (ID asc como proxy de antigüedad, Q5).
+    const allIds = Array.from(new Set([...invoiceIds, ...residualIds])).sort((a, b) => a - b);
+    for (const invoiceId of allIds) {
+      try {
+        const r = await payInvoice(invoiceId, { journalId, memo: `${paymentToken}#${invoiceId}` });
+        if (r.success && (r.alreadyPaid || r.residualAfterBs <= 0.01)) {
+          console.log(`[OdooSyncTrigger] ✅ ${collectionItemId} pay_invoice ${invoiceId} ${r.alreadyPaid ? "already_paid" : "cerrado " + r.paymentName}${r.excessToAnticipoBs > 0 ? ` (excedente ${r.excessToAnticipoBs}→anticipo)` : ""}`);
+        } else {
+          failures.push({ invoiceId, error: `pay_invoice no cerró: residual_after=${r.residualAfterBs}` });
+        }
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        failures.push({ invoiceId, error: `pay_invoice: ${errMsg.slice(0, 200)}` });
+        console.error(`[OdooSyncTrigger] pay_invoice ${invoiceId} error:`, err);
+      }
+    }
+    if (failures.length > 0) {
+      await safeEnqueue({
+        collectionItemId, paymentToken, paymentMethod, paymentReference,
+        amountUsd, amountVes, paymentDate,
+        odooPartnerId, odooInvoiceId: failures[0].invoiceId,
+        error: `wuipi_pay_invoice: ${failures.length}/${allIds.length} fallaron: ${failures.map(f => `inv${f.invoiceId}=${f.error}`).join("; ").slice(0, 1400)}`,
+      });
+      return;
+    }
+    await markCollectionItemSyncedNow(collectionItemId);
+    return;
+  }
 
   // ── Fase 1 — SALDO ANTERIOR: residuales posteados PRIMERO ────────────────────
   // Se cobran con wuipi_pay_invoice_residual (helper Odoo, recomendado 2026-07-09):

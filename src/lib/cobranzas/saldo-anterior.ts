@@ -37,6 +37,21 @@ export function isSaldoAnteriorEnabledForPartner(partnerId: number): boolean {
 }
 
 /**
+ * Migración al helper universal `wuipi_pay_invoice` (2026-07-09): flag
+ * WUIPI_PAY_INVOICE_ENABLED + whitelist WUIPI_PAY_INVOICE_PARTNER_WHITELIST.
+ * Con el flag on, el sync (métodos Bs) cobra TODAS las facturas (drafts +
+ * saldos anteriores) con `payInvoice` — sin registerPayment/reconcile manual/M2.
+ * Off → flujo actual. Rollout E2E → whitelist → global (whitelist vacío).
+ */
+export function isPayInvoiceMigrationEnabledForPartner(partnerId: number): boolean {
+  if (process.env.WUIPI_PAY_INVOICE_ENABLED !== "true") return false;
+  const wl = (process.env.WUIPI_PAY_INVOICE_PARTNER_WHITELIST || "")
+    .split(",").map((s) => s.trim()).filter(Boolean).map(Number)
+    .filter((n) => Number.isInteger(n) && n > 0);
+  return wl.length === 0 || wl.includes(partnerId);
+}
+
+/**
  * Residual Bs (saldo anterior) a sumar al cobro, leído de
  * `metadata.posted_residual_total_bs`. Devuelve 0 si el flag está off, si el
  * partner (metadata.odoo_partner_id) no está en el whitelist, si no hay metadata,

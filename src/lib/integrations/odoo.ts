@@ -1307,6 +1307,66 @@ export async function payInvoiceResidual(
   };
 }
 
+export interface PayInvoiceResult {
+  success: boolean;
+  invoiceName?: string;
+  invoiceState?: string;
+  alreadyPaid: boolean;
+  paymentId?: number;
+  paymentName?: string;
+  amountAppliedBs: number;
+  excessToAnticipoBs: number;
+  residualAfterBs: number;
+}
+
+/**
+ * Helper UNIVERSAL de cobro del equipo Odoo (`account.move.wuipi_pay_invoice`,
+ * 2026-07-09). Para CUALQUIER factura en Bs (draft o posteada): la postea si es
+ * draft (fechas/tasa BCV del día, no seteamos month_billed — es computado),
+ * auto-aplica el saldo a favor del partner, y cobra el residual ATÓMICO contra
+ * ESA factura — SIN pasar por el matching de drafts del hook de action_post (que
+ * desviaba pagos a anticipo en multi-factura, bug Massimo/Gustavo/Emilio 2026-07).
+ *
+ * `amountBs` omitido → cobra el residual exacto post-anticipo (recomendado; el
+ * drift de tasa queda del lado banco, céntimos misma-tasa). Con `amountBs`, si
+ * excede el residual el excedente va a anticipo (`excessToAnticipoBs`).
+ * Idempotente por memo wpy_ (reintento no duplica). Consume el saldo UNA vez en
+ * un loop (los créditos se concilian; la siguiente iteración lee residual fresco).
+ * `alreadyPaid=true` (cubierto por saldo / reintento) → sin pago, montos 0.
+ * O cierra al 100% o lanza UserError (jsonRpc lo propaga como throw — capturar).
+ * Solo Bs (rechaza divisa). Reemplaza registerPayment+reconcile manual y payInvoiceResidual.
+ */
+export async function payInvoice(
+  invoiceId: number,
+  opts: { memo: string; journalId?: number; amountBs?: number | null },
+): Promise<PayInvoiceResult> {
+  const uid = await authenticate();
+  const kwargs: Record<string, unknown> = { memo: opts.memo };
+  if (typeof opts.journalId === "number") kwargs.journal_id = opts.journalId;
+  if (typeof opts.amountBs === "number" && opts.amountBs > 0) kwargs.amount_bs = opts.amountBs;
+  const r = (await jsonRpc("object", "execute_kw", [
+    ODOO_DB, uid, ODOO_API_KEY,
+    "account.move", "wuipi_pay_invoice",
+    [[invoiceId]],
+    kwargs,
+  ])) as {
+    success?: boolean; invoice_name?: string; invoice_state?: string; already_paid?: boolean;
+    payment_id?: number; payment_name?: string; amount_applied_bs?: number;
+    excess_to_anticipo_bs?: number; residual_after_bs?: number;
+  } | null;
+  return {
+    success: !!r?.success,
+    invoiceName: r?.invoice_name,
+    invoiceState: r?.invoice_state,
+    alreadyPaid: !!r?.already_paid,
+    paymentId: r?.payment_id,
+    paymentName: r?.payment_name,
+    amountAppliedBs: Number(r?.amount_applied_bs ?? 0),
+    excessToAnticipoBs: Number(r?.excess_to_anticipo_bs ?? 0),
+    residualAfterBs: Number(r?.residual_after_bs ?? 0),
+  };
+}
+
 /**
  * Idempotencia POR FACTURA: ¿ESTA factura ya tiene un account.payment de ESTE
  * token? El memo nuevo es `${paymentToken}#${invoiceId} — Mercantil Web ref:...`
