@@ -55,7 +55,9 @@ export async function GET(
           // fijo). Es el "monto esperado" TOTAL que el cliente debe pagar. Con el
           // flag off, postedResidualBs devuelve 0 → idéntico al comportamiento previo.
           const residualBs = postedResidualBs(item.metadata);
-          update.amount_bss = convertUsdToBs(Number(item.amount_usd), bcv.usd_to_bs) + residualBs;
+          update.amount_bss = Math.round(
+            (convertUsdToBs(Number(item.amount_usd), bcv.usd_to_bs) + residualBs) * 100,
+          ) / 100;
           update.bcv_rate = bcv.usd_to_bs;
           item.amount_bss = update.amount_bss as number;
           item.bcv_rate = update.bcv_rate as number;

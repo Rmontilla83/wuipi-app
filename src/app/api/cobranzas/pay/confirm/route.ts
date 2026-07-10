@@ -72,8 +72,9 @@ export async function POST(request: NextRequest) {
         // Fase 1: incluir el saldo anterior (Bs fijo) para que la baseline del
         // mismatch iguale al declaredAmountBss (que ya lo incluye desde el display).
         // El frozen item.amount_bss ya viene inclusivo (se congela en [token]).
-        amountBss = convertUsdToBs(Number(item.amount_usd), bcv.usd_to_bs)
-          + postedResidualBs(item.metadata);
+        amountBss = Math.round(
+          (convertUsdToBs(Number(item.amount_usd), bcv.usd_to_bs) + postedResidualBs(item.metadata)) * 100,
+        ) / 100;
         item.amount_bss = amountBss; // refrescar en memoria (lectores posteriores)
         await updateItem(item.id, {
           amount_bss: amountBss,

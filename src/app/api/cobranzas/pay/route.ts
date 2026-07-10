@@ -83,8 +83,11 @@ export async function POST(request: NextRequest) {
     const bcv = await fetchBCVRate();
     // Fase 1: sumar el saldo anterior (Bs fijo) al monto convertido → el cliente
     // paga drafts + residual en un solo cobro. Flag off → postedResidualBs = 0.
-    const amountBss = convertUsdToBs(Number(item.amount_usd), bcv.usd_to_bs)
-      + postedResidualBs(item.metadata);
+    // round2 al sumar el residual: sino la suma float (3501.12+16.45) da
+    // 3517.5699999999997 y Mercantil rechaza el monto malformado (error 825).
+    const amountBss = Math.round(
+      (convertUsdToBs(Number(item.amount_usd), bcv.usd_to_bs) + postedResidualBs(item.metadata)) * 100,
+    ) / 100;
 
     // Save BCV rate on the item for future reference
     await updateItem(item.id, {

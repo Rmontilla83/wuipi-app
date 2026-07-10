@@ -35,8 +35,9 @@ export async function POST(request: NextRequest) {
 
     const bcv = await fetchBCVRate();
     // Fase 1: sumar el saldo anterior (Bs fijo) al monto convertido.
-    const amountBss = convertUsdToBs(Number(item.amount_usd), bcv.usd_to_bs)
-      + postedResidualBs(item.metadata);
+    const amountBss = Math.round(
+      (convertUsdToBs(Number(item.amount_usd), bcv.usd_to_bs) + postedResidualBs(item.metadata)) * 100,
+    ) / 100;
 
     const sdk = new MercantilSDK();
     const ua = request.headers.get("user-agent") || "WUIPI-Portal";

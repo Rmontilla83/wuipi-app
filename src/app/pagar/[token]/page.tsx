@@ -778,7 +778,9 @@ function PagarPageMain() {
   // Con el flag off, el endpoint no devuelve el campo → 0 → total idéntico al previo.
   // amountBss alimenta el "MONTO A PAGAR", el monto a transferir y el de C2P.
   const residualBs = data.posted_residual_total_bs || 0;
-  const amountBss = (bcv?.amount_bss || 0) + residualBs;
+  // round2: evita el artefacto float al sumar el residual (ej. 3501.12+16.45 =
+  // 3517.5699999999997). Alimenta el total mostrado + el monto a transferir/declarar.
+  const amountBss = Math.round(((bcv?.amount_bss || 0) + residualBs) * 100) / 100;
   const bcvRate = bcv?.usd_to_bs || 0;
 
   // ---- Payment selection ----
