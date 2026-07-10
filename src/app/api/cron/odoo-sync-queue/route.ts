@@ -168,7 +168,10 @@ async function processQueueItem(
   // ── MIGRACIÓN a wuipi_pay_invoice (flag WUIPI_PAY_INVOICE_ENABLED) ────────────
   // Mismo flujo unificado que el trigger, para reintentos. Solo Bs. Idempotente
   // por memo → reintentar sobre facturas ya pagadas devuelve already_paid.
-  if (!isMultiCur && item.odoo_partner_id && isPayInvoiceMigrationEnabledForPartner(item.odoo_partner_id)) {
+  // "solo Bs" = factura VED (171); excluye cash_usd (misma-moneda USD) del helper.
+  const isBsInvoiceMethod = !isMultiCur
+    && PAYMENT_METHOD_MAPPING[paymentMethod]?.invoiceCurrencyId === 171;
+  if (isBsInvoiceMethod && item.odoo_partner_id && isPayInvoiceMigrationEnabledForPartner(item.odoo_partner_id)) {
     const journalId = PAYMENT_METHOD_MAPPING[paymentMethod]?.journalId;
     const residualIds = process.env.PORTAL_SALDO_ANTERIOR_ENABLED === "true"
       && Array.isArray(metadata.odoo_posted_residual_ids)

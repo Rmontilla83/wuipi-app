@@ -154,8 +154,13 @@ export async function triggerOdooSyncOrEnqueue(input: SyncTriggerInput): Promise
   // residual, SIN el matching de drafts del hook (que desviaba pagos a anticipo en
   // multi-factura → casos Massimo/Gustavo/Emilio). Elimina M2, B1, registerPayment
   // + reconcile manual. amount_bs omitido = residual exacto post-anticipo. Solo Bs
-  // (USD/Stripe/PayPal sigue el flujo de abajo). Flag off → flujo actual intacto.
-  if (!isMultiCur && isPayInvoiceMigrationEnabledForPartner(odooPartnerId)) {
+  // (USD/Stripe/PayPal Y cash_usd siguen el flujo de abajo). Flag off → intacto.
+  // Predicado "solo Bs" = factura posteada en VED (171). NO uses !isMultiCur solo:
+  // cash_usd es misma-moneda USD (isMultiCur=false) pero factura USD → el helper la
+  // rechazaría (solo Bs) y quedaría atascada (review 2026-07-09).
+  const isBsInvoiceMethod = !isMultiCur
+    && PAYMENT_METHOD_MAPPING[paymentMethod]?.invoiceCurrencyId === 171;
+  if (isBsInvoiceMethod && isPayInvoiceMigrationEnabledForPartner(odooPartnerId)) {
     const journalId = PAYMENT_METHOD_MAPPING[paymentMethod]?.journalId;
     const residualIds = process.env.PORTAL_SALDO_ANTERIOR_ENABLED === "true"
       ? (await readPostedResidualInfo(collectionItemId)).ids
