@@ -26,7 +26,7 @@ import {
   syncOdooForCollectionItem,
   findOdooPartnerByIdentifiers,
   findLatestDraftInvoiceForPartner,
-  findPaymentForInvoiceByToken,
+  payInvoiceResidual,
   PAYMENT_METHOD_MAPPING,
   isMultiCurrencyMethod,
   computeProratedAmounts,
@@ -145,45 +145,36 @@ export async function triggerOdooSyncOrEnqueue(input: SyncTriggerInput): Promise
 
   const isMultiCur = isMultiCurrencyMethod(paymentMethod);
   const failures: Array<{ invoiceId: number; error: string }> = [];
-  const residualExcess: number[] = []; // residuales cerrados por caja → excedente a manual (#2)
 
   // ── Fase 1 — SALDO ANTERIOR: residuales posteados PRIMERO ────────────────────
-  // Se procesan ANTES de M2 y de los drafts a propósito:
-  //  (B2) son ortogonales al reparto de anticipo que M2 protege → NO se pierden
-  //       aunque M2 desvíe los drafts a revisión manual (el cliente sí los pagó).
-  //  (V1) al cerrar el residual VIEJO antes de postear los drafts, el auto-reconcile
-  //       de action_post ya no tiene un residual abierto para agarrar el pago del draft.
-  // Solo misma moneda (Bs); flag off → residualTotalBs=0, ids=[] (byte-idéntico).
-  // El registro usa preview.amount = amount_residual VIVO (nunca sobre-registra).
+  // Se cobran con wuipi_pay_invoice_residual (helper Odoo, recomendado 2026-07-09):
+  // crea+postea+reconcilia ATÓMICO contra la factura, SIN pasar por el matching de
+  // drafts del hook de action_post (que enrutaría el pago a anticipo — bug detectado
+  // en el E2E 2026-07-09). Idempotente por memo wpy_. amount_bs omitido → paga el
+  // residual VIVO completo (evita el stale del congelado). Solo misma moneda (Bs);
+  // flag off → residualTotalBs=0, ids=[] (byte-idéntico). Procesados antes de M2 y de
+  // los drafts (B2: si M2 desvía los drafts, el residual ya quedó cobrado).
   let residualTotalBs = 0;
   if (process.env.PORTAL_SALDO_ANTERIOR_ENABLED === "true" && !isMultiCur) {
     const residualInfo = await readPostedResidualInfo(collectionItemId);
     residualTotalBs = residualInfo.totalBs;
+    const residualJournalId = PAYMENT_METHOD_MAPPING[paymentMethod]?.journalId;
     for (const invoiceId of residualInfo.ids) {
       try {
-        const result = await syncOdooForCollectionItem({
-          invoiceId, paymentMethod, paymentReference: paymentReference || "",
-          paymentToken, paymentDate, amountUsd: undefined, amountVesPaid: null,
+        const r = await payInvoiceResidual(invoiceId, {
+          memo: `${paymentToken}#${invoiceId}`,
+          journalId: residualJournalId,
         });
-        if (result.ok) {
-          // #2 (review) — si ya estaba pagado (already_synced) y NO por un pago
-          // NUESTRO (memo token#invoiceId), lo cerró CAJA entre iniciar y el sync →
-          // el cliente pagó el residual congelado online = excedente sin conciliar.
-          // Deterministico y a prueba de reintentos (nuestro pago persiste).
-          if (result.already_synced) {
-            let mine: number | null = null;
-            try { mine = await findPaymentForInvoiceByToken(invoiceId, paymentToken); } catch { /* noop */ }
-            if (mine == null) residualExcess.push(invoiceId);
-          }
-          console.log(`[OdooSyncTrigger] ✅ ${collectionItemId} residual invoice=${invoiceId} OK state=${result.invoice_payment_state}`);
+        if (r.success && r.residual_after_bs <= 0.01) {
+          console.log(`[OdooSyncTrigger] ✅ ${collectionItemId} residual invoice=${invoiceId} cerrado (${r.payment_name})`);
         } else {
-          failures.push({ invoiceId, error: `residual: ${result.error || "sync fallo"}` });
-          console.warn(`[OdooSyncTrigger] residual invoice=${invoiceId} fallo: ${result.error}`);
+          failures.push({ invoiceId, error: `residual no cerró: residual_after=${r.residual_after_bs}` });
         }
       } catch (err) {
+        // UserError del helper (o error de red). El cron reintenta (idempotente).
         const errMsg = err instanceof Error ? err.message : String(err);
-        failures.push({ invoiceId, error: `residual exception: ${errMsg}` });
-        console.error(`[OdooSyncTrigger] residual invoice=${invoiceId} exception:`, err);
+        failures.push({ invoiceId, error: `residual: ${errMsg.slice(0, 200)}` });
+        console.error(`[OdooSyncTrigger] residual invoice=${invoiceId} error:`, err);
       }
     }
   }
@@ -318,19 +309,6 @@ export async function triggerOdooSyncOrEnqueue(input: SyncTriggerInput): Promise
       amountUsd, amountVes, paymentDate,
       odooPartnerId, odooInvoiceId: failures[0].invoiceId,
       error: `${failures.length}/${invoiceIds.length} fallaron: ${failures.map(f => `inv${f.invoiceId}=${f.error}`).join("; ").slice(0, 1500)}`,
-    });
-    return;
-  }
-
-  // #2 (review) — excedente de residual (caja lo cerró) sin otras fallas: NO
-  // marcar sincronizado en silencio; encolar para que un humano aplique el monto
-  // pagado online como anticipo del partner.
-  if (residualExcess.length > 0) {
-    await safeEnqueue({
-      collectionItemId, paymentToken, paymentMethod, paymentReference,
-      amountUsd, amountVes, paymentDate,
-      odooPartnerId, odooInvoiceId: residualExcess[0],
-      error: `Saldo anterior ya cerrado en caja (residual(es) ${residualExcess.join(",")}) — el cliente pagó el monto congelado online: aplicar el excedente como anticipo (revisión manual).`,
     });
     return;
   }

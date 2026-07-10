@@ -1254,13 +1254,54 @@ export async function applyAnticipoToInvoice(
   amountBs: number,
 ): Promise<{ success: boolean; move_id?: number; amount_applied_bs: number; residual_after_bs: number }> {
   const uid = await authenticate();
+  // amount_bs va como KWARGS (7º arg de execute_kw), NO como dict posicional —
+  // sino el método recibe amount_bs = {amount_bs: X} y no aplica (bug 2026-06-30
+  // latente, confirmado por el equipo Odoo en el E2E 2026-07-09).
   const r = (await jsonRpc("object", "execute_kw", [
     ODOO_DB, uid, ODOO_API_KEY,
-    "account.move", "wuipi_apply_anticipo", [[invoiceId], { amount_bs: amountBs }],
+    "account.move", "wuipi_apply_anticipo",
+    [[invoiceId]],
+    { amount_bs: amountBs },
   ])) as { success?: boolean; move_id?: number; amount_applied_bs?: number; residual_after_bs?: number } | null;
   return {
     success: !!r?.success,
     move_id: r?.move_id,
+    amount_applied_bs: Number(r?.amount_applied_bs ?? 0),
+    residual_after_bs: Number(r?.residual_after_bs ?? 0),
+  };
+}
+
+/**
+ * Cobra y cierra el residual de una factura POSTEADA-parcial (saldo anterior) vía
+ * el helper Odoo `wuipi_pay_invoice_residual`. Crea+postea+reconcilia el pago
+ * ATÓMICO contra ESA factura, SIN pasar por el matching de drafts del hook de
+ * action_post (que enrutaría el pago a anticipo). O cierra al 100% o lanza
+ * UserError — jsonRpc lo propaga como throw, hay que capturarlo en el caller.
+ *
+ * `amountBs` omitido/null → paga el residual VIVO completo (no el congelado, evita
+ * el stale por cobros de caja intermedios). Solo facturas en Bs. `memo` con el
+ * token wpy_ para la idempotencia de reintentos (el helper la respeta).
+ * Recomendado por el equipo Odoo (2026-07-09) — reemplaza el flujo "crear payment
+ * + reconcile manual", que perdía la carrera contra el hook.
+ */
+export async function payInvoiceResidual(
+  invoiceId: number,
+  opts: { memo: string; journalId?: number; amountBs?: number | null },
+): Promise<{ success: boolean; payment_id?: number; payment_name?: string; amount_applied_bs: number; residual_after_bs: number }> {
+  const uid = await authenticate();
+  const kwargs: Record<string, unknown> = { memo: opts.memo };
+  if (typeof opts.journalId === "number") kwargs.journal_id = opts.journalId;
+  if (typeof opts.amountBs === "number" && opts.amountBs > 0) kwargs.amount_bs = opts.amountBs;
+  const r = (await jsonRpc("object", "execute_kw", [
+    ODOO_DB, uid, ODOO_API_KEY,
+    "account.move", "wuipi_pay_invoice_residual",
+    [[invoiceId]],
+    kwargs,
+  ])) as { success?: boolean; payment_id?: number; payment_name?: string; amount_applied_bs?: number; residual_after_bs?: number } | null;
+  return {
+    success: !!r?.success,
+    payment_id: r?.payment_id,
+    payment_name: r?.payment_name,
     amount_applied_bs: Number(r?.amount_applied_bs ?? 0),
     residual_after_bs: Number(r?.residual_after_bs ?? 0),
   };

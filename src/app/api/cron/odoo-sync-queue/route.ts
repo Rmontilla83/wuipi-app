@@ -32,10 +32,11 @@ import {
 } from "@/lib/dal/odoo-sync-queue";
 import {
   syncOdooForCollectionItem,
-  findPaymentForInvoiceByToken,
+  payInvoiceResidual,
   isMultiCurrencyMethod,
   computeProratedAmounts,
   getPartnerAnticipo,
+  PAYMENT_METHOD_MAPPING,
 } from "@/lib/integrations/odoo";
 
 const BATCH_SIZE = 25; // Procesar máx 25 items por corrida — evita timeouts
@@ -158,40 +159,30 @@ async function processQueueItem(
   const paymentDate = item.payment_date || ci.paid_at?.slice(0, 10) || undefined;
 
   const failures: Array<{ invoiceId: number; error: string }> = [];
-  const residualExcess: number[] = []; // residuales cerrados por caja → excedente a manual (#2)
   let allAlreadySynced = true;
   let postDoneAggregate = item.post_invoice_done;
   let regDoneAggregate = item.register_payment_done;
 
   // ── Fase 1 — SALDO ANTERIOR: residuales posteados PRIMERO (antes de M2/drafts) ──
-  // (B2) ortogonales al reparto de anticipo de M2 → NO se pierden si M2 desvía.
-  // (V1) cerrar el residual viejo antes de postear los drafts evita que el
-  //      auto-reconcile de action_post agarre el pago del draft. Solo misma moneda.
+  // Se cobran con wuipi_pay_invoice_residual (helper Odoo): crea+postea+reconcilia
+  // ATÓMICO contra la factura, sin pasar por el matching de drafts del hook (que
+  // enrutaría a anticipo). Idempotente por memo wpy_ → el reintento no duplica.
   let residualTotalBs = 0;
   if (process.env.PORTAL_SALDO_ANTERIOR_ENABLED === "true" && !isMultiCur) {
     residualTotalBs = Math.round((Number(metadata.posted_residual_total_bs) || 0) * 100) / 100;
     const residualIds = Array.isArray(metadata.odoo_posted_residual_ids)
       ? (metadata.odoo_posted_residual_ids as unknown[]).map(Number).filter((n) => Number.isInteger(n) && n > 0)
       : [];
+    const residualJournalId = PAYMENT_METHOD_MAPPING[paymentMethod]?.journalId;
     for (const invoiceId of residualIds) {
       try {
-        const result = await syncOdooForCollectionItem({
-          invoiceId, paymentMethod,
-          paymentReference: item.payment_reference || ci.payment_reference || "",
-          paymentToken: item.payment_token || ci.payment_token,
-          paymentDate, amountUsd: undefined, amountVesPaid: null,
+        const r = await payInvoiceResidual(invoiceId, {
+          memo: `${item.payment_token || ci.payment_token}#${invoiceId}`,
+          journalId: residualJournalId,
         });
-        if (result.ok) {
-          if (!result.already_synced) allAlreadySynced = false;
-          else {
-            // #2 (review) — cerrado por caja (no por un pago nuestro) → excedente.
-            let mine: number | null = null;
-            try { mine = await findPaymentForInvoiceByToken(invoiceId, item.payment_token || ci.payment_token); } catch { /* noop */ }
-            if (mine == null) residualExcess.push(invoiceId);
-          }
-        } else {
+        if (!(r.success && r.residual_after_bs <= 0.01)) {
           allAlreadySynced = false;
-          failures.push({ invoiceId, error: `residual: ${result.error || "sync fallo"}` });
+          failures.push({ invoiceId, error: `residual no cerró: residual_after=${r.residual_after_bs}` });
         }
       } catch (err) {
         allAlreadySynced = false;
@@ -307,15 +298,6 @@ async function processQueueItem(
 
   // (Los residuales del saldo anterior ya se procesaron ARRIBA, antes de M2 y
   // de los drafts.)
-
-  // #2 (review) — excedente de residual (caja lo cerró) sin otras fallas: NO
-  // marcar done en silencio; a revisión manual (aplicar excedente como anticipo).
-  if (failures.length === 0 && residualExcess.length > 0) {
-    await markQueueItemFailed(item.id, {
-      error: `Saldo anterior ya cerrado en caja (residual(es) ${residualExcess.join(",")}) — cliente pagó el monto congelado online: aplicar excedente como anticipo (revisión manual).`,
-    });
-    return "failed";
-  }
 
   if (failures.length === 0) {
     await markQueueItemDone(item.id);
