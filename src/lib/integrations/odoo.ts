@@ -547,6 +547,73 @@ export async function getInvoiceById(invoiceId: number): Promise<DraftInvoiceFor
   };
 }
 
+export interface InvoiceLiveState {
+  state: string;          // draft | posted | cancel
+  paymentState: string;   // not_paid | partial | paid | in_payment | reversed
+  amountResidual: number; // en la moneda de la factura (VED tras postear)
+  currencyId: number;
+}
+
+/**
+ * Estado VIVO (en Odoo, AHORA) de N facturas, en UNA sola llamada.
+ *
+ * El sync NO debe decidir qué helper usar mirando el snapshot congelado en
+ * `metadata` del collection_item: entre que se generó el link y que el cliente
+ * paga (pueden pasar semanas — los items viven 30-45 días) una factura `draft`
+ * puede haber pasado a `posted/partial` (típico: cobro incompleto en caja). Si
+ * la tratamos como draft y la mandamos a `wuipi_pay_invoice`, el helper revienta
+ * con "asientos que ya han sido conciliados" (incidente 2026-07-14).
+ * Enrutar por ESTE estado, no por el metadata (review adversarial 2026-07-14).
+ */
+export async function getInvoicesLiveState(
+  invoiceIds: number[],
+): Promise<Map<number, InvoiceLiveState>> {
+  const out = new Map<number, InvoiceLiveState>();
+  if (!invoiceIds.length) return out;
+  const rows = await searchRead("account.move",
+    [["id", "in", invoiceIds]],
+    {
+      fields: ["id", "state", "payment_state", "amount_residual", "currency_id"],
+      limit: 200,
+    }
+  );
+  for (const r of rows) {
+    out.set(Number(r.id), {
+      state: String(r.state),
+      paymentState: String(r.payment_state ?? ""),
+      amountResidual: Number(r.amount_residual) || 0,
+      currencyId: Array.isArray(r.currency_id) ? Number(r.currency_id[0]) : 0,
+    });
+  }
+  return out;
+}
+
+/**
+ * Suma en Bs TODOS los pagos que NOSOTROS creamos para este cobro, identificados
+ * por el prefijo del memo (`wpy_<token>...`). Es CUMULATIVA: incluye los pagos de
+ * corridas anteriores del mismo item (reintentos), no solo los de esta pasada.
+ *
+ * Sirve para la ASERCIÓN DE CUADRE del sync: lo aplicado en Odoo debe ser igual a
+ * lo que se le cobró al cliente. Sin este check, varios fallos quedan SILENCIOSOS y
+ * el item se marca "synced" con dinero cobrado que nunca se registró (review
+ * adversarial 2026-07-14): (a) `wuipi_pay_invoice` cierra la factura con ANTICIPO y
+ * no crea pago (cuando el portal no descontó ese anticipo — pago de factura suelta);
+ * (b) la factura ya la cerró caja entre medias y la saltamos por idempotencia.
+ */
+export async function sumPaymentsBsByToken(paymentToken: string): Promise<number> {
+  if (!paymentToken) return 0;
+  const rows = await searchRead("account.payment",
+    [["memo", "like", `${paymentToken}%`]],
+    { fields: ["id", "amount", "state"], limit: 100 }
+  );
+  let total = 0;
+  for (const r of rows) {
+    if (String(r.state) === "cancel") continue;
+    total += Number(r.amount) || 0;
+  }
+  return Math.round(total * 100) / 100;
+}
+
 /**
  * Lee las lineas de producto de una factura. Solo display_type='product'
  * (excluye lineas de seccion/nota).
@@ -1325,7 +1392,7 @@ export interface PayInvoiceResult {
  * draft (fechas/tasa BCV del día, no seteamos month_billed — es computado),
  * auto-aplica el saldo a favor del partner, y cobra el residual ATÓMICO contra
  * ESA factura — SIN pasar por el matching de drafts del hook de action_post (que
- * desviaba pagos a anticipo en multi-factura, bug Massimo/Gustavo/Emilio 2026-07).
+ * desviaba pagos a anticipo en multi-factura, bug de misroute multi-factura 2026-07).
  *
  * `amountBs` omitido → cobra el residual exacto post-anticipo (recomendado; el
  * drift de tasa queda del lado banco, céntimos misma-tasa). Con `amountBs`, si

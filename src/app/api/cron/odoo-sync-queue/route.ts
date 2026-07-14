@@ -33,13 +33,16 @@ import {
 import {
   syncOdooForCollectionItem,
   payInvoiceResidual,
-  payInvoice,
   isMultiCurrencyMethod,
   computeProratedAmounts,
   getPartnerAnticipo,
   PAYMENT_METHOD_MAPPING,
 } from "@/lib/integrations/odoo";
-import { isPayInvoiceMigrationEnabledForPartner } from "@/lib/cobranzas/saldo-anterior";
+import {
+  isPayInvoiceMigrationEnabledForPartner,
+  isSaldoAnteriorEnabledForPartner,
+} from "@/lib/cobranzas/saldo-anterior";
+import { payAllInvoicesBs } from "@/lib/cobranzas/pay-invoices-bs";
 
 const BATCH_SIZE = 25; // Procesar máx 25 items por corrida — evita timeouts
 
@@ -163,7 +166,7 @@ async function processQueueItem(
   // Partner efectivo: preferir el del metadata (autoritativo, fijado en `iniciar`
   // desde el token del cliente) sobre el guardado en la cola. El de la cola pudo
   // resolverse por email/cédula → partner EQUIVOCADO si dos comparten email
-  // (duplicados/familia). Ver la nota del trigger (caso Ana(8)/Rafael(1707)).
+  // (duplicados/familia). Ver la nota del trigger.
   const metaPidRaw = Number((metadata as Record<string, unknown>).odoo_partner_id);
   const effectivePartnerId = (Number.isInteger(metaPidRaw) && metaPidRaw > 0)
     ? metaPidRaw
@@ -182,26 +185,33 @@ async function processQueueItem(
     && PAYMENT_METHOD_MAPPING[paymentMethod]?.invoiceCurrencyId === 171;
   if (isBsInvoiceMethod && effectivePartnerId && isPayInvoiceMigrationEnabledForPartner(effectivePartnerId)) {
     const journalId = PAYMENT_METHOD_MAPPING[paymentMethod]?.journalId;
-    const residualIds = process.env.PORTAL_SALDO_ANTERIOR_ENABLED === "true"
-      && Array.isArray(metadata.odoo_posted_residual_ids)
+    const token = item.payment_token || ci.payment_token;
+    const residualIdsMeta = Array.isArray(metadata.odoo_posted_residual_ids)
       ? (metadata.odoo_posted_residual_ids as unknown[]).map(Number).filter((n) => Number.isInteger(n) && n > 0)
       : [];
-    const allIds = Array.from(new Set([...invoiceIds, ...residualIds])).sort((a, b) => a - b);
-    const token = item.payment_token || ci.payment_token;
-    for (const invoiceId of allIds) {
-      try {
-        const r = await payInvoice(invoiceId, { journalId, memo: `${token}#${invoiceId}` });
-        if (!(r.success && (r.alreadyPaid || r.residualAfterBs <= 0.01))) {
-          failures.push({ invoiceId, error: `pay_invoice no cerró: residual_after=${r.residualAfterBs}` });
-        }
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        failures.push({ invoiceId, error: `pay_invoice: ${msg.slice(0, 200)}` });
-      }
-    }
-    if (failures.length > 0) {
+    // Gate del SALDO ANTERIOR: MISMO helper whitelist-aware que el lado que COBRA.
+    // Mirar solo el env aquí infla el banco si se reintroduce la whitelist (cobraríamos
+    // un residual que al cliente no se le cobró) — review adversarial 2026-07-14.
+    const saldoOn = isSaldoAnteriorEnabledForPartner(effectivePartnerId);
+    if (residualIdsMeta.length > 0 && !saldoOn) {
+      // Ya se le cobró el saldo anterior al cliente: no lo dejes caer en silencio
+      // marcando el item como done (sub-cobro invisible). Falla visible en la cola.
       await markQueueItemFailed(item.id, {
-        error: `wuipi_pay_invoice: ${failures.length}/${allIds.length} fallaron: ${failures.map((f) => `inv${f.invoiceId}=${f.error}`).join("; ").slice(0, 1400)}`,
+        error: `Item cobrado con saldo anterior (inv ${residualIdsMeta.join(",")}) pero el gate está OFF para el partner ${effectivePartnerId} — NO se marca synced (revisar flag/whitelist)`,
+      });
+      return "failed";
+    }
+    const res = await payAllInvoicesBs({
+      paymentToken: token,
+      journalId,
+      draftIdsFromMeta: invoiceIds,
+      residualIdsFromMeta: saldoOn ? residualIdsMeta : [],
+      chargedBs: Number(item.amount_ves) || null,
+      logPrefix: `[cron/odoo-sync-queue] ${item.collection_item_id}`,
+    });
+    if (!res.ok) {
+      await markQueueItemFailed(item.id, {
+        error: `wuipi_pay_invoice: ${res.failures.length}/${res.attempted} fallaron: ${res.failures.map((f) => `inv${f.invoiceId}=${f.error}`).join("; ").slice(0, 1400)}`,
       });
       return "failed";
     }

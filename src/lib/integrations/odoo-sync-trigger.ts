@@ -27,13 +27,16 @@ import {
   findOdooPartnerByIdentifiers,
   findLatestDraftInvoiceForPartner,
   payInvoiceResidual,
-  payInvoice,
   PAYMENT_METHOD_MAPPING,
   isMultiCurrencyMethod,
   computeProratedAmounts,
   getPartnerAnticipo,
 } from "@/lib/integrations/odoo";
-import { isPayInvoiceMigrationEnabledForPartner } from "@/lib/cobranzas/saldo-anterior";
+import {
+  isPayInvoiceMigrationEnabledForPartner,
+  isSaldoAnteriorEnabledForPartner,
+} from "@/lib/cobranzas/saldo-anterior";
+import { payAllInvoicesBs } from "@/lib/cobranzas/pay-invoices-bs";
 import { enqueueOdooSync } from "@/lib/dal/odoo-sync-queue";
 import { createAdminSupabase } from "@/lib/supabase/server";
 
@@ -97,8 +100,8 @@ export async function triggerOdooSyncOrEnqueue(input: SyncTriggerInput): Promise
   //    cédula es FRÁGIL: dos partners pueden compartir email (duplicados/familia)
   //    y `search` devuelve el ID más bajo → resuelve el partner EQUIVOCADO, con lo
   //    que el gate/whitelist y el lookup de anticipo aplican al partner errado.
-  //    Caso 2026-07-10: Ana(8) y Rafael(1707) comparten rafaelmontilla8@gmail.com
-  //    → el sync resolvió 8 → gate de migración saltó → misroute. El metadata
+  //    Caso 2026-07-10: DOS partners distintos comparten el mismo email en Odoo
+  //    → el sync resolvía el partner equivocado → el gate saltaba → misroute. El metadata
   //    partner es el dueño real de las facturas que el portal listó y cobró.
   let odooPartnerId: number | null = null;
   try {
@@ -176,7 +179,7 @@ export async function triggerOdooSyncOrEnqueue(input: SyncTriggerInput): Promise
   // Flujo UNIFICADO Bs: cobra TODAS las facturas (drafts + saldos anteriores) con
   // el helper atómico wuipi_pay_invoice — postea + auto-aplica anticipo + cobra el
   // residual, SIN el matching de drafts del hook (que desviaba pagos a anticipo en
-  // multi-factura → casos Massimo/Gustavo/Emilio). Elimina M2, B1, registerPayment
+  // multi-factura → casos reales multi-factura, 2026-07). Elimina M2, B1, registerPayment
   // + reconcile manual. amount_bs omitido = residual exacto post-anticipo. Solo Bs
   // (USD/Stripe/PayPal Y cash_usd siguen el flujo de abajo). Flag off → intacto.
   // Predicado "solo Bs" = factura posteada en VED (171). NO uses !isMultiCur solo:
@@ -186,31 +189,38 @@ export async function triggerOdooSyncOrEnqueue(input: SyncTriggerInput): Promise
     && PAYMENT_METHOD_MAPPING[paymentMethod]?.invoiceCurrencyId === 171;
   if (isBsInvoiceMethod && isPayInvoiceMigrationEnabledForPartner(odooPartnerId)) {
     const journalId = PAYMENT_METHOD_MAPPING[paymentMethod]?.journalId;
-    const residualIds = process.env.PORTAL_SALDO_ANTERIOR_ENABLED === "true"
-      ? (await readPostedResidualInfo(collectionItemId)).ids
-      : [];
-    // Todas las facturas, más vieja primero (ID asc como proxy de antigüedad, Q5).
-    const allIds = Array.from(new Set([...invoiceIds, ...residualIds])).sort((a, b) => a - b);
-    for (const invoiceId of allIds) {
-      try {
-        const r = await payInvoice(invoiceId, { journalId, memo: `${paymentToken}#${invoiceId}` });
-        if (r.success && (r.alreadyPaid || r.residualAfterBs <= 0.01)) {
-          console.log(`[OdooSyncTrigger] ✅ ${collectionItemId} pay_invoice ${invoiceId} ${r.alreadyPaid ? "already_paid" : "cerrado " + r.paymentName}${r.excessToAnticipoBs > 0 ? ` (excedente ${r.excessToAnticipoBs}→anticipo)` : ""}`);
-        } else {
-          failures.push({ invoiceId, error: `pay_invoice no cerró: residual_after=${r.residualAfterBs}` });
-        }
-      } catch (err) {
-        const errMsg = err instanceof Error ? err.message : String(err);
-        failures.push({ invoiceId, error: `pay_invoice: ${errMsg.slice(0, 200)}` });
-        console.error(`[OdooSyncTrigger] pay_invoice ${invoiceId} error:`, err);
-      }
-    }
-    if (failures.length > 0) {
+    // Gate del SALDO ANTERIOR: usa el MISMO helper whitelist-aware que el lado que
+    // COBRA (`postedResidualBs`). Si aquí mirásemos solo el env y alguien reintrodujera
+    // `PORTAL_SALDO_ANTERIOR_PARTNER_WHITELIST`, mandaríamos al banco un residual que al
+    // cliente NO se le cobró → banco inflado (review adversarial 2026-07-14).
+    const residualInfo = await readPostedResidualInfo(collectionItemId);
+    const saldoOn = isSaldoAnteriorEnabledForPartner(odooPartnerId);
+    if (residualInfo.ids.length > 0 && !saldoOn) {
+      // El item TRAE residuales en metadata → al cliente YA se le cobraron. Si el gate
+      // de hoy los apagaría, NO los dejes caer en silencio marcando el item como synced
+      // (sub-cobro invisible): encola con error explícito para que quede a la vista.
       await safeEnqueue({
         collectionItemId, paymentToken, paymentMethod, paymentReference,
         amountUsd, amountVes, paymentDate,
-        odooPartnerId, odooInvoiceId: failures[0].invoiceId,
-        error: `wuipi_pay_invoice: ${failures.length}/${allIds.length} fallaron: ${failures.map(f => `inv${f.invoiceId}=${f.error}`).join("; ").slice(0, 1400)}`,
+        odooPartnerId, odooInvoiceId: residualInfo.ids[0],
+        error: `Item cobrado con saldo anterior (inv ${residualInfo.ids.join(",")}) pero el gate está OFF para el partner ${odooPartnerId} — NO se marca synced (revisar flag/whitelist)`,
+      });
+      return;
+    }
+    const res = await payAllInvoicesBs({
+      paymentToken,
+      journalId,
+      draftIdsFromMeta: invoiceIds,
+      residualIdsFromMeta: saldoOn ? residualInfo.ids : [],
+      chargedBs: amountVes ?? null,
+      logPrefix: `[OdooSyncTrigger] ${collectionItemId}`,
+    });
+    if (!res.ok) {
+      await safeEnqueue({
+        collectionItemId, paymentToken, paymentMethod, paymentReference,
+        amountUsd, amountVes, paymentDate,
+        odooPartnerId, odooInvoiceId: res.failures[0].invoiceId,
+        error: `wuipi_pay_invoice: ${res.failures.length}/${res.attempted} fallaron: ${res.failures.map(f => `inv${f.invoiceId}=${f.error}`).join("; ").slice(0, 1400)}`,
       });
       return;
     }
