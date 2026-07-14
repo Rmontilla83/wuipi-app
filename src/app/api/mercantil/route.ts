@@ -342,6 +342,67 @@ export async function POST(request: NextRequest) {
           }
 
           if (item) {
+            // ── C2 (auditoría de seguridad 2026-06-05) — VALIDAR EL MONTO ────────────
+            // Antes se marcaba la factura como pagada usando el `amount` que venía en el
+            // webhook, SIN compararlo nunca con lo que el cliente debía: un pago aprobado
+            // por menos de lo debido cerraba la factura COMPLETA.
+            // `item.amount_bss` es el monto que NOSOTROS le pedimos cobrar a Mercantil
+            // (lo fija /api/cobranzas/pay justo antes de crear el pago) y aquí el item
+            // sigue en pending/sent/viewed, así que este webhook todavía no lo sobrescribió.
+            const expectedBs = Number(item.amount_bss);
+            const receivedBs = Number(normalized.amount);
+            const TOLERANCIA_BS = 0.05; // céntimos por formato/redondeo de la pasarela
+
+            const noValidable = !Number.isFinite(expectedBs) || expectedBs <= 0
+              || !Number.isFinite(receivedBs) || receivedBs <= 0;
+            const insuficiente = !noValidable && receivedBs < expectedBs - TOLERANCIA_BS;
+
+            if (noValidable || insuficiente) {
+              const motivo = noValidable
+                ? `monto no validable (esperado=${item.amount_bss} recibido=${normalized.amount})`
+                : `MONTO INSUFICIENTE: recibido ${receivedBs} Bs < esperado ${expectedBs} Bs`;
+              console.error(
+                "[Mercantil Alias] ⛔ NO se marca pagado " + item.payment_token + ": " + motivo
+              );
+              logGatewayEvent({
+                collectionItemId: item.id, paymentToken: item.payment_token,
+                gateway: "mercantil", gatewayProduct: "web_button",
+                eventType: "webhook_received", outcome: "error",
+                responseMessage: motivo,
+                response: {
+                  status: normalized.raw_status,
+                  errorCode: normalized.error_code || null,
+                  transactionId: normalized.reference_number || null,
+                  expectedBs: item.amount_bss ?? null,
+                },
+                responseCode: normalized.raw_status || null,
+                ip,
+                amountVes: normalized.amount ?? null,
+                customerCedulaRif: item.customer_cedula_rif,
+                customerName: item.customer_name,
+                amountUsd: Number(item.amount_usd),
+              }).catch(() => {});
+              if (logId) {
+                await supabase
+                  .from("payment_webhook_logs")
+                  .update({ processing_error: motivo })
+                  .eq("id", logId);
+              }
+              // 200 para que Mercantil no reintente en bucle. El item queda SIN pagar y
+              // el evento queda registrado para revisión.
+              return NextResponse.json(
+                { received: true, amount_mismatch: true },
+                { status: 200 }
+              );
+            }
+            if (receivedBs > expectedBs + TOLERANCIA_BS) {
+              // Sobrepago: no es un riesgo (el cliente pagó de más) pero debe verse.
+              console.warn(
+                "[Mercantil Alias] ⚠️ SOBREPAGO " + item.payment_token
+                + ": recibido " + receivedBs + " Bs > esperado " + expectedBs + " Bs"
+              );
+            }
+
             const paidResult = await markItemPaid(item.payment_token, {
               payment_method: "debito_inmediato",
               payment_reference: normalized.reference_number || "",
